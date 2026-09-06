@@ -1,0 +1,174 @@
+:root {
+  /* Overwritten at runtime by ThemeProvider — these are just fallbacks. */
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafafc;
+  --rail: #16171a;
+  --rail-fg: #8e9098;
+  --rail-fg-on: #ffffff;
+  --rail-hover: rgba(255, 255, 255, .08);
+  --text: #16171a;
+  --text-2: #5c5f68;
+  --muted: #9a9ca4;
+  --line: #e8e9ed;
+  --shadow: 0 8px 24px -20px rgba(20, 22, 28, .5);
+
+  --accent: #3b82f6;
+  --accent-rgb: 59 130 246;
+  --accent-soft: rgba(59, 130, 246, .12);
+  --accent-fg: #ffffff;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --radius-lg: 22px;
+
+  --pad: 18px;
+  --gap: 14px;
+  --row-h: 44px;
+  --font: 13.5px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  font-weight: var(--font-weight, 500);
+  letter-spacing: var(--tracking, 0);
+  line-height: var(--line-height, 1.5);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: var(--font-smooth, antialiased);
+  transition: background .22s ease, color .22s ease;
+}
+
+/* Component sizes are in px, so the scale is applied as a page zoom —
+   this keeps type and spacing in proportion instead of breaking layouts. */
+#root { zoom: var(--font-scale, 1); }
+
+h1, h2, h3, h4 {
+  font-weight: var(--heading-weight, 800);
+  letter-spacing: var(--heading-tracking, -.3px);
+  line-height: 1.25;
+}
+
+button { font-family: inherit; border: none; background: none; cursor: pointer; color: inherit; }
+input, textarea, select { font-family: inherit; color: inherit; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-track { background: transparent; }
+
+::selection { background: var(--accent-soft); }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--line);
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--surface);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .28);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid var(--surface);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- notch
+   Sits INSIDE the header bar, inline with the theme and bell buttons. */
+.notch {
+  display: inline-flex; align-items: center;
+  gap: var(--notch-gap);
+  padding: var(--notch-pad);
+  min-width: var(--notch-min-w);
+  justify-content: center;
+  background: var(--notch-bg);
+  border-radius: var(--notch-radius);
+  box-shadow: var(--notch-shadow);
+  transition: background .22s, border-radius .18s, padding .18s, min-width .18s;
+}
+
+.notch-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--notch-btn-h);
+  padding: 0 var(--notch-btn-pad);
+  border-radius: var(--notch-btn-radius);
+  font-size: var(--notch-font);
+  font-weight: 600;
+  color: var(--notch-fg);
+  white-space: nowrap;
+  transition: background .16s, color .16s, height .18s, padding .18s, border-radius .18s;
+}
+.notch-btn:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.notch-btn[data-on='true'] {
+  background: var(--notch-on-bg);
+  color: var(--notch-fg-on);
+  font-weight: 800;
+}
+
+/* Drag handle only appears on hover, keeping the rail clean. */
+.rail-grip { opacity: 0; }
+button:hover > .rail-grip { opacity: .45; }
+.rail-grip:hover { opacity: .9 !important; }
+
+/* Danger-zone row behaves like a link. */
+.danger-row:hover { background: var(--danger-line) !important; }
+
+/* Windows 11 nav-pane hover. */
+.w11-nav:hover { background: var(--surface-2) !important; }
+
+/* Context-menu hover. */
+.ctx-item:hover { background: var(--surface-2); }
+
+/* Hue slider paints the full spectrum. */
+.hue-slider { -webkit-appearance: none; appearance: none; height: 12px; border-radius: 99px;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); outline: none; }
+.hue-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; border: 2px solid rgba(0,0,0,.35); cursor: pointer; }
+.hue-slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 2px solid rgba(0,0,0,.35); cursor: pointer; }
+
+/* Toast entry animation (used once the toast host is mounted). */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+.toast-in { animation: toast-in .2s cubic-bezier(.2,.8,.3,1); }
+
+/* ---- component kit (not applied yet; used once Kit.jsx is imported) ---- */
+@keyframes kit-spin { to { transform: rotate(360deg); } }
+.kit-spin { animation: kit-spin .7s linear infinite; }
+
+@keyframes kit-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.kit-shimmer {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: kit-shimmer 1.4s ease-in-out infinite;
+}
+.kit-menu-item:hover { background: var(--surface-2); }
+.kit-row:hover td { background: var(--surface-2); }
+
+/* Related-settings cards. */
+.rel-card:hover { border-color: var(--accent) !important; background: var(--surface-2) !important; }
+
+/* Shared control styling, driven by the Component edit panel. */
+.cmp-btn:hover { filter: brightness(1.06); }
+.cmp-btn:focus-visible, .cmp-input:focus-within { box-shadow: var(--cmp-ring); outline: none; }
