@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
-  Chevron, Grip, Pin, PinOff, Lock, Unlock, Star,
+  Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
 export const NAV = [
@@ -15,7 +15,7 @@ export const NAV = [
     label: 'AI tools',
     Icon: Sparkle,
     children: [
-      { id: 'aiagents', label: 'AI agents', Icon: Bot },
+      { id: 'aiagents', label: 'AI chats', Icon: Bot },
     ],
   },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
@@ -324,7 +324,7 @@ export default function Sidebar({ active, onChange }) {
             color: 'var(--rail-fg)',
           }}
         >
-          <span style={S.iconBox}><Chevron size={prefs.railIcon - 2} dir={mini ? 'right' : 'left'} /></span>
+          <span style={S.iconBox}><Chevrons size={prefs.railIcon - 1} dir={mini ? 'right' : 'left'} /></span>
           {!mini && <span style={S.label}>Collapse</span>}
         </button>
       </div>

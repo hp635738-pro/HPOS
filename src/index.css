@@ -150,6 +150,13 @@ button:hover > .rail-grip { opacity: .45; }
 }
 .toast-in { animation: toast-in .2s cubic-bezier(.2,.8,.3,1); }
 
+/* Chat: "assistant is typing" dots + shared focus ring for chat controls. */
+@keyframes chat-dot {
+  0%, 60%, 100% { opacity: .35; transform: none; }
+  30%           { opacity: 1;   transform: translateY(-2px); }
+}
+.chat-focus:focus-visible { box-shadow: var(--cmp-ring); outline: none; }
+
 /* ---- component kit (not applied yet; used once Kit.jsx is imported) ---- */
 @keyframes kit-spin { to { transform: rotate(360deg); } }
 .kit-spin { animation: kit-spin .7s linear infinite; }

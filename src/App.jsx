@@ -3,6 +3,7 @@ import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
+import ChatPage from './pages/ChatPage'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 
@@ -17,10 +18,6 @@ export default function App() {
     setView(nextView)
   }
 
-  if (view === 'files') {
-    return <FilesWorkspace onBack={() => setView(previousView)} />
-  }
-
   const allNav = useMemo(() => {
     const out = []
     NAV.forEach((n) => {
@@ -29,6 +26,12 @@ export default function App() {
     })
     return out
   }, [])
+
+  // NOTE: all hooks must stay above this early return — otherwise React
+  // throws "rendered fewer hooks" and unmounts the whole tree (blank screen).
+  if (view === 'files') {
+    return <FilesWorkspace onBack={() => setView(previousView)} />
+  }
 
   const title =
     allNav.find((n) => n.id === view)?.label ??
@@ -57,7 +60,9 @@ export default function App() {
               jumpTo={advancedPage}
               onJumped={() => setAdvancedPage(null)}
             />
-          : <Blank />}
+          : view === 'aiagents'
+            ? <ChatPage />
+            : <Blank />}
       </main>
 
       <CommandPalette
