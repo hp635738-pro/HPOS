@@ -59,7 +59,8 @@ export default function CalculatorWorkspace({ onBack }) {
   }
 
   return (
-    <section style={S.screen} aria-label="Calculator">
+    <section style={S.overlay} role="dialog" aria-modal="true" aria-label="Calculator">
+      <div style={S.dialog}>
       <header style={S.header}>
         <button type="button" onClick={onBack} style={S.back}>
           <Chevron size={18} dir="left" />
@@ -112,19 +113,21 @@ export default function CalculatorWorkspace({ onBack }) {
           </aside>
         )}
       </main>
+      </div>
     </section>
   )
 }
 
 const S = {
-  screen: { width: '100vw', height: '100vh', overflow: 'auto', background: 'var(--bg)', color: 'var(--text)' },
+  overlay: { position: 'fixed', inset: 0, zIndex: 70, padding: 24, display: 'grid', placeItems: 'center', overflow: 'auto', background: 'rgba(0,0,0,.48)', backdropFilter: 'blur(5px)', color: 'var(--text)' },
+  dialog: { width: 'min(720px, 100%)', maxHeight: 'min(760px, calc(100vh - 48px))', overflow: 'auto', borderRadius: 'var(--radius-lg)', background: 'var(--bg)', border: '1px solid var(--line)', boxShadow: '0 24px 70px -18px rgba(0,0,0,.68)' },
   header: { minHeight: 72, padding: '0 28px', display: 'flex', alignItems: 'center', gap: 22, background: 'var(--surface)', borderBottom: '1px solid var(--line)' },
   back: { display: 'inline-flex', alignItems: 'center', gap: 8, height: 38, padding: '0 13px 0 10px', borderRadius: 'var(--radius-sm)', color: 'var(--text-2)', background: 'var(--surface-2)', border: '1px solid var(--line)', fontSize: 13, fontWeight: 700 },
   title: { display: 'flex', alignItems: 'center', gap: 12 },
   icon: { width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 'var(--radius-sm)', color: 'var(--accent)', background: 'var(--accent-soft)' },
   h1: { margin: 0, fontSize: 18, fontWeight: 800 },
   sub: { margin: '1px 0 0', color: 'var(--muted)', fontSize: 12 },
-  main: { maxWidth: 880, margin: '0 auto', padding: '42px 28px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 26, flexWrap: 'wrap' },
+  main: { maxWidth: 880, margin: '0 auto', padding: '28px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 26, flexWrap: 'wrap' },
   calculator: { width: 352, padding: 18, borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'var(--shadow)' },
   display: { minHeight: 128, padding: '8px 10px 18px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', overflow: 'hidden' },
   expression: { minHeight: 22, fontSize: 18, color: 'var(--muted)', whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' },
