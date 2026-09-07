@@ -24,6 +24,14 @@ npm run lint    # oxlint
 
 **Requirements:** Node 18+ (Node 20 pe test kiya hua)
 
+Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke steps `BRIDGE.md` mein hain.
+
+Conversations local `localStorage` mein persist hoti hain — koi backend/API nahi.
+
+```bash
+npm test        # bridge + conversation store checks
+```
+
 ---
 
 ## Kya bana hua hai
@@ -62,7 +70,10 @@ src/
 │   └── ThemeContext.jsx    prefs store, palettes, undo/redo engine
 │
 ├── lib/
-│   └── colour.js           hex/rgb/hsv/hsl, contrast, harmony
+│   ├── colour.js           hex/rgb/hsv/hsl, contrast, harmony
+│   ├── chat/               message factory + conversation hook
+│   ├── storage/            local conversation store (Step 5)
+│   └── bridge/             BrowserBridge + DeepSeek connector
 │
 ├── pages/
 │   ├── Blank.jsx           empty canvas
@@ -128,6 +139,68 @@ resolved                      // 'light' ya 'dark' (system resolve ho ke)
 ```js
 { id: 'act:something', group: 'Actions', name: 'Do the thing', run: () => {} }
 ```
+
+---
+
+## Conversations (Step 5)
+
+AI chats **local** persistent conversations hain. Koi server, cloud sync, ya AI title API nahi.
+
+### Storage
+
+- **Key:** `localStorage['hpos.conversations']`
+- **Schema version:** `1`
+- **Module:** `src/lib/storage/conversationStore.js` — UI is module ko use karti hai; components khud `localStorage` nahi chhuute.
+
+```json
+{
+  "version": 1,
+  "activeId": "c-…",
+  "conversations": [
+    {
+      "id": "c-…",
+      "title": "Explain quantum computing",
+      "createdAt": 1710000000000,
+      "updatedAt": 1710000000000,
+      "provider": "deepseek",
+      "messages": [
+        { "id": "m-…", "role": "user", "content": "…", "ts": 1710000000000, "status": "sent" }
+      ]
+    }
+  ]
+}
+```
+
+`ts` existing chat timestamp hai (`MessageBubble` usi ko use karta hai). Cookies, passwords, tokens persist **nahi** hote.
+
+Corrupt JSON / invalid records ignore ho jaate hain — app crash nahi karti, empty state dikhti hai. Future schema: `migrate()` `version` ke through chalta hai.
+
+### New chat
+
+Header ka standalone **New chat** naya conversation create karta hai (`title: "New chat"`, `provider: "deepseek"`), usko active karta hai, aur chat area empty state dikhata hai. Composer turant usable hai. Har click ek naya conversation banata hai — mount par auto-create nahi.
+
+Pehli meaningful user message se title **local** truncate hota hai (koi API nahi): `"Explain quantum computing"` → wahi title.
+
+### Sidebar list
+
+AI tools → AI chats ke neeche conversations: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
+
+Delete active conversation: remaining mein sabse recent active ho jaati hai. Last wali delete ho to “Start a new chat”.
+
+### Switch + refresh
+
+Conversation click → selected load, composer reset, messages mix nahi hote. Streaming deltas **usi** conversation id par patch hoti hain, visible chat chahe switch ho chuka ho.
+
+Refresh: conversations aur messages `localStorage` se wapas.
+
+Streaming: memory har delta par update, disk ~280ms debounce, complete par flush.
+
+### Limitations
+
+- Sirf is browser origin ka localStorage. Dusre device / profile par copy nahi.
+- DeepSeek tab/session persist nahi — sirf HPOS transcript.
+- `provider` abhi `"deepseek"` (future providers ke liye field reserved).
+- Title rename UI is step mein nahi.
 
 ---
 

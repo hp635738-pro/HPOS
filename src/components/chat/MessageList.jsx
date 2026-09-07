@@ -7,7 +7,7 @@ import MessageBubble from './MessageBubble'
  * changes, and shows a quick-start empty state (tappable prompts) until the
  * first message is sent.
  */
-export default function MessageList({ messages, onSuggestion }) {
+export default function MessageList({ messages, onSuggestion, onStop, empty = 'idle' }) {
   const scroller = useRef(null)
 
   useEffect(() => {
@@ -16,12 +16,30 @@ export default function MessageList({ messages, onSuggestion }) {
   }, [messages])
 
   if (!messages.length) {
+    if (empty === 'loading') {
+      return (
+        <main style={S.empty} aria-label="Loading conversations">
+          <p style={S.heroSub}>Loading conversations…</p>
+        </main>
+      )
+    }
+    if (empty === 'none') {
+      return (
+        <main style={S.empty} aria-label="No conversations">
+          <span style={S.heroIcon}><Sparkle size={26} /></span>
+          <h2 style={S.heroTitle}>Start a new chat</h2>
+          <p style={S.heroSub}>
+            Use New chat in the header, or type a message below.
+          </p>
+        </main>
+      )
+    }
     return (
       <main style={S.empty} aria-label="Empty conversation">
         <span style={S.heroIcon}><Sparkle size={26} /></span>
         <h2 style={S.heroTitle}>How can I help?</h2>
         <p style={S.heroSub}>
-          Ask anything — this preview runs a local mock assistant, no network involved.
+          Ask anything — draft a reply, summarise text, or get a quick explanation.
         </p>
         <div style={S.chips}>
           {SUGGESTIONS.map((s) => (
@@ -49,7 +67,13 @@ export default function MessageList({ messages, onSuggestion }) {
       aria-label="Conversation"
     >
       <div style={S.column}>
-        {messages.map((m) => <MessageBubble key={m.id} m={m} />)}
+        {messages.map((m) => (
+          <MessageBubble
+            key={m.id}
+            m={m}
+            onStop={m.stoppable && onStop ? () => onStop(m.id) : undefined}
+          />
+        ))}
       </div>
     </main>
   )

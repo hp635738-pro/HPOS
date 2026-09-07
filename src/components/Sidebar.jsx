@@ -4,6 +4,7 @@ import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
+import ConversationList from './chat/ConversationList'
 
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
@@ -261,44 +262,47 @@ export default function Sidebar({ active, onChange }) {
                 <div style={S.subList}>
                   {children.map((child) => {
                     const childOn = active === child.id
+                    const openChat = () => {
+                      onChange(child.id)
+                      if (autoExpandedRef.current) {
+                        autoExpandedRef.current = false
+                        setTimeout(() => set('sidebar', 'icons'), 150)
+                      }
+                    }
                     return (
-                      <button
-                        key={child.id}
-                        onClick={() => {
-                          onChange(child.id)
-                          // If the sidebar was auto-opened via a parent icon
-                          // click, collapse it back after selecting a child.
-                          if (autoExpandedRef.current) {
-                            autoExpandedRef.current = false
-                            setTimeout(() => set('sidebar', 'icons'), 150)
-                          }
-                        }}
-                        onContextMenu={(e) => openMenu(e, child.id)}
-                        title={child.label}
-                        style={{
-                          ...S.item,
-                          ...S.subItem,
-                          height: prefs.railItemH - 4,
-                          borderRadius: prefs.railRadius - 2,
-                          padding: '0 8px 0 0',
-                          background: childOn ? 'var(--rail-hover)' : 'transparent',
-                          color: childOn ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
-                          opacity: 0.9,
-                        }}
-                      >
-                        <span style={S.bullet}>•</span>
-                        <span style={{
-                          ...S.iconBox,
-                          width: 16, height: 16,
-                          marginLeft: 4,
-                          opacity: 0.75,
-                        }}>
-                          <child.Icon size={14} />
-                        </span>
-                        <span style={{ ...S.label, fontSize: prefs.railFont - 0.5, fontWeight: 500 }}>
-                          {child.label}
-                        </span>
-                      </button>
+                      <div key={child.id}>
+                        <button
+                          onClick={openChat}
+                          onContextMenu={(e) => openMenu(e, child.id)}
+                          title={child.label}
+                          style={{
+                            ...S.item,
+                            ...S.subItem,
+                            height: prefs.railItemH - 4,
+                            borderRadius: prefs.railRadius - 2,
+                            padding: '0 8px 0 0',
+                            background: childOn ? 'var(--rail-hover)' : 'transparent',
+                            color: childOn ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
+                            opacity: 0.9,
+                          }}
+                        >
+                          <span style={S.bullet}>•</span>
+                          <span style={{
+                            ...S.iconBox,
+                            width: 16, height: 16,
+                            marginLeft: 4,
+                            opacity: 0.75,
+                          }}>
+                            <child.Icon size={14} />
+                          </span>
+                          <span style={{ ...S.label, fontSize: prefs.railFont - 0.5, fontWeight: 500 }}>
+                            {child.label}
+                          </span>
+                        </button>
+                        {child.id === 'aiagents' && (
+                          <ConversationList onOpen={() => onChange('aiagents')} />
+                        )}
+                      </div>
                     )
                   })}
                 </div>

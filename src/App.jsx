@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
@@ -6,6 +6,9 @@ import Blank from './pages/Blank'
 import ChatPage from './pages/ChatPage'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
+import { getBrowserBridge } from './lib/bridge'
+import { getDeepSeekConnector } from './lib/bridge/DeepSeekConnector.js'
+import { createConversation } from './lib/storage/conversationStore.js'
 
 export default function App() {
   const [view, setView] = useState('overview')
@@ -17,6 +20,18 @@ export default function App() {
     if (nextView === 'files') setPreviousView(view)
     setView(nextView)
   }
+
+  // Browser bridge handshake, then DeepSeek tab detect. Safe no-op if extension absent.
+  useEffect(() => {
+    const bridge = getBrowserBridge()
+    const ds = getDeepSeekConnector()
+    const off = bridge.onStatus((s) => {
+      if (s === 'connected') ds.connect().catch(() => {})
+      else ds.disconnect()
+    })
+    bridge.connect().catch(() => {})
+    return off
+  }, [])
 
   const allNav = useMemo(() => {
     const out = []
@@ -53,6 +68,7 @@ export default function App() {
           title={title}
           active={inRail ? null : view}
           onNavigate={navigate}
+          onNewChat={view === 'aiagents' ? () => { createConversation({ provider: 'deepseek' }) } : undefined}
         />
 
         {view === 'settings'
