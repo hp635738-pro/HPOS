@@ -4,11 +4,22 @@ import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
 import CommandPalette from './components/CommandPalette'
+import FilesWorkspace from './components/FilesWorkspace'
 
 export default function App() {
   const [view, setView] = useState('overview')
+  const [previousView, setPreviousView] = useState('overview')
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
+
+  const navigate = (nextView) => {
+    if (nextView === 'files') setPreviousView(view)
+    setView(nextView)
+  }
+
+  if (view === 'files') {
+    return <FilesWorkspace onBack={() => setView(previousView)} />
+  }
 
   const title =
     NAV.find((n) => n.id === view)?.label ??
@@ -19,13 +30,13 @@ export default function App() {
 
   return (
     <div style={S.shell}>
-      <Sidebar active={inRail ? view : null} onChange={setView} />
+      <Sidebar active={inRail ? view : null} onChange={navigate} />
 
       <main style={S.main}>
         <Topbar
           title={title}
           active={inRail ? null : view}
-          onNavigate={setView}
+          onNavigate={navigate}
         />
 
         {view === 'settings'
@@ -37,7 +48,7 @@ export default function App() {
       </main>
 
       <CommandPalette
-        onNavigate={setView}
+        onNavigate={navigate}
         onOpenAdvanced={(panel) => { setView('settings'); setAdvancedPage(panel) }}
       />
     </div>
