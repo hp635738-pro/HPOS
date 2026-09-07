@@ -20,22 +20,22 @@ export function createMessage({ role, content, status = 'sent', meta = null }) {
 /* Small canned brain — keyword match first, generic fallbacks otherwise. */
 const CANNED = [
   [/^(hi|hii+|hello|hey|namaste|hola)\b/i,
-    'Hello! I am the HPOS assistant, running fully offline in this preview.\nAsk me to draft a reply, summarise something, or explain a feature.'],
+    'Hello! I am the HPOS assistant.\nAsk me to draft a reply, summarise something, or explain a feature.'],
   [/who are you|what are you|introduce/i,
-    'I am a mock assistant wired into the HPOS chat UI.\nRight now I answer from a tiny local script — no network calls at all.\nLater this slot gets a real model (DeepSeek, ChatGPT, …).'],
+    'I am the HPOS assistant.\nI can help you draft replies, summarise text, and walk through features.'],
   [/what can you do|help|features?/i,
-    'In this Step 1 build you can:\n• Send messages with Enter (Shift+Enter adds a new line)\n• Watch the conversation scroll to the latest message\n• Start a fresh chat from the header\nReal AI answers arrive when the connector lands in a later step.'],
+    'Here is what I can help with:\n• Draft a reply to a customer\n• Summarise a piece of text\n• Explain how a feature works\nSend a message with Enter — Shift+Enter adds a new line. Use New chat in the header to start fresh.'],
   [/summar/i,
-    'Sure — paste the text and I will summarise it.\n(Mock note: a real model would analyse the content here; for now I am just proving the send/receive pipeline works.)'],
+    'Sure — paste the text and I will summarise it.'],
   [/sale|revenue|profit|order/i,
-    'Here is how I would handle a sales question once connected to real data:\n1. Pull the period you care about\n2. Total revenue, orders and average bill\n3. Flag the top movers\n(Mock preview — no data source is connected yet.)'],
+    'Here is how I would handle a sales question:\n1. Pull the period you care about\n2. Total revenue, orders and average bill\n3. Flag the top movers'],
   [/thank/i, 'Anytime! Type something else or hit “New chat” to start over.'],
 ]
 
 const FALLBACKS = [
-  (t) => `Got it — “${t}”.\nI am running as a local mock right now, so my reply is scripted. Once the real connector plugs in, this same bubble will carry a genuine answer.`,
-  (t) => `Understood: “${t}”.\nEverything you type lands here instantly — the message pipeline (send → list → reply → scroll) is fully working offline.`,
-  (t) => `“${t}” — noted.\nTry asking “what can you do” to see the scripted replies, or just keep testing the composer.`,
+  (t) => `Got it — “${t}”.\nTell me a bit more and I can draft a reply, summarise it, or break it down.`,
+  (t) => `Understood: “${t}”.\nWhat would you like me to do with this — summarise, rewrite, or draft a reply?`,
+  (t) => `“${t}” — noted.\nAsk “what can you do” for a quick overview, or keep going and I will follow your lead.`,
 ]
 
 /** Resolves with a mock reply string after a short, human-ish delay. */

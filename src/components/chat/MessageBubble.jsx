@@ -7,9 +7,10 @@ const fmtTime = (ts) =>
  * One message in the conversation. User messages sit right on the accent,
  * assistant messages sit left on a quiet surface with a small bot avatar.
  */
-export default function MessageBubble({ m }) {
+export default function MessageBubble({ m, onStop }) {
   const user = m.role === 'user'
   const thinking = m.status === 'thinking'
+  const streaming = thinking && Boolean(m.content)
 
   return (
     <div
@@ -23,7 +24,7 @@ export default function MessageBubble({ m }) {
 
       <div style={{ ...S.group, alignItems: user ? 'flex-end' : 'flex-start' }}>
         <div style={user ? S.bubbleUser : S.bubbleBot}>
-          {thinking ? (
+          {thinking && !streaming ? (
             <span style={S.dots} aria-label="Assistant is typing">
               <i style={{ ...S.dot, animationDelay: '0ms' }} />
               <i style={{ ...S.dot, animationDelay: '160ms' }} />
@@ -33,6 +34,14 @@ export default function MessageBubble({ m }) {
             <span style={S.text}>{m.content}</span>
           )}
         </div>
+        {thinking && onStop && (
+          <button type="button" onClick={onStop} style={S.stop} aria-label="Stop generating">
+            Stop
+          </button>
+        )}
+        {m.notice && (
+          <span style={S.notice}>{m.notice}</span>
+        )}
         {!thinking && (
           <time style={S.time} dateTime={new Date(m.ts).toISOString()}>
             {fmtTime(m.ts)}
@@ -65,6 +74,20 @@ const S = {
     borderRadius: 'var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg)',
   },
   time: { fontSize: 10.5, color: 'var(--muted)', padding: '0 4px' },
+  stop: {
+    alignSelf: 'flex-start',
+    height: 22,
+    padding: '0 8px',
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: 700,
+    color: 'var(--text-2)',
+    background: 'transparent',
+    border: '1px solid var(--line)',
+    borderRadius: 999,
+    cursor: 'pointer',
+  },
+  notice: { fontSize: 10.5, color: 'var(--muted)', padding: '0 4px' },
   dots: { display: 'inline-flex', alignItems: 'center', gap: 5, height: 20, padding: '0 2px' },
   dot: {
     width: 7, height: 7, borderRadius: '50%', display: 'block',

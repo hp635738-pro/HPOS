@@ -6,6 +6,8 @@ import { ToastProvider } from './components/ui/Toast.jsx'
 import { ModalProvider } from './components/ui/Modal.jsx'
 import './index.css'
 
+document.documentElement.dataset.hposApp = 'hpos'
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
