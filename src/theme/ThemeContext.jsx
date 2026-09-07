@@ -164,6 +164,10 @@ export const DEFAULTS = {
   notchBg: 'rail',        // rail | surface | accent
   notchLabels: true,      // show text labels
   notchShadow: true,
+
+  /* ---- calculator ---- */
+  calcHistory: true,      // show recent calculations in the current session
+  calcPrecision: 4,       // maximum decimal places in results
 }
 
 /* Palettes for the two real themes. */
