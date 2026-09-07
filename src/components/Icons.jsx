@@ -64,11 +64,21 @@ export const Chart = (p) => (
 )
 
 export const Chat = (p) => (
-  <Svg {...p}><path d="M20.5 12.2c0 4.2-3.8 7.6-8.5 7.6-1.1 0-2.2-.2-3.1-.5L4 21l1.4-3.6A7.2 7.2 0 0 1 3.5 12.2C3.5 8 7.3 4.6 12 4.6s8.5 3.4 8.5 7.6Z" /></Svg>
+  <Svg {...p}>
+    <path d="M20.5 12.2c0 4.2-3.8 7.6-8.5 7.6-1.1 0-2.2-.2-3.1-.5L4 21l1.4-3.6A7.2 7.2 0 0 1 3.5 12.2C3.5 8 7.3 4.6 12 4.6s8.5 3.4 8.5 7.6Z" />
+    <circle cx="8.5" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
+    <circle cx="15.5" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
+  </Svg>
 )
 
 export const Ghost = (p) => (
-  <Svg {...p}><path d="M5 20V11a7 7 0 0 1 14 0v9l-2.3-1.7L14.4 20l-2.4-1.7L9.6 20l-2.3-1.7L5 20Z" /><circle cx="9.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" /></Svg>
+  <Svg {...p}>
+    <path d="M5 20V11a7 7 0 0 1 14 0v9l-2.3-1.7L14.4 20l-2.4-1.7L9.6 20l-2.3-1.7L5 20Z" />
+    <circle cx="9.5" cy="10.3" r="1.15" fill="currentColor" stroke="none" />
+    <circle cx="14.5" cy="10.3" r="1.15" fill="currentColor" stroke="none" />
+    <path d="M10.1 14.2c.55.55 1.15.8 1.9.8s1.35-.25 1.9-.8" />
+  </Svg>
 )
 
 export const Gear = (p) => (
@@ -92,6 +102,16 @@ export const Chevron = ({ size = 16, dir = 'down', ...p }) => {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" style={{ transform: `rotate(${rot}deg)` }} {...p}>
       <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** Chevrons — double chevron, the modern collapse/expand affordance. */
+export const Chevrons = ({ size = 16, dir = 'down', ...p }) => {
+  const rot = { down: 0, up: 180, left: 90, right: -90 }[dir]
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ transform: `rotate(${rot}deg)` }} {...p}>
+      <path d="m5.5 6 6 6-6 6M12.5 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -232,24 +252,31 @@ export const Terminal = (p) => (
 
 /* ---- nav icons ---------------------------------------------------- */
 
-/** Input terminal — a prompt caret inside a screen. */
+/** Input terminal — a chevron prompt with a live block caret. */
 export const InputTerminal = (p) => (
-  <Svg {...p}><rect x="2.5" y="4.5" width="19" height="15" rx="3" /><path d="m6.8 10 2.4 2-2.4 2M12.5 14.5h4.7" /></Svg>
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="3.6" />
+    <path d="m7.2 9.4 3 2.6-3 2.6" />
+    <rect x="12.4" y="13.6" width="4.4" height="1.9" rx=".95" fill="currentColor" stroke="none" />
+  </Svg>
 )
 
-/** Analyzing — a pulse sweeping across a frame. */
+/** Analyzing — a clean ECG pulse sweeping left to right. */
 export const Analyzing = (p) => (
-  <Svg {...p}><path d="M3 12h3.4l2-5.2 3.2 10.4 2.2-6.4 1.5 3.2H21" /></Svg>
+  <Svg {...p}><path d="M2.5 12h4l2.2-7 4.3 14 2.2-7h6.3" /></Svg>
 )
 
-/** Topics — stacked tags. */
+/** Topics — a modern slanted hash, like channels. */
 export const Topics = (p) => (
-  <Svg {...p}><path d="M13.4 3.5H6.2a2.7 2.7 0 0 0-2.7 2.7v7.2c0 .7.3 1.4.8 1.9l5.6 5.6a2.7 2.7 0 0 0 3.8 0l6-6a2.7 2.7 0 0 0 0-3.8l-5.6-5.6a2.7 2.7 0 0 0-1.9-.8Z" /><circle cx="8.4" cy="8.4" r="1.5" fill="currentColor" stroke="none" /></Svg>
+  <Svg {...p}><path d="M9.6 4.5 7.8 19.5M16.2 4.5l-1.8 15M4.8 9.2h14.7M4 14.8h14.7" /></Svg>
 )
 
-/** Bord — a kanban board. */
+/** Bord — a kanban board with floating task columns of varied depth. */
 export const Bord = (p) => (
-  <Svg {...p}><rect x="2.5" y="3.5" width="19" height="17" rx="3" /><path d="M8.7 3.5v17M15.3 3.5v17" /></Svg>
+  <Svg {...p}>
+    <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="3.6" />
+    <path d="M8.2 7.2v6.4M12 7.2v3.6M15.8 7.2v9.2" />
+  </Svg>
 )
 
 /** Wrench — tempdev workbench. */
@@ -262,14 +289,26 @@ export const Folder = (p) => (
   <Svg {...p}><path d="M3 7.2A2.2 2.2 0 0 1 5.2 5h3.4a2.2 2.2 0 0 1 1.6.7l1.2 1.3h7.4A2.2 2.2 0 0 1 21 9.2v7.6a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 16.8V7.2Z" /></Svg>
 )
 
-/** AI analyz — a sparkle/spark cluster suggesting machine insight. */
+/** AI tools — one smooth four-point AI sparkle, with a tiny star and plus. */
 export const Sparkle = (p) => (
-  <Svg {...p}><path d="M12 3.2 13.7 8l4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7 10.3 8 12 3.2Z" /><path d="M18.6 15.1l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2ZM5.6 3.4l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4L3.7 5.3l1.4-.5.5-1.4Z" /></Svg>
+  <Svg {...p}>
+    <path d="M12 2.6Q15.2 8.8 21.4 12Q15.2 15.2 12 21.4Q8.8 15.2 2.6 12Q8.8 8.8 12 2.6Z" />
+    <path d="M18.4 15.9l.75 1.75 1.75.75-1.75.75-.75 1.75-.75-1.75-1.75-.75 1.75-.75.75-1.75Z" fill="currentColor" stroke="none" />
+    <path d="M5.6 3.2v3M4.1 4.7h3" />
+  </Svg>
 )
 
-/** Bot — an AI agent robot head. */
+/** Bot — a round-headed agent with dot eyes and an antenna. */
 export const Bot = (p) => (
-  <Svg {...p}><rect x="4" y="7" width="16" height="12" rx="3" /><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6" /><circle cx="12" cy="4.5" r="1" fill="currentColor" stroke="none" /><path d="M2 12h2M20 12h2" /></Svg>
+  <Svg {...p}>
+    <path d="M12 5.2V8" />
+    <circle cx="12" cy="4.1" r="1.15" fill="currentColor" stroke="none" />
+    <rect x="4" y="8" width="16" height="12.4" rx="4" />
+    <path d="M2.4 13.2h1.6M20 13.2h1.6" />
+    <circle cx="9" cy="13.2" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="13.2" r="1.2" fill="currentColor" stroke="none" />
+    <path d="M10 16.9h4" />
+  </Svg>
 )
 
 /** Grip — six dots, the standard drag handle. */
@@ -300,7 +339,7 @@ export const Unlock = (p) => (
 export const Star = ({ size = 16, filled = false, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24"
     fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
-    strokeWidth="1.7" strokeLinejoin="round" {...p}>
+    strokeWidth="1.9" strokeLinejoin="round" {...p}>
     <path d="m12 3.4 2.7 5.5 6 .9-4.35 4.24 1.03 6-5.38-2.83L6.62 20l1.03-6L3.3 9.8l6-.9L12 3.4Z" />
   </svg>
 )
