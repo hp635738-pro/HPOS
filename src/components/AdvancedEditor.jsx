@@ -11,7 +11,6 @@ import BackupPanel from './BackupPanel'
 import PalettePanel from './PalettePanel'
 import WorkspacePanel from './WorkspacePanel'
 import ComponentPanel from './ComponentPanel'
-import CalculatorPanel from './CalculatorPanel'
 import Notch from './Notch'
 import { Chevron, Check, Search, Wrench, Grid, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks } from './Icons'
 
@@ -143,16 +142,6 @@ const PAGES = [
     desc: 'Export your settings to a file, import one back, or reset everything.',
     keywords: 'export import backup restore json reset defaults save file',
     Panel: BackupPanel,
-  },
-  {
-    id: 'calculator',
-    related: ['notch', 'header', 'components', 'type', 'shortcuts'],
-    name: 'Calculator',
-    group: 'Tools',
-    Icon: Grid,
-    desc: 'Popup size, keypad layout, history and answer precision for the calculator.'
-    keywords: 'calculator calculate history decimal precision operators arithmetic',
-    Panel: CalculatorPanel,
   },
   {
     id: 'pages',

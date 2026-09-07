@@ -1,10 +1,9 @@
 import { useTheme } from '../theme/ThemeContext'
-import { Gear, Folder, Grid } from './Icons'
+import { Gear, Folder } from './Icons'
 
 export const TOOLS = [
   { id: 'settings', label: 'Settings', Icon: Gear },
   { id: 'files',      label: 'File',       Icon: Folder },
-  { id: 'calculator', label: 'Calculator', Icon: Grid },
 ]
 
 /**
