@@ -267,6 +267,11 @@ export const Sparkle = (p) => (
   <Svg {...p}><path d="M12 3.2 13.7 8l4.8 1.7-4.8 1.7L12 16.2l-1.7-4.8L5.5 9.7 10.3 8 12 3.2Z" /><path d="M18.6 15.1l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2ZM5.6 3.4l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4L3.7 5.3l1.4-.5.5-1.4Z" /></Svg>
 )
 
+/** Bot — an AI agent robot head. */
+export const Bot = (p) => (
+  <Svg {...p}><rect x="4" y="7" width="16" height="12" rx="3" /><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6" /><circle cx="12" cy="4.5" r="1" fill="currentColor" stroke="none" /><path d="M2 12h2M20 12h2" /></Svg>
+)
+
 /** Grip — six dots, the standard drag handle. */
 export const Grip = ({ size = 14, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" {...p}>
