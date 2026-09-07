@@ -39,11 +39,22 @@ export default function CommandPalette({ onNavigate, onOpenAdvanced }) {
   const commands = useMemo(() => {
     const out = []
 
-    NAV.forEach((n) => out.push({
-      id: `nav:${n.id}`, group: 'Pages', name: n.label,
-      hint: 'Go to page', Icon: n.Icon,
-      run: () => onNavigate(n.id),
-    }))
+    NAV.forEach((n) => {
+      out.push({
+        id: `nav:${n.id}`, group: 'Pages', name: n.label,
+        hint: 'Go to page', Icon: n.Icon,
+        run: () => onNavigate(n.id),
+      })
+      if (n.children) {
+        n.children.forEach((c) => {
+          out.push({
+            id: `nav:${c.id}`, group: n.label, name: c.label,
+            hint: 'Go to page', Icon: c.Icon,
+            run: () => onNavigate(c.id),
+          })
+        })
+      }
+    })
 
     out.push({
       id: 'nav:settings', group: 'Pages', name: 'Settings',

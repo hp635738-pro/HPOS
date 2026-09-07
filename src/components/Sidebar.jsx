@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
-  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle,
+  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
   Chevron, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
@@ -10,21 +10,38 @@ export const NAV = [
   { id: 'schedule',  label: 'Analyzing',      Icon: Analyzing },
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
-  { id: 'aianalyz',  label: 'AI analyz',      Icon: Sparkle },
+  {
+    id: 'aianalyz',
+    label: 'AI tools',
+    Icon: Sparkle,
+    children: [
+      { id: 'aiagents', label: 'AI agents', Icon: Bot },
+    ],
+  },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
   { id: 'assistant', label: 'Assistant',      Icon: Ghost },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 
+/** Flat list of every leaf nav id (children included), in display order. */
+export function flatNav() {
+  const out = []
+  NAV.forEach((n) => {
+    if (n.children) { out.push(n); n.children.forEach((c) => out.push(c)) }
+    else out.push(n)
+  })
+  return out
+}
+
 /** Applies a saved id order to NAV, tolerating added/removed items. */
 export function orderNav(saved) {
   if (!Array.isArray(saved)) return NAV
-  const byId = new Map(NAV.map((n) => [n.id, n]))
+  const topById = new Map(NAV.map((n) => [n.id, n]))
   const out = []
   saved.forEach((id) => {
-    if (byId.has(id)) { out.push(byId.get(id)); byId.delete(id) }
+    if (topById.has(id)) { out.push(topById.get(id)); topById.delete(id) }
   })
-  return [...out, ...byId.values()]
+  return [...out, ...topById.values()]
 }
 
 export default function Sidebar({ active, onChange }) {
@@ -33,6 +50,7 @@ export default function Sidebar({ active, onChange }) {
 
   const pinned = prefs.navPinned || []
   const locked = prefs.navLocked || []
+  const expanded = prefs.navExpanded || ['aianalyz']
 
   // Pinned items float to the top, keeping their relative order.
   const items = useMemo(() => {
@@ -46,6 +64,22 @@ export default function Sidebar({ active, onChange }) {
   const [edge, setEdge] = useState('above')
   const [menu, setMenu] = useState(null)     // { id, x, y }
   const dragRef = useRef(null)
+
+  // When true, the sidebar was expanded automatically by clicking a parent
+  // icon in collapsed mode — clicking a child should then collapse it back.
+  const autoExpandedRef = useRef(false)
+
+  // Track when sidebar becomes mini (collapsed) so we can reset the flag.
+  useEffect(() => {
+    if (mini) autoExpandedRef.current = false
+  }, [mini])
+
+  // Persist expanded state on mount so default-open stays across reloads.
+  useEffect(() => {
+    if (!Array.isArray(prefs.navExpanded)) {
+      set('navExpanded', ['aianalyz'])
+    }
+  }, [])
 
   // Any click or scroll dismisses the context menu.
   useEffect(() => {
@@ -67,10 +101,17 @@ export default function Sidebar({ active, onChange }) {
     set(key, list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
   }
 
+  const toggleExpanded = (id) => {
+    const list = prefs.navExpanded || ['aianalyz']
+    set('navExpanded', list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
+  }
+
   const commit = (fromId, toId, placeBelow) => {
     if (!fromId || !toId || fromId === toId) return
     if (locked.includes(fromId) || locked.includes(toId)) return
+    // Only reorder top-level items (don't drag children).
     const ids = items.map((n) => n.id)
+    if (!ids.includes(fromId) || !ids.includes(toId)) return
     const from = ids.indexOf(fromId)
     ids.splice(from, 1)
     let to = ids.indexOf(toId)
@@ -87,7 +128,8 @@ export default function Sidebar({ active, onChange }) {
 
   const reset = () => { setDragId(null); setOverId(null); dragRef.current = null }
 
-  const menuItem = menu && NAV.find((n) => n.id === menu.id)
+  const allFlat = useMemo(() => flatNav(), [])
+  const menuItem = menu && allFlat.find((n) => n.id === menu.id)
   const isPinned = menu && pinned.includes(menu.id)
   const isLocked = menu && locked.includes(menu.id)
 
@@ -108,14 +150,19 @@ export default function Sidebar({ active, onChange }) {
       )}
 
       <nav style={{ ...S.nav, gap: prefs.railGap }}>
-        {items.map(({ id, label, Icon, dot }, i) => {
-          const on = active === id
+        {items.map((item, i) => {
+          const { id, label, Icon, dot, children } = item
+          const isParent = !!children
+          const isOpen = expanded.includes(id)
+          // Section headers themselves are never "active" — they only highlight
+          // when one of their children is the active page.
+          const on = isParent ? false : active === id
           const dragging = dragId === id
           const marker = overId === id && dragId && dragId !== id
           const pin = pinned.includes(id)
           const lock = locked.includes(id)
-          // Divider sits under the last pinned item.
           const lastPinned = pin && !pinned.includes(items[i + 1]?.id)
+          const hasActiveChild = isParent && children.some((c) => c.id === active)
 
           return (
             <div key={id} style={S.slot}>
@@ -141,7 +188,26 @@ export default function Sidebar({ active, onChange }) {
                   reset()
                 }}
                 onDragEnd={reset}
-                onClick={() => onChange(id)}
+                onClick={() => {
+                  if (isParent) {
+                    if (mini) {
+                      // Collapsed (icon-only) mode: click on AI tools icon
+                      // auto-expands the sidebar AND opens the section.
+                      autoExpandedRef.current = true
+                      set('sidebar', 'expanded')
+                      // Make sure the parent's children are visible.
+                      const list = prefs.navExpanded || []
+                      if (!list.includes(id)) {
+                        set('navExpanded', [...list, id])
+                      }
+                    } else {
+                      // Expanded mode: normal toggle of the section chevron.
+                      toggleExpanded(id)
+                    }
+                  } else {
+                    onChange(id)
+                  }
+                }}
                 onContextMenu={(e) => openMenu(e, id)}
                 title={mini ? label : undefined}
                 style={{
@@ -150,13 +216,12 @@ export default function Sidebar({ active, onChange }) {
                   borderRadius: prefs.railRadius,
                   justifyContent: mini ? 'center' : 'flex-start',
                   padding: mini ? 0 : '0 8px 0 11px',
-                  background: on ? 'var(--rail-hover)' : 'transparent',
-                  color: on ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
+                  background: (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent',
+                  color: (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
                   opacity: dragging ? 0.35 : 1,
-                  cursor: dragging ? 'grabbing' : 'pointer',
+                  cursor: 'pointer',
                 }}
               >
-                {on && prefs.railPips && <span style={S.pip} />}
                 <span style={S.iconBox}>
                   <Icon size={prefs.railIcon} />
                   {dot && prefs.railDots && <span style={S.dot} />}
@@ -169,12 +234,75 @@ export default function Sidebar({ active, onChange }) {
                       {pin && <Pin size={11} />}
                       {lock && <Lock size={11} />}
                     </span>
-                    {!lock && (
+                    {isParent ? (
+                      <>
+                        {!lock && (
+                          <span className="rail-grip" style={S.grip}><Grip size={13} /></span>
+                        )}
+                        <span style={{
+                          ...S.chev,
+                          transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transition: 'transform .18s',
+                          opacity: 0.7,
+                          marginLeft: -4,
+                        }}>
+                          <Chevron size={14} dir="right" />
+                        </span>
+                      </>
+                    ) : !lock ? (
                       <span className="rail-grip" style={S.grip}><Grip size={13} /></span>
-                    )}
+                    ) : null}
                   </>
                 )}
               </button>
+
+              {/* Nested children */}
+              {!mini && isParent && isOpen && (
+                <div style={S.subList}>
+                  {children.map((child) => {
+                    const childOn = active === child.id
+                    return (
+                      <button
+                        key={child.id}
+                        onClick={() => {
+                          onChange(child.id)
+                          // If the sidebar was auto-opened via a parent icon
+                          // click, collapse it back after selecting a child.
+                          if (autoExpandedRef.current) {
+                            autoExpandedRef.current = false
+                            setTimeout(() => set('sidebar', 'icons'), 150)
+                          }
+                        }}
+                        onContextMenu={(e) => openMenu(e, child.id)}
+                        title={child.label}
+                        style={{
+                          ...S.item,
+                          ...S.subItem,
+                          height: prefs.railItemH - 4,
+                          borderRadius: prefs.railRadius - 2,
+                          padding: '0 8px 0 0',
+                          background: childOn ? 'var(--rail-hover)' : 'transparent',
+                          color: childOn ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
+                          opacity: 0.9,
+                        }}
+                      >
+                        <span style={S.bullet}>•</span>
+                        <span style={{
+                          ...S.iconBox,
+                          width: 16, height: 16,
+                          marginLeft: 4,
+                          opacity: 0.75,
+                        }}>
+                          <child.Icon size={14} />
+                        </span>
+                        <span style={{ ...S.label, fontSize: prefs.railFont - 0.5, fontWeight: 500 }}>
+                          {child.label}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
 
               {marker && edge === 'below' && <span style={{ ...S.marker, bottom: -2 }} />}
               {!mini && lastPinned && <span style={S.pinDivider} />}
@@ -234,7 +362,7 @@ export default function Sidebar({ active, onChange }) {
                 className="ctx-item"
                 style={S.menuBtn}
                 onClick={() => {
-                  set('navOrder', null); set('navPinned', []); set('navLocked', [])
+                  set('navOrder', null); set('navPinned', []); set('navLocked', []); set('navExpanded', ['aianalyz'])
                   setMenu(null)
                 }}
               >
@@ -251,7 +379,7 @@ export default function Sidebar({ active, onChange }) {
 
 const S = {
   rail: {
-    position: 'relative', flexShrink: 0, overflow: 'hidden',
+    position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
     background: 'var(--rail)',
     display: 'flex', flexDirection: 'column',
     transition: 'width .22s cubic-bezier(.4,0,.2,1), background .22s,\n                 border-radius .18s, margin .18s',
@@ -284,10 +412,8 @@ const S = {
     position: 'relative', width: '100%',
     display: 'flex', alignItems: 'center', gap: 11,
     transition: 'background .16s, color .16s, opacity .16s',
-  },
-  pip: {
-    position: 'absolute', left: -10, top: '50%', transform: 'translateY(-50%)',
-    width: 3, height: 18, borderRadius: 99, background: 'var(--accent)',
+    border: 'none', background: 'transparent',
+    cursor: 'pointer',
   },
   iconBox: {
     position: 'relative',
@@ -303,6 +429,10 @@ const S = {
     display: 'flex', alignItems: 'center', gap: 4,
     opacity: 0.5, flexShrink: 0,
   },
+  chev: {
+    display: 'grid', placeItems: 'center',
+    flexShrink: 0,
+  },
   grip: {
     display: 'grid', placeItems: 'center',
     color: 'var(--rail-fg)', opacity: 0,
@@ -313,7 +443,23 @@ const S = {
     width: 6, height: 6, borderRadius: '50%', background: '#f5c451',
   },
 
-  foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0 },
+  subList: {
+    display: 'flex', flexDirection: 'column', gap: 2,
+    paddingLeft: 14,
+    marginTop: 1, marginBottom: 3,
+  },
+  subItem: {
+    opacity: 0.85,
+  },
+  bullet: {
+    width: 14, textAlign: 'center',
+    fontSize: 14, lineHeight: 1,
+    color: 'var(--rail-fg)',
+    opacity: 0.5,
+    flexShrink: 0,
+  },
+
+  foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, marginTop: 8 },
 
   menu: {
     position: 'fixed', zIndex: 90, minWidth: 186,
@@ -335,6 +481,7 @@ const S = {
     height: 32, padding: '0 10px', borderRadius: 5,
     fontSize: 12.5, fontWeight: 500, color: 'var(--text)',
     background: 'transparent', textAlign: 'left',
+    border: 'none', cursor: 'pointer',
   },
   menuSep: { height: 1, background: 'var(--line)', margin: '4px 6px' },
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
@@ -21,17 +21,29 @@ export default function App() {
     return <FilesWorkspace onBack={() => setView(previousView)} />
   }
 
+  const allNav = useMemo(() => {
+    const out = []
+    NAV.forEach((n) => {
+      out.push(n)
+      if (n.children) n.children.forEach((c) => out.push(c))
+    })
+    return out
+  }, [])
 
   const title =
-    NAV.find((n) => n.id === view)?.label ??
+    allNav.find((n) => n.id === view)?.label ??
     TOOLS.find((t) => t.id === view)?.label ??
     ''
 
-  const inRail = NAV.some((n) => n.id === view)
+  // True for both top-level nav items and their nested children.
+  const inRail = allNav.some((n) => n.id === view)
+
+  // Pass child id to sidebar (so highlight can track child + parent state).
+  const activeInSidebar = inRail ? view : null
 
   return (
     <div style={S.shell}>
-      <Sidebar active={inRail ? view : null} onChange={navigate} />
+      <Sidebar active={activeInSidebar} onChange={navigate} />
 
       <main style={S.main}>
         <Topbar
