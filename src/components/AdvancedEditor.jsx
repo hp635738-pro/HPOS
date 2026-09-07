@@ -146,11 +146,11 @@ const PAGES = [
   },
   {
     id: 'calculator',
-    related: ['notch', 'header', 'shortcuts'],
+    related: ['notch', 'header', 'components', 'type', 'shortcuts'],
     name: 'Calculator',
     group: 'Tools',
     Icon: Grid,
-    desc: 'History and answer precision for the calculator workspace.',
+    desc: 'Popup size, keypad layout, history and answer precision for the calculator.'
     keywords: 'calculator calculate history decimal precision operators arithmetic',
     Panel: CalculatorPanel,
   },
