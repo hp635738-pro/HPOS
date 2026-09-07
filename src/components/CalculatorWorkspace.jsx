@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Chevron, Grid } from './Icons'
 import { useTheme } from '../theme/ThemeContext'
 
 const KEYS = [
@@ -17,8 +16,7 @@ function evaluate(value, precision) {
   if (!expression || !/^[0-9+\-*/.()\s]+$/.test(expression)) return null
   try {
     const result = Function('"use strict"; return (' + expression + ')')()
-    if (!Number.isFinite(result)) return null
-    return String(Number(result.toFixed(precision)))
+    return Number.isFinite(result) ? String(Number(result.toFixed(precision))) : null
   } catch {
     return null
   }
@@ -28,7 +26,6 @@ export default function CalculatorWorkspace({ onBack }) {
   const { prefs } = useTheme()
   const [expression, setExpression] = useState('')
   const [display, setDisplay] = useState('0')
-  const [history, setHistory] = useState([])
 
   const commit = (next) => {
     setExpression(next)
@@ -37,10 +34,7 @@ export default function CalculatorWorkspace({ onBack }) {
 
   const press = (value) => {
     if (value === 'clear') return commit('')
-    if (value === 'sign') {
-      const next = expression.startsWith('−') ? expression.slice(1) : '−' + (expression || '0')
-      return commit(next)
-    }
+    if (value === 'sign') return commit(expression.startsWith('−') ? expression.slice(1) : '−' + (expression || '0'))
     if (value === 'percent') {
       const result = evaluate(expression || display, prefs.calcPrecision)
       return commit(result == null ? expression : String(Number(result) / 100))
@@ -48,96 +42,60 @@ export default function CalculatorWorkspace({ onBack }) {
     if (value === 'equals') {
       const result = evaluate(expression, prefs.calcPrecision)
       if (result == null) return setDisplay('Error')
-      if (prefs.calcHistory) setHistory((items) => [{ expression, result }, ...items].slice(0, 8))
-      setExpression(result)
-      return setDisplay(result)
+      return commit(result)
     }
-    const isOperator = ['+', '−', '×', '÷'].includes(value)
+    const operator = ['+', '−', '×', '÷'].includes(value)
     const next = display === 'Error' ? value : expression + value
-    if (isOperator && !expression) return commit(display + value)
+    if (operator && !expression) return commit(display + value)
     commit(next)
   }
 
   return (
-    <section style={S.overlay} role="dialog" aria-modal="true" aria-label="Calculator">
-      <div style={S.dialog}>
-      <header style={S.header}>
-        <button type="button" onClick={onBack} style={S.back}>
-          <Chevron size={18} dir="left" />
-          <span>Back</span>
-        </button>
-        <div style={S.title}>
-          <span style={S.icon}><Grid size={20} /></span>
-          <div>
-            <h1 style={S.h1}>Calculator</h1>
-            <p style={S.sub}>Fast calculations, ready for saved history.</p>
-          </div>
-        </div>
-      </header>
-
-      <main style={S.main}>
-        <div style={S.calculator}>
-          <div style={S.display}>
-            <span style={S.expression}>{expression || ' '}</span>
-            <output style={S.result}>{display}</output>
-          </div>
-
-          <div style={S.keypad}>
-            {KEYS.map(([value, label, kind]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => press(value)}
-                style={{
-                  ...S.key,
-                  ...(kind === 'utility' ? S.utility : {}),
-                  ...(kind === 'operator' ? S.operator : {}),
-                  ...(kind === 'wide' ? S.wide : {}),
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+    <section style={S.overlay} onMouseDown={onBack} aria-label="Calculator overlay">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Calculator"
+        style={{ ...S.calculator, width: prefs.calcWidth }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div style={{ ...S.display, minHeight: prefs.calcDisplayHeight }}>
+          <span style={S.expression}>{expression || ' '}</span>
+          <output style={S.result}>{display}</output>
         </div>
 
-        {prefs.calcHistory && history.length > 0 && (
-          <aside style={S.history}>
-            <h2 style={S.historyTitle}>Recent calculations</h2>
-            {history.map((item, index) => (
-              <button key={index} type="button" onClick={() => commit(item.result)} style={S.historyRow}>
-                <span>{item.expression}</span>
-                <strong>{item.result}</strong>
-              </button>
-            ))}
-          </aside>
-        )}
-      </main>
+        <div style={{ ...S.keypad, gap: prefs.calcGap }}>
+          {KEYS.map(([value, label, kind]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => press(value)}
+              style={{
+                ...S.key,
+                height: prefs.calcKeySize,
+                ...(kind === 'utility' ? S.utility : {}),
+                ...(kind === 'operator' ? S.operator : {}),
+                ...(kind === 'wide' ? { ...S.wide, borderRadius: prefs.calcKeySize / 2 } : {}),
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   )
 }
 
 const S = {
-  overlay: { position: 'fixed', inset: 0, zIndex: 70, padding: 24, display: 'grid', placeItems: 'center', overflow: 'auto', background: 'rgba(0,0,0,.48)', backdropFilter: 'blur(5px)', color: 'var(--text)' },
-  dialog: { width: 'min(720px, 100%)', maxHeight: 'min(760px, calc(100vh - 48px))', overflow: 'auto', borderRadius: 'var(--radius-lg)', background: 'var(--bg)', border: '1px solid var(--line)', boxShadow: '0 24px 70px -18px rgba(0,0,0,.68)' },
-  header: { minHeight: 72, padding: '0 28px', display: 'flex', alignItems: 'center', gap: 22, background: 'var(--surface)', borderBottom: '1px solid var(--line)' },
-  back: { display: 'inline-flex', alignItems: 'center', gap: 8, height: 38, padding: '0 13px 0 10px', borderRadius: 'var(--radius-sm)', color: 'var(--text-2)', background: 'var(--surface-2)', border: '1px solid var(--line)', fontSize: 13, fontWeight: 700 },
-  title: { display: 'flex', alignItems: 'center', gap: 12 },
-  icon: { width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 'var(--radius-sm)', color: 'var(--accent)', background: 'var(--accent-soft)' },
-  h1: { margin: 0, fontSize: 18, fontWeight: 800 },
-  sub: { margin: '1px 0 0', color: 'var(--muted)', fontSize: 12 },
-  main: { maxWidth: 880, margin: '0 auto', padding: '28px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 26, flexWrap: 'wrap' },
-  calculator: { width: 352, padding: 18, borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: 'var(--shadow)' },
-  display: { minHeight: 128, padding: '8px 10px 18px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', overflow: 'hidden' },
+  overlay: { position: 'fixed', inset: 0, zIndex: 70, padding: 24, display: 'grid', placeItems: 'center', overflow: 'auto', background: 'rgba(0,0,0,.48)', backdropFilter: 'blur(5px)' },
+  calculator: { padding: 18, borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--line)', boxShadow: '0 24px 70px -18px rgba(0,0,0,.68)' },
+  display: { padding: '8px 10px 18px', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'flex-end', overflow: 'hidden', color: 'var(--text)' },
   expression: { minHeight: 22, fontSize: 18, color: 'var(--muted)', whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' },
   result: { marginTop: 2, fontSize: 48, lineHeight: 1.12, letterSpacing: '-1.5px', fontWeight: 400, whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' },
-  keypad: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 },
-  key: { height: 64, borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--line)', color: 'var(--text)', fontSize: 25, fontWeight: 500, boxShadow: '0 5px 10px -8px rgba(0,0,0,.75)' },
+  keypad: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' },
+  key: { borderRadius: '50%', background: 'var(--surface-2)', border: '1px solid var(--line)', color: 'var(--text)', fontSize: 25, fontWeight: 500, boxShadow: '0 5px 10px -8px rgba(0,0,0,.75)' },
   utility: { background: 'var(--line)', color: 'var(--text)', fontSize: 22 },
   operator: { background: 'var(--accent)', color: 'var(--accent-fg)', borderColor: 'transparent', fontSize: 31, fontWeight: 700 },
-  wide: { gridColumn: 'span 2', borderRadius: 32 },
-  history: { width: 250, padding: 18, borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--line)' },
-  historyTitle: { margin: '0 0 10px', fontSize: 13, fontWeight: 800 },
-  historyRow: { width: '100%', display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: '1px solid var(--line)', color: 'var(--text-2)', fontSize: 12, textAlign: 'left' },
+  wide: { gridColumn: 'span 2' },
 }
