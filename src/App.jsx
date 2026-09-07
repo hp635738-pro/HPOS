@@ -10,11 +10,16 @@ import CalculatorWorkspace from './components/CalculatorWorkspace'
 export default function App() {
   const [view, setView] = useState('overview')
   const [previousView, setPreviousView] = useState('overview')
+  const [calculatorOpen, setCalculatorOpen] = useState(false)
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
 
   const navigate = (nextView) => {
-    if (nextView === 'files' || nextView === 'calculator') setPreviousView(view)
+    if (nextView === 'calculator') {
+      setCalculatorOpen(true)
+      return
+    }
+    if (nextView === 'files') setPreviousView(view)
     setView(nextView)
   }
 
@@ -22,9 +27,6 @@ export default function App() {
     return <FilesWorkspace onBack={() => setView(previousView)} />
   }
 
-  if (view === 'calculator') {
-    return <CalculatorWorkspace onBack={() => setView(previousView)} />
-  }
 
   const title =
     NAV.find((n) => n.id === view)?.label ??
@@ -51,6 +53,8 @@ export default function App() {
             />
           : <Blank />}
       </main>
+
+      {calculatorOpen && <CalculatorWorkspace onBack={() => setCalculatorOpen(false)} />}
 
       <CommandPalette
         onNavigate={navigate}
