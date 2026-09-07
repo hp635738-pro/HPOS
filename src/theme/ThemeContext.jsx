@@ -168,6 +168,10 @@ export const DEFAULTS = {
   /* ---- calculator ---- */
   calcHistory: true,      // show recent calculations in the current session
   calcPrecision: 4,       // maximum decimal places in results
+  calcWidth: 352,          // popup width
+  calcKeySize: 64,         // calculator key height
+  calcDisplayHeight: 128,  // display area height
+  calcGap: 10,             // space between keys
 }
 
 /* Palettes for the two real themes. */
