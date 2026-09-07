@@ -5,6 +5,7 @@ import Settings from './pages/Settings'
 import Blank from './pages/Blank'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
+import CalculatorWorkspace from './components/CalculatorWorkspace'
 
 export default function App() {
   const [view, setView] = useState('overview')
@@ -13,12 +14,16 @@ export default function App() {
   const [advancedPage, setAdvancedPage] = useState(null)
 
   const navigate = (nextView) => {
-    if (nextView === 'files') setPreviousView(view)
+    if (nextView === 'files' || nextView === 'calculator') setPreviousView(view)
     setView(nextView)
   }
 
   if (view === 'files') {
     return <FilesWorkspace onBack={() => setView(previousView)} />
+  }
+
+  if (view === 'calculator') {
+    return <CalculatorWorkspace onBack={() => setView(previousView)} />
   }
 
   const title =
