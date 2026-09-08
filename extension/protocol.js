@@ -23,6 +23,7 @@
     DS_SEND: 'DS_SEND',
     DS_STOP: 'DS_STOP',
     DS_IDENTITY: 'DS_IDENTITY',
+    DS_NEW_CHAT: 'DS_NEW_CHAT',
     CONNECTOR_EVENT: 'CONNECTOR_EVENT',
   }
   var EVENT = {
@@ -51,6 +52,7 @@
     COMPOSER_GONE: 'COMPOSER_GONE',
     DEEPSEEK_CONVERSATION_MISMATCH: 'DEEPSEEK_CONVERSATION_MISMATCH',
     DEEPSEEK_CONVERSATION_UNVERIFIED: 'DEEPSEEK_CONVERSATION_UNVERIFIED',
+    DEEPSEEK_NEW_CONVERSATION_UNVERIFIED: 'DEEPSEEK_NEW_CONVERSATION_UNVERIFIED',
     DEEPSEEK_TAB_NOT_READY: 'DEEPSEEK_TAB_NOT_READY',
     BRIDGE_DISCONNECTED: 'BRIDGE_DISCONNECTED',
     REQUEST_INTERRUPTED: 'REQUEST_INTERRUPTED',
@@ -76,6 +78,7 @@
   ALLOWED_REQUESTS[ACTION.DS_SEND] = true
   ALLOWED_REQUESTS[ACTION.DS_STOP] = true
   ALLOWED_REQUESTS[ACTION.DS_IDENTITY] = true
+  ALLOWED_REQUESTS[ACTION.DS_NEW_CHAT] = true
 
   var ALLOWED_EVENTS = {}
   ALLOWED_EVENTS[EVENT.RESPONSE_START] = true
@@ -196,11 +199,22 @@
     return { messageId: String(raw.messageId || '').slice(0, 80) }
   }
 
+  function pickNewChatPayload(raw) {
+    var out = {}
+    if (!raw || typeof raw !== 'object') return out
+    if (typeof raw.tabId === 'number' && isFinite(raw.tabId)) out.tabId = raw.tabId
+    if (typeof raw.previousIdentity === 'string' && raw.previousIdentity) {
+      out.previousIdentity = String(raw.previousIdentity).slice(0, 120)
+    }
+    return out
+  }
+
   function pickRequest(msg) {
     var payload = null
     if (msg.action === ACTION.DS_SEND) payload = pickSendPayload(msg.payload)
     if (msg.action === ACTION.DS_STOP) payload = pickStopPayload(msg.payload)
     if (msg.action === ACTION.DS_IDENTITY) payload = pickIdentityPayload(msg.payload)
+    if (msg.action === ACTION.DS_NEW_CHAT) payload = pickNewChatPayload(msg.payload)
     return {
       channel: CHANNEL,
       type: TYPE.REQUEST,
@@ -233,5 +247,6 @@
     pickSendPayload: pickSendPayload,
     pickStopPayload: pickStopPayload,
     pickIdentityPayload: pickIdentityPayload,
+    pickNewChatPayload: pickNewChatPayload,
   }
 })(typeof globalThis !== 'undefined' ? globalThis : self)

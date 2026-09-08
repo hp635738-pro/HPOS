@@ -12,6 +12,7 @@ export const USER_COPY = {
   [ERROR.DEEPSEEK_IDENTITY_TIMEOUT]: 'Could not confirm the DeepSeek conversation in time. No message was sent.',
   [ERROR.DEEPSEEK_CONVERSATION_MISMATCH]: 'DeepSeek is on a different conversation. No message was sent.',
   [ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED]: 'DeepSeek could not verify the current conversation. No message was sent.',
+  [ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED]: 'DeepSeek could not start a new conversation. No message was sent.',
   [ERROR.DEEPSEEK_SEND_TIMEOUT]: 'DeepSeek did not confirm the send. The message was not resent.',
   [ERROR.DEEPSEEK_RESPONSE_TIMEOUT]: 'DeepSeek did not finish responding. The message was not resent.',
   [ERROR.REQUEST_INTERRUPTED]: 'Connection dropped. Response may be incomplete.',

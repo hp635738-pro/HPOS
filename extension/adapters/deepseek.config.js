@@ -10,6 +10,9 @@
  *   input:    textarea (name=search / placeholder / spellcheck=false)
  *   send:     button aria-label Send / 发送
  *   answer:   .ds-markdown inside the chat transcript
+ *   message:  .ds-message turn rows
+ *   thinking: .ds-think-content (DeepThink reasoning — NOT the final answer)
+ *   answer wrap: .ds-assistant-message-main-content (final answer wrapper)
  */
 (function (root) {
   root.DEEPSEEK_CONFIG = {
@@ -22,6 +25,16 @@
     stableMs: 1600,
     deltaMinMs: 80,
     maxChars: 100000,
+    /* After clicking "New chat": how long to wait for the identity change,
+       and how often to re-check the visible URL/DOM identity. */
+    newChatWaitMs: 8000,
+    newChatPollMs: 150,
+    /* DeepThink: reasoning may go quiet between the think block and the
+       final answer. While a think block is known and no answer text exists
+       yet, completion is withheld — but if generation ends and no final
+       answer appears within this grace window, the response is reported as
+       missing instead of completing with thinking text. */
+    thinkAnswerGapMs: 30000,
     observeRoot: [
       '.ds-scroll-area',
       'main',
@@ -57,9 +70,34 @@
       'button[aria-label*="停止"]',
     ],
 
+    /* Normal visible "New chat" control in the DeepSeek sidebar. */
+    newChat: [
+      '[data-testid="new-chat"]',
+      'button[aria-label*="New chat"]',
+      'button[aria-label*="new chat"]',
+      '[role="button"][aria-label*="New chat"]',
+      '[role="button"][aria-label*="new chat"]',
+      'a[href="/a/chat"]',
+    ],
+
+    /* Exact visible labels used as a text fallback for the New chat control. */
+    newChatText: ['new chat', '新对话', '开启新对话'],
+
     assistant: [
       '.ds-markdown',
       '[class*="ds-markdown"]',
+    ],
+
+    /* DeepThink reasoning containers — their text is thinking, not answer. */
+    thinking: [
+      '.ds-think-content',
+      '[class*="ds-think-content"]',
+    ],
+
+    /* Final-answer wrapper inside an assistant turn (preferred source). */
+    answer: [
+      '.ds-assistant-message-main-content',
+      '[class*="ds-assistant-message-main-content"]',
     ],
 
     message: [

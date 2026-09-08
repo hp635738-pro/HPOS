@@ -1,6 +1,16 @@
 /**
  * DeepSeek DOM adapter. Isolated world on chat.deepseek.com only.
  * Reads visible composer + assistant markdown. Never cookies, tokens, or storage.
+ *
+ * Response model (internal):
+ *
+ *   { reasoningText, answerText, phase: THINKING | ANSWERING | COMPLETE }
+ *
+ * A DeepSeek assistant turn (`.ds-message`) can contain a DeepThink
+ * reasoning block (`.ds-think-content`) and a final-answer wrapper
+ * (`.ds-assistant-message-main-content`) holding `.ds-markdown`. Only the
+ * final answer streams to HPOS — thinking text never becomes a delta and a
+ * thinking mutation never triggers RESPONSE_COMPLETE.
  */
 (function () {
   var P = globalThis.HPOS_PROTOCOL
@@ -101,22 +111,70 @@
     return Boolean(findStop())
   }
 
-  function listAssistantNodes() {
+  function queryAll(scope, list) {
     var out = []
     var seen = []
-    for (var i = 0; i < C.assistant.length; i++) {
+    for (var i = 0; i < list.length; i++) {
+      var found
       try {
-        var found = document.querySelectorAll(C.assistant[i])
-        for (var j = 0; j < found.length; j++) {
-          var el = found[j]
-          if (seen.indexOf(el) === -1) {
-            seen.push(el)
-            out.push(el)
-          }
+        found = scope.querySelectorAll(list[i])
+      } catch {
+        found = []
+      }
+      if (!found) continue
+      for (var j = 0; j < found.length; j++) {
+        if (seen.indexOf(found[j]) === -1) {
+          seen.push(found[j])
+          out.push(found[j])
         }
-      } catch { /* ignore */ }
+      }
     }
     return out
+  }
+
+  function matchesAny(el, list) {
+    if (!el || !el.matches) return false
+    for (var i = 0; i < list.length; i++) {
+      try {
+        if (el.matches(list[i])) return true
+      } catch { /* ignore */ }
+    }
+    return false
+  }
+
+  function listContentNodes() {
+    var content = Array.isArray(C.thinking) && C.thinking.length
+      ? C.assistant.concat(C.thinking)
+      : C.assistant
+    return queryAll(document, content)
+  }
+
+  /** The `.ds-message` turn row that owns a content node (fallback: node). */
+  function rowOf(node) {
+    var list = C.message || []
+    if (node && node.closest) {
+      for (var i = 0; i < list.length; i++) {
+        try {
+          var row = node.closest(list[i])
+          if (row) return row
+        } catch { /* ignore */ }
+      }
+    }
+    return node
+  }
+
+  function listRows() {
+    var nodes = listContentNodes()
+    var rows = []
+    var seen = []
+    for (var i = 0; i < nodes.length; i++) {
+      var row = rowOf(nodes[i])
+      if (row && seen.indexOf(row) === -1) {
+        seen.push(row)
+        rows.push(row)
+      }
+    }
+    return rows
   }
 
   function nodeText(el) {
@@ -126,15 +184,93 @@
     return text
   }
 
-  function pinTarget(beforeNodes, beforeText) {
-    var now = listAssistantNodes()
-    var i
-    for (i = 0; i < now.length; i++) {
-      if (beforeNodes.indexOf(now[i]) === -1) return now[i]
+  /** Thinking text is also read from collapsed blocks (innerText may be ''). */
+  function thinkText(el) {
+    var text = nodeText(el)
+    if (!text && el) {
+      text = String(el.textContent || '').trim()
+      if (text.length > C.maxChars) text = text.slice(0, C.maxChars)
+    }
+    return text
+  }
+
+  function insideThinking(node) {
+    if (matchesAny(node, C.thinking || [])) return true
+    if (node && node.closest) {
+      var list = C.thinking || []
+      for (var i = 0; i < list.length; i++) {
+        try {
+          if (node.closest(list[i])) return true
+        } catch { /* ignore */ }
+      }
+    }
+    return false
+  }
+
+  function joinTexts(nodes, read) {
+    var parts = []
+    for (var i = 0; i < nodes.length; i++) {
+      var t = read(nodes[i])
+      if (t) parts.push(t)
+    }
+    var text = parts.join('\n\n')
+    if (text.length > C.maxChars) text = text.slice(0, C.maxChars)
+    return text
+  }
+
+  /**
+   * Split a turn row into reasoning vs final answer.
+   * Never reads cookies/storage — visible DOM text only.
+   */
+  function extractRow(row) {
+    var empty = { answer: '', thinking: '', hasThinking: false }
+    if (!row) return empty
+    var thinkList = C.thinking || []
+    var thinkNodes = []
+    if (thinkList.length && matchesAny(row, thinkList)) thinkNodes.push(row)
+    if (thinkList.length) {
+      var scoped = queryAll(row, thinkList)
+      for (var t = 0; t < scoped.length; t++) {
+        if (thinkNodes.indexOf(scoped[t]) === -1) thinkNodes.push(scoped[t])
+      }
+    }
+    var thinking = joinTexts(thinkNodes, thinkText)
+
+    var answerNodes = []
+    var wrapList = C.answer || []
+    if (wrapList.length) {
+      if (matchesAny(row, wrapList)) answerNodes.push(row)
+      var wraps = queryAll(row, wrapList)
+      for (var w = 0; w < wraps.length; w++) {
+        if (answerNodes.indexOf(wraps[w]) === -1) answerNodes.push(wraps[w])
+      }
+    }
+    if (!answerNodes.length) {
+      var md = queryAll(row, C.assistant)
+      if (matchesAny(row, C.assistant)) md.unshift(row)
+      for (var m = 0; m < md.length; m++) {
+        if (insideThinking(md[m])) continue
+        if (answerNodes.indexOf(md[m]) === -1) answerNodes.push(md[m])
+      }
+    }
+    var answer = joinTexts(answerNodes, nodeText)
+    return { answer: answer, thinking: thinking, hasThinking: thinkNodes.length > 0 }
+  }
+
+  /** Combined signature for change detection only (never emitted). */
+  function rowText(row) {
+    var t = extractRow(row)
+    return (t.thinking || '') + '\n\n' + (t.answer || '')
+  }
+
+  function pinRow(beforeRows, beforeText) {
+    var now = listRows()
+    for (var i = 0; i < now.length; i++) {
+      if (beforeRows.indexOf(now[i]) === -1) return now[i]
     }
     var last = now.length ? now[now.length - 1] : null
     if (last) {
-      var t = nodeText(last)
+      var t = rowText(last)
       if (t && t !== beforeText) return last
     }
     return null
@@ -151,6 +287,70 @@
     return document.body
   }
 
+  /**
+   * The normal visible sidebar "New chat" control.
+   * DeepSeek navigates it via ordinary link/button — we never build URLs,
+   * open hidden tabs, or call DeepSeek APIs.
+   */
+  function clickRoot(el) {
+    if (el && el.closest) {
+      var wrapped = null
+      try {
+        wrapped = el.closest('a') || el.closest('button') || el.closest('[role="button"]')
+      } catch {
+        wrapped = null
+      }
+      if (wrapped) return wrapped
+    }
+    return el
+  }
+
+  function labelHit(el) {
+    var labels = C.newChatText || []
+    if (!labels.length) return false
+    var raw = (el.innerText || el.textContent || '')
+    var txt = String(raw).replace(/\s+/g, ' ').trim().toLowerCase()
+    if (!txt || txt.length > 24) return false
+    for (var i = 0; i < labels.length; i++) {
+      if (txt === String(labels[i]).toLowerCase()) return true
+    }
+    return false
+  }
+
+  function findNewChatControl() {
+    var list = C.newChat || []
+    for (var i = 0; i < list.length; i++) {
+      try {
+        var nodes = document.querySelectorAll(list[i])
+        for (var j = 0; j < nodes.length; j++) {
+          if (visible(nodes[j]) && !isDisabled(nodes[j])) return clickRoot(nodes[j])
+        }
+      } catch { /* ignore */ }
+    }
+    var labels = C.newChatText || []
+    if (!labels.length) return null
+    var groups = ['a,button,[role="button"]', 'body *']
+    for (var g = 0; g < groups.length; g++) {
+      var cand
+      try {
+        cand = document.querySelectorAll(groups[g])
+      } catch {
+        cand = null
+      }
+      if (!cand) continue
+      var best = null
+      for (var c = 0; c < cand.length; c++) {
+        var el = cand[c]
+        if (!visible(el)) continue
+        if (!labelHit(el)) continue
+        if (best && best.contains && best.contains(el)) continue
+        best = el
+      }
+      if (best) return clickRoot(best)
+    }
+    return null
+  }
+
   function getCurrentConversationIdentity() {
     if (!hostOk()) {
       return { supported: false, reason: P.ERROR.UNSUPPORTED_PAGE }
@@ -160,6 +360,117 @@
     }
     if (I && typeof I.getCurrent === 'function') return I.getCurrent()
     return { supported: false, reason: 'UNVERIFIED' }
+  }
+
+  function isHomeIdentity(identity) {
+    return Boolean(
+      identity &&
+      identity.supported === true &&
+      identity.confidence === 'low' &&
+      identity.source === 'url' &&
+      typeof identity.identity === 'string' &&
+      identity.identity.indexOf('https://') === 0,
+    )
+  }
+
+  function unsupportedPageError(message) {
+    return {
+      success: false,
+      error: {
+        code: P.ERROR.UNSUPPORTED_PAGE,
+        message: message || 'Unsupported page',
+      },
+    }
+  }
+
+  function newChatError(message) {
+    return {
+      success: false,
+      error: {
+        code: P.ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED || 'DEEPSEEK_NEW_CONVERSATION_UNVERIFIED',
+        message: message || 'New conversation could not be verified',
+      },
+    }
+  }
+
+  /**
+   * createNewConversation — move the visible DeepSeek tab to a fresh chat
+   * through its normal "New chat" UI, then verify the resulting identity.
+   *
+   * Never invents an id: DeepSeek assigns a thread id only after the first
+   * message, so a verified "new" state is a different thread id OR the
+   * low-confidence home/new-chat state. Anything else is a structured error
+   * and the caller must not send.
+   */
+  async function createNewConversation(payload) {
+    if (!pageValid()) {
+      return unsupportedPageError(isLogin() ? 'DeepSeek login page — sign in first' : 'Unsupported page')
+    }
+    if (busy()) {
+      return { success: false, error: { code: P.ERROR.BUSY, message: 'A response is still generating' } }
+    }
+
+    var before = getCurrentConversationIdentity()
+    if (!before || before.supported !== true || !before.identity) {
+      return newChatError('Current DeepSeek conversation could not be verified')
+    }
+    var wanted = payload && typeof payload.previousIdentity === 'string' ? payload.previousIdentity : ''
+    if (wanted && wanted !== before.identity) {
+      return newChatError('DeepSeek tab state changed')
+    }
+
+    var control = findNewChatControl()
+    if (!control) {
+      return newChatError('DeepSeek "New chat" control not found')
+    }
+    try {
+      control.click()
+    } catch {
+      return newChatError('DeepSeek "New chat" control could not be used')
+    }
+
+    var beforeHome = isHomeIdentity(before)
+    var deadline = Date.now() + (C.newChatWaitMs || 8000)
+    var after = before
+    while (Date.now() < deadline) {
+      await sleep(C.newChatPollMs || 150)
+      if (!pageValid()) {
+        return unsupportedPageError(isLogin() ? 'DeepSeek login page — sign in first' : 'Unsupported page')
+      }
+      after = getCurrentConversationIdentity()
+      if (after && after.supported === true && after.identity) {
+        var afterHome = isHomeIdentity(after)
+        if (after.identity !== before.identity) {
+          return {
+            success: true,
+            payload: {
+              supported: true,
+              identity: after.identity,
+              url: after.url || null,
+              confidence: after.confidence || null,
+              source: after.source || 'url',
+              newConversation: true,
+              previousIdentity: before.identity,
+            },
+          }
+        }
+        if (beforeHome && afterHome) {
+          return {
+            success: true,
+            payload: {
+              supported: true,
+              identity: after.identity,
+              url: after.url || null,
+              confidence: after.confidence || null,
+              source: after.source || 'url',
+              newConversation: true,
+              previousIdentity: before.identity,
+            },
+          }
+        }
+      }
+    }
+    return newChatError('New conversation identity could not be verified')
   }
 
   function detect() {
@@ -266,19 +577,26 @@
     session = null
   }
 
-  function startObserve(ids, beforeNodes, beforeText) {
+  function startObserve(ids, beforeRows, beforeText) {
     stopSession()
     var finished = false
-    var last = ''
+    var answerLast = ''
+    var thinkingLast = ''
+    var thinkingSeen = false
+    var answerSeen = false
+    var sawActivity = false
     var lastChangeAt = 0
     var lastEmitAt = 0
-    var gotToken = false
     var pinned = null
+
+    function current() {
+      return pinned ? extractRow(pinned) : { answer: '', thinking: '', hasThinking: false }
+    }
 
     function finish(event, code, message) {
       if (finished) return
       finished = true
-      var text = last || (pinned ? nodeText(pinned) : '')
+      var text = answerLast || current().answer || ''
       var ref = session
       stopSession()
       if (event === 'RESPONSE_COMPLETE') {
@@ -288,54 +606,80 @@
       }
     }
 
+    function thinkingGapExceeded(now) {
+      return thinkingSeen && !answerSeen
+        && lastChangeAt > 0
+        && !generating() && !findStop()
+        && now - lastChangeAt >= (C.thinkAnswerGapMs || 30000)
+    }
+
     function onTick() {
       if (finished) return
       if (!pageValid()) return finish('ERROR', P.ERROR.PAGE_CHANGED, 'Page changed')
       if (!document.body) return finish('ERROR', P.ERROR.PAGE_CHANGED, 'Page changed')
 
-      if (!pinned) pinned = pinTarget(beforeNodes, beforeText)
-      var raw = pinned ? nodeText(pinned) : ''
-      if (raw === beforeText) raw = ''
-      var next = R.reconcileAssistantText(last, raw)
+      if (!pinned) pinned = pinRow(beforeRows, beforeText)
+      var t = current()
+      var next = R.reconcileAssistantText(answerLast, t.answer)
+      var thinkNext = t.thinking
+      var changed = (next !== answerLast) || (thinkNext !== thinkingLast)
 
-      if (next && next !== last) {
-        gotToken = true
-        last = next
+      if (changed) {
+        sawActivity = true
         lastChangeAt = Date.now()
         if (session && session.firstTimer) {
           clearTimeout(session.firstTimer)
           session.firstTimer = null
         }
-        if (Date.now() - lastEmitAt >= C.deltaMinMs) {
-          lastEmitAt = Date.now()
-          emit('RESPONSE_DELTA', session, last)
+        if (thinkNext) thinkingSeen = true
+        if (thinkNext !== thinkingLast) thinkingLast = thinkNext
+        if (next !== answerLast) {
+          answerLast = next
+          if (next) answerSeen = true
+          if (next && Date.now() - lastEmitAt >= C.deltaMinMs) {
+            lastEmitAt = Date.now()
+            emit('RESPONSE_DELTA', session, answerLast)
+          }
         }
       }
 
-      if (!gotToken && !findInput() && !generating()) {
+      if (!sawActivity && !findInput() && !generating()) {
         return finish('ERROR', P.ERROR.COMPOSER_GONE, 'Composer disappeared')
       }
 
       if (session && session.stableTimer) clearTimeout(session.stableTimer)
       session.stableTimer = setTimeout(function onStable() {
         if (finished || !session) return
-        var nowText = R.reconcileAssistantText(last, pinned ? nodeText(pinned) : '')
-        if (nowText && nowText !== last) {
-          last = nowText
+        var nowT = current()
+        var nowText = R.reconcileAssistantText(answerLast, nowT.answer)
+        if (nowText && nowText !== answerLast) {
+          answerLast = nowText
+          answerSeen = true
+          sawActivity = true
           lastChangeAt = Date.now()
           lastEmitAt = Date.now()
-          emit('RESPONSE_DELTA', session, last)
+          emit('RESPONSE_DELTA', session, answerLast)
         }
-        if (R.shouldComplete({
-          currentText: last,
-          lastEmitted: last,
+        if (nowT.thinking) thinkingSeen = true
+        if (nowT.thinking !== thinkingLast) {
+          thinkingLast = nowT.thinking
+          lastChangeAt = Date.now()
+        }
+        var now = Date.now()
+        if (answerSeen && R.shouldComplete({
+          currentText: answerLast,
+          lastEmitted: answerLast,
           generating: generating(),
           stopVisible: Boolean(findStop()),
           lastChangeAt: lastChangeAt,
-          now: Date.now(),
+          now: now,
           stableMs: C.stableMs,
         })) {
           finish('RESPONSE_COMPLETE')
+          return
+        }
+        if (thinkingGapExceeded(now)) {
+          finish('ERROR', P.ERROR.RESPONSE_NOT_DETECTED, 'Thinking finished without a final answer')
           return
         }
         session.stableTimer = setTimeout(onStable, C.stableMs)
@@ -353,12 +697,14 @@
       observer: observer,
       stableTimer: null,
       firstTimer: setTimeout(function () {
-        if (!gotToken) finish('ERROR', P.ERROR.RESPONSE_NOT_DETECTED, 'Response not detected')
+        if (!sawActivity) finish('ERROR', P.ERROR.RESPONSE_NOT_DETECTED, 'Response not detected')
       }, C.firstTokenMs),
       limitTimer: setTimeout(function () {
-        if (generating() || (pinned && nodeText(pinned) !== last)) {
+        var t = current()
+        var stillChanging = t.answer !== answerLast || t.thinking !== thinkingLast
+        if (generating() || stillChanging) {
           finish('ERROR', P.ERROR.CONNECTOR_TIMEOUT, 'Connector timeout')
-        } else if (gotToken) {
+        } else if (answerSeen && answerLast) {
           finish('RESPONSE_COMPLETE')
         } else {
           finish('ERROR', P.ERROR.CONNECTOR_TIMEOUT, 'Connector timeout')
@@ -394,8 +740,9 @@
       return { success: false, error: { code: P.ERROR.INPUT_NOT_FOUND, message: 'Input not found' } }
     }
 
-    var beforeNodes = listAssistantNodes()
-    var beforeText = beforeNodes.length ? nodeText(beforeNodes[beforeNodes.length - 1]) : ''
+    var beforeRows = listRows()
+    var beforeRow = beforeRows.length ? beforeRows[beforeRows.length - 1] : null
+    var beforeText = beforeRow ? rowText(beforeRow) : ''
 
     var ok = setNativeValue(input, payload.text)
     if (!ok) {
@@ -423,7 +770,7 @@
 
     startObserve(
       { messageId: payload.messageId, requestId: requestId, conversationId: payload.conversationId },
-      beforeNodes,
+      beforeRows,
       beforeText,
     )
     return {
@@ -488,13 +835,22 @@
         })
         return false
       }
+      if (message.action === P.ACTION.DS_NEW_CHAT) {
+        var packed = P.pickNewChatPayload ? P.pickNewChatPayload(message.payload) : (message.payload || {})
+        createNewConversation(packed).then(function (result) {
+          sendResponse(result)
+        }).catch(function () {
+          sendResponse(newChatError())
+        })
+        return true
+      }
       if (message.action === P.ACTION.DS_SEND) {
-        var packed = P.pickSendPayload(message.payload)
-        if (!packed.text) {
+        var packed2 = P.pickSendPayload(message.payload)
+        if (!packed2.text) {
           sendResponse({ success: false, error: { code: P.ERROR.INVALID_MESSAGE, message: 'Empty prompt' } })
           return false
         }
-        sendPrompt(packed, message.requestId).then(function (result) {
+        sendPrompt(packed2, message.requestId).then(function (result) {
           sendResponse(result)
         }).catch(function () {
           sendResponse({ success: false, error: { code: P.ERROR.INVALID_MESSAGE, message: 'Send failed' } })
