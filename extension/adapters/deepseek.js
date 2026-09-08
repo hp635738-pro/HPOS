@@ -36,10 +36,6 @@
     return pageValid()
   }
 
-  function isReady() {
-    return Boolean(detect().ready)
-  }
-
   function visible(el) {
     if (!el) return false
     var r = el.getBoundingClientRect()
@@ -187,7 +183,7 @@
     var input = findInput()
     return {
       ok: Boolean(input),
-      ready: isReady(),
+      ready: Boolean(input),
       supportedPage: isSupportedPage(),
       detected: true,
       host: location.hostname,
