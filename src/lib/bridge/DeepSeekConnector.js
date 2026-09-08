@@ -80,6 +80,7 @@ export class DeepSeekConnector extends WebsiteConnector {
     this._poll = null
     this._waiters = new Map()
     this._active = null
+    this._queued = null
     this._ackedIds = new Set()
     this._completed = null
     this._recovering = null
@@ -209,6 +210,44 @@ export class DeepSeekConnector extends WebsiteConnector {
     return this.verifyBinding(hposConversationId)
   }
 
+  /**
+   * Passive identity reconciliation for the currently visible conversation.
+   * Re-verifies an EXISTING binding against the CURRENT DeepSeek tab and
+   * makes the connector status honest about it (bound ⇄ mismatch/…).
+   *
+   * Never sends. Never touches an unbound conversation. Never mutates the
+   * stored binding beyond what findBoundDeepSeekTab already permits
+   * (touch + tabId adoption after an identity match). A mismatch is only
+   * reported — the binding itself is left exactly where it was.
+   */
+  async reconcileBindingStatus(hposConversationId) {
+    if (this.bridge.getStatus() !== 'connected') return null
+    if (this.isBusy() || this._recovering) return null
+    const binding = this._bindings.getBinding(hposConversationId)
+    if (!binding || !binding.deepseekConversationId) return null
+    let plan
+    try {
+      plan = await this.verifyBinding(hposConversationId)
+    } catch (err) {
+      this._diag('debug', DIAG.BINDING_VERIFY_FAILED, { hposConversationId, errorCode: err && err.code, passive: true })
+      return null
+    }
+    if (this.isBusy() || this._recovering) return plan
+    const code = (plan && plan.found && plan.found.code) || (plan && plan.code) || null
+    if (plan && plan.send) {
+      this._setStatus('bound', 'DeepSeek bound')
+    } else if (code === ERROR.DEEPSEEK_CONVERSATION_MISMATCH) {
+      this._setStatus('mismatch', RECOVERY_COPY.mismatch)
+    } else if (code === ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED) {
+      this._setStatus('unverified', RECOVERY_COPY.unverified)
+    } else if (code === ERROR.UNSUPPORTED_PAGE) {
+      this._setStatus('unsupported', RECOVERY_COPY.unsupported)
+    } else {
+      this._setStatus('unavailable', RECOVERY_COPY.tabNotReady)
+    }
+    return plan
+  }
+
   async verifyBinding(hposConversationId) {
     const binding = this._bindings.getBinding(hposConversationId)
     this._diag('debug', DIAG.BINDING_VERIFY_START, { hposConversationId })
@@ -306,6 +345,16 @@ export class DeepSeekConnector extends WebsiteConnector {
 
     this._ensureBridgeListen()
     this._advanceRequest('QUEUE')
+    // From QUEUE until the DS_SEND ack resolves, events for THIS message can
+    // arrive before _active exists (binding verification takes real time) or
+    // before the ack returns. Buffer them against the queued send instead of
+    // dropping them into a later "Response not detected".
+    this._queued = {
+      messageId: messageId || '',
+      conversationId: conversationId || null,
+      lastContent: '',
+      bufferedComplete: undefined,
+    }
     this._diag('info', DIAG.REQUEST_QUEUED, { messageId, hposConversationId: conversationId, contentLength: content.length })
 
     let tabId = null
@@ -316,6 +365,7 @@ export class DeepSeekConnector extends WebsiteConnector {
       } catch (err) {
         this._advanceRequest('FAIL')
         this._active = null
+        this._queued = null
         throw err
       }
     }
@@ -338,13 +388,20 @@ export class DeepSeekConnector extends WebsiteConnector {
       if (tabId != null) payload.tabId = tabId
       ack = await this.bridge.sendMessage(ACTION.DS_SEND, payload, { timeout: this._t.sendAckMs })
     } catch (err) {
-      this._life = nextLife(this._life, 'DISCONNECT')
-      this._advanceRequest('TIMEOUT')
       this._active = null
-      if (err.code === ERROR.DEEPSEEK_TAB_UNAVAILABLE || err.code === ERROR.DEEPSEEK_TAB_NOT_READY) {
+      this._queued = null
+      const code = err && err.code
+      if (code === ERROR.DEEPSEEK_TAB_UNAVAILABLE || code === ERROR.DEEPSEEK_TAB_NOT_READY) {
+        this._life = nextLife(this._life, 'ERROR')
+        this._advanceRequest('FAIL')
         throw this._bindingError(ERROR.DEEPSEEK_TAB_NOT_READY)
       }
-      if (err.code === ERROR.DISCONNECTED || err.code === ERROR.NOT_AVAILABLE || err.code === ERROR.TIMEOUT || err.code === ERROR.BRIDGE_DISCONNECTED || err.code === ERROR.BRIDGE_TIMEOUT) {
+      if (code === ERROR.DISCONNECTED || code === ERROR.NOT_AVAILABLE || code === ERROR.TIMEOUT || code === ERROR.BRIDGE_DISCONNECTED || code === ERROR.BRIDGE_TIMEOUT) {
+        // Delivery is UNKNOWN here: the message may or may not have reached
+        // DeepSeek. INTERRUPTED is the honest terminal state — and nothing
+        // may resend automatically.
+        this._life = nextLife(this._life, 'DISCONNECT')
+        this._advanceRequest('TIMEOUT')
         const mapped = bridgeError(ERROR.DEEPSEEK_SEND_TIMEOUT, RECOVERY_COPY.interruptedUnknown, {
           interrupted: true,
           sent: false,
@@ -354,8 +411,13 @@ export class DeepSeekConnector extends WebsiteConnector {
         this._setStatus('unavailable', mapped.message)
         throw mapped
       }
+      // A flat adapter refusal (SEND_NOT_FOUND etc.): nothing was delivered,
+      // so this is FAILED — never mislabeled INTERRUPTED, and the busy lock
+      // is released for an explicit user retry. Exactly one DS_SEND attempt
+      // happened per user action either way.
+      this._life = nextLife(this._life, 'ERROR')
       this._advanceRequest('FAIL')
-      this._diag('error', DIAG.REQUEST_FAILED, { messageId, errorCode: err.code })
+      this._diag('error', DIAG.REQUEST_FAILED, { messageId, errorCode: code })
       this._setStatus('error', err.message || 'Connection error')
       throw err
     }
@@ -363,19 +425,38 @@ export class DeepSeekConnector extends WebsiteConnector {
     const requestId = ack.requestId || ack.payload?.requestId || null
     const ackTab = typeof ack.payload?.tabId === 'number' ? ack.payload.tabId : tabId
     if (messageId) this._rememberAck(messageId)
+    // Events can beat the ack in real tabs (different channels). Carry over
+    // anything buffered while QUEUED instead of dropping it.
+    const prevActive = this._active && this._active.messageId === messageId ? this._active : null
+    const queued = this._queued && (!this._queued.messageId || this._queued.messageId === messageId) ? this._queued : null
+    const buffered = reconcileAssistantText(
+      (queued && queued.lastContent) || '',
+      (prevActive && prevActive.lastContent) || '',
+    )
+    const bufferedComplete = prevActive && prevActive.bufferedComplete != null
+      ? prevActive.bufferedComplete
+      : (queued ? queued.bufferedComplete : undefined)
+    this._queued = null
     this._active = {
       messageId,
       requestId,
       conversationId: conversationId || null,
       tabId: ackTab,
       sent: true,
-      lastContent: '',
+      lastContent: buffered,
+      bufferedComplete,
       sawStart: false,
     }
     this._advanceRequest('ACK')
     this._life = nextLife(this._life, 'ACK')
+    if (buffered || bufferedComplete != null) {
+      this._advanceRequest('RESPONSE_START')
+      this._life = nextLife(this._life, 'RESPONSE_START')
+    }
     this._diag('info', DIAG.REQUEST_SENT, { messageId, requestId, tabId: ackTab, hposConversationId: conversationId })
-    this._setStatus('generating', 'Generating')
+    if (bufferedComplete == null) {
+      this._setStatus(buffered ? 'streaming' : 'generating', buffered ? 'Streaming' : 'Generating')
+    }
     return this._waitComplete(messageId, requestId, onDelta, onComplete, conversationId, ackTab)
   }
 
@@ -684,6 +765,9 @@ export class DeepSeekConnector extends WebsiteConnector {
     if (payload && payload.messageId && this._waiters.has(payload.messageId)) {
       return this._waiters.get(payload.messageId)
     }
+    if (payload && payload.messageId && this._queued && payload.messageId === this._queued.messageId) {
+      return this._queued
+    }
     return null
   }
 
@@ -744,12 +828,20 @@ export class DeepSeekConnector extends WebsiteConnector {
       return
     }
 
+    const id = payload.messageId
+    const waiter = id ? this._waiters.get(id) : null
+
+    // Correlated activity before any content has streamed is proof of life:
+    // re-arm the first-response watchdog. This applies to the DeepThink
+    // liveness pings (throttled RESPONSE_START repeats) too, including the
+    // ones that take the early-return paths below.
+    if (waiter && !waiter.lastContent && waiter.bufferedComplete == null) {
+      this._armFirstTimeout(waiter)
+    }
+
     for (const fn of this._messageListeners) {
       try { fn(payload) } catch { /* ignore */ }
     }
-
-    const id = payload.messageId
-    const waiter = id ? this._waiters.get(id) : null
 
     if (payload.event === EVENT.RESPONSE_START) {
       if (this._active && this._active.sawStart) return
@@ -766,7 +858,16 @@ export class DeepSeekConnector extends WebsiteConnector {
 
     if (payload.event === EVENT.RESPONSE_DELTA && typeof payload.content === 'string') {
       if (!canRequestTransition(this._requestLife, 'RESPONSE_DELTA') && this._requestLife !== REQUEST_LIFE.STREAMING) {
-        this._diag('debug', DIAG.STALE_EVENT_REJECTED, { event: payload.event, errorCode: ERROR.REQUEST_ALREADY_COMPLETE })
+        // QUEUED means the DS_SEND ack has not resolved yet: real tabs race
+        // the two channels. Buffer the correlated delta against the queued
+        // send instead of dropping it (dropping it was how an answered
+        // DeepSeek turn could end in "Response not detected").
+        if (this._requestLife === REQUEST_LIFE.QUEUED && (ids === this._active || ids === this._queued)) {
+          ids.lastContent = reconcileAssistantText(ids.lastContent || '', payload.content)
+          this._diag('debug', DIAG.RESPONSE_DELTA, { messageId: id, buffered: true, contentLength: ids.lastContent.length })
+        } else {
+          this._diag('debug', DIAG.STALE_EVENT_REJECTED, { event: payload.event, errorCode: ERROR.REQUEST_ALREADY_COMPLETE })
+        }
         return
       }
       const prev = (this._active && this._active.lastContent) || (waiter && waiter.lastContent) || ''
@@ -784,6 +885,15 @@ export class DeepSeekConnector extends WebsiteConnector {
       }
     }
     if (payload.event === EVENT.RESPONSE_COMPLETE) {
+      // Same race, terminal form: an instant answer's COMPLETE can beat the
+      // DS_SEND ack. Buffer it; the ack path settles with it immediately.
+      if (this._requestLife === REQUEST_LIFE.QUEUED && (ids === this._active || ids === this._queued)) {
+        ids.bufferedComplete = typeof payload.content === 'string' && payload.content
+          ? reconcileAssistantText(ids.lastContent || '', payload.content)
+          : (ids.lastContent || '')
+        this._diag('debug', DIAG.RESPONSE_COMPLETE, { messageId: id, buffered: true })
+        return
+      }
       if (isTerminalRequest(this._requestLife) && this._requestLife === REQUEST_LIFE.COMPLETE) {
         return
       }
@@ -835,7 +945,46 @@ export class DeepSeekConnector extends WebsiteConnector {
     }
   }
 
+  /**
+   * The first-response watchdog. Fires only when NOTHING at all was seen
+   * (no delta, no completion, no liveness ping) for firstResponseMs while
+   * the request is still in SENT/GENERATING. It is (re)armed on every
+   * correlated pre-content event, so a legitimately long DeepThink phase
+   * — which keeps signalling activity — can never trip it, while a silent
+   * page still fails after one quiet window and settles exactly once.
+   */
+  _armFirstTimeout(waiter) {
+    if (!waiter) return
+    if (waiter.lastContent || waiter.bufferedComplete != null) return
+    this._clearFirstTimer(waiter)
+    waiter.firstTimer = setTimeout(() => this._fireFirstTimeout(waiter.messageId), this._t.firstResponseMs)
+  }
+
+  _fireFirstTimeout(messageId) {
+    const waiter = this._waiters.get(messageId)
+    if (!waiter) return
+    if (waiter.lastContent) return
+    if (waiter.bufferedComplete != null) return
+    if (this._requestLife !== REQUEST_LIFE.SENT && this._requestLife !== REQUEST_LIFE.GENERATING) return
+    this._waiters.delete(messageId)
+    clearTimeout(waiter.timer)
+    this._active = null
+    this._life = LIFE.INTERRUPTED
+    this._advanceRequest('TIMEOUT')
+    const err = bridgeError(ERROR.DEEPSEEK_RESPONSE_TIMEOUT, userMessage(ERROR.DEEPSEEK_RESPONSE_TIMEOUT), {
+      interrupted: true,
+      sent: true,
+      partial: '',
+      autoResend: false,
+    })
+    this._setStatus('unavailable', err.message)
+    waiter.reject(err)
+  }
+
   _waitComplete(messageId, requestId, onDelta, onComplete, conversationId, tabId) {
+    const live = this._active && this._active.messageId === messageId ? this._active : null
+    const buffered = (live && live.lastContent) || ''
+    const bufferedComplete = live ? live.bufferedComplete : undefined
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this._waiters.delete(messageId)
@@ -851,28 +1000,36 @@ export class DeepSeekConnector extends WebsiteConnector {
           autoResend: false,
         }))
       }, this._t.completeMs)
-      const firstTimer = setTimeout(() => {
-        const waiter = this._waiters.get(messageId)
-        if (!waiter) return
-        if (waiter.lastContent) return
-        if (this._requestLife !== REQUEST_LIFE.SENT && this._requestLife !== REQUEST_LIFE.GENERATING) return
-        this._waiters.delete(messageId)
-        clearTimeout(waiter.timer)
-        this._active = null
-        this._life = LIFE.INTERRUPTED
-        this._advanceRequest('TIMEOUT')
-        const err = bridgeError(ERROR.DEEPSEEK_RESPONSE_TIMEOUT, userMessage(ERROR.DEEPSEEK_RESPONSE_TIMEOUT), {
-          interrupted: true,
-          sent: true,
-          partial: '',
-          autoResend: false,
-        })
-        this._setStatus('unavailable', err.message)
-        waiter.reject(err)
-      }, this._t.firstResponseMs)
-      this._waiters.set(messageId, {
-        resolve, reject, timer, firstTimer, onDelta, onComplete, messageId, requestId, conversationId, tabId, lastContent: '',
-      })
+      const waiter = {
+        resolve, reject, timer, firstTimer: null, onDelta, onComplete,
+        messageId, requestId, conversationId, tabId,
+        lastContent: buffered,
+        bufferedComplete,
+      }
+      this._waiters.set(messageId, waiter)
+      if (bufferedComplete != null) {
+        // The completion beat the ack (instant answer on a real tab): apply
+        // the buffered lifecycle and settle now — never wait out a timeout
+        // for content DeepSeek already produced.
+        this._life = nextLife(this._life, 'RESPONSE_DELTA')
+        this._advanceRequest('RESPONSE_DELTA')
+        this._life = nextLife(this._life, 'RESPONSE_COMPLETE')
+        this._advanceRequest('RESPONSE_COMPLETE')
+        this._diag('info', DIAG.RESPONSE_COMPLETE, { messageId, requestId, buffered: true })
+        this._settle(messageId, true, bufferedComplete)
+        return
+      }
+      if (buffered) {
+        this._life = nextLife(this._life, 'RESPONSE_DELTA')
+        this._advanceRequest('RESPONSE_DELTA')
+        this._setStatus('streaming', 'Streaming')
+        this._diag('debug', DIAG.RESPONSE_DELTA, { messageId, buffered: true, contentLength: buffered.length })
+        if (onDelta) {
+          try { onDelta(buffered) } catch { /* ignore */ }
+        }
+        return
+      }
+      this._armFirstTimeout(waiter)
     })
   }
 
@@ -933,6 +1090,7 @@ export class DeepSeekConnector extends WebsiteConnector {
     }
     this._waiters.clear()
     this._active = null
+    this._queued = null
   }
 
   _startPoll() {
