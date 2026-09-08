@@ -32,6 +32,9 @@ const TIMING_OVERRIDES = `
   DEEPSEEK_CONFIG.thinkAnswerGapMs = 300
   DEEPSEEK_CONFIG.newChatWaitMs = 600
   DEEPSEEK_CONFIG.newChatPollMs = 15
+  DEEPSEEK_CONFIG.sendConfirmMs = 450
+  DEEPSEEK_CONFIG.sendPollMs = 20
+  DEEPSEEK_CONFIG.thinkingPingMs = 60
 `
 
 class FakeEl {
@@ -144,7 +147,7 @@ function wait(ms) {
  *   pathname      — starting route ('/a/chat/s/sess-…' or '/a/chat')
  *   hostname      — defaults to chat.deepseek.com
  */
-export function loadDeepSeekPage({ pathname = '/a/chat', hostname = 'chat.deepseek.com' } = {}) {
+export function loadDeepSeekPage({ pathname = '/a/chat', hostname = 'chat.deepseek.com', timing = null } = {}) {
   const registry = []
   const observers = []
   const listeners = []
@@ -219,6 +222,12 @@ export function loadDeepSeekPage({ pathname = '/a/chat', hostname = 'chat.deepse
     runInContext(readExtension(file), context, { filename: file })
     if (file === 'adapters/deepseek.config.js') {
       runInContext(TIMING_OVERRIDES, context, { filename: 'timing-overrides' })
+      if (timing && typeof timing === 'object') {
+        const extra = Object.entries(timing)
+          .map(([k, v]) => `DEEPSEEK_CONFIG.${k} = ${JSON.stringify(v)}`)
+          .join('\n')
+        runInContext(extra, context, { filename: 'timing-extra' })
+      }
     }
   }
 
@@ -272,19 +281,44 @@ function readExtension(file) {
   return readFileSync(join(extensionDir, file), 'utf8')
 }
 
-/** DeepSeek-looking composer + visible send button wired to the fixture. */
-export function addComposer(fixture) {
+/**
+ * DeepSeek-looking composer + visible send button wired to the fixture.
+ * Mirrors the real page: a successful submit clears the composer value.
+ *   clearsOn      — 'both' (default) | 'click' | 'enter' | 'none'
+ *   clearDelayMs  — 0 = instant; >0 models a slow/background tab committing
+ *                   the SPA state late (the root of the recorded duplicates)
+ * omitSend        — true leaves out the Send button (Enter-only page)
+ */
+export function addComposer(fixture, { clearsOn = 'both', clearDelayMs = 0, omitSend = false } = {}) {
   const input = fixture.addEl({
     tagName: 'TEXTAREA',
     sels: ['textarea[name="search"]', 'textarea[placeholder*="Message DeepSeek"]'],
     rect: { width: 420, height: 26 },
   })
-  const send = fixture.addEl({
-    tagName: 'BUTTON',
-    sels: ['button[aria-label="Send"]'],
-    rect: { width: 40, height: 26 },
-  })
-  return { input, send }
+  const stats = { enterCount: 0 }
+  const clear = () => {
+    if (clearDelayMs > 0) setTimeout(() => { input.value = '' }, clearDelayMs)
+    else input.value = ''
+  }
+  input.dispatchEvent = (ev) => {
+    if (ev && ev.type === 'keydown' && ev.key === 'Enter') {
+      stats.enterCount += 1
+      if (clearsOn === 'both' || clearsOn === 'enter') clear()
+    }
+    return true
+  }
+  let send = null
+  if (!omitSend) {
+    send = fixture.addEl({
+      tagName: 'BUTTON',
+      sels: ['button[aria-label="Send"]'],
+      rect: { width: 40, height: 26 },
+    })
+    send.onClick = () => {
+      if (clearsOn === 'both' || clearsOn === 'click') clear()
+    }
+  }
+  return { input, send, stats }
 }
 
 /** Visible Stop control, toggled to mirror DeepSeek's generating state. */

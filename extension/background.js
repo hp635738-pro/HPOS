@@ -233,6 +233,11 @@ async function handleDsSend(message, hposTabId) {
   if (!packed.text) {
     return fail(message.requestId, message.action, P.ERROR.INVALID_MESSAGE, 'Empty prompt')
   }
+  // One in-flight DS_SEND per HPOS message id — anything else would be the
+  // same user message reaching DeepSeek twice (retry storms, SW replay).
+  if (packed.messageId && pendingByMessage[packed.messageId] != null) {
+    return fail(message.requestId, message.action, P.ERROR.BUSY, 'This message is already in flight')
+  }
   var wantTab = typeof packed.tabId === 'number' ? packed.tabId : null
   var tab = await pickDeepSeekTab(wantTab, { strict: wantTab != null })
   if (!tab || tab.id == null) {

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useBrowserBridge, useDeepSeek } from '../../lib/bridge/useBrowserBridge.js'
 import { useConversations } from '../../lib/chat/useConversations.js'
 
@@ -31,7 +32,29 @@ export default function BridgeStatus() {
   const { status, error, retry } = useBrowserBridge()
   const ds = useDeepSeek()
   const { active } = useConversations()
-  const bound = Boolean(active?.id && ds.connector.getConversationBinding(active.id)?.deepseekConversationId)
+  const activeId = active?.id || null
+  const bound = Boolean(activeId && ds.connector.getConversationBinding(activeId)?.deepseekConversationId)
+
+  // "Browser connected" must never imply "DeepSeek bound": while a binding
+  // exists for the visible conversation, periodically re-verify the CURRENT
+  // DeepSeek tab identity through the connector's structured mismatch path.
+  // Drift flips the chip to mismatch; the binding itself is never rewritten.
+  useEffect(() => {
+    if (status !== 'connected' || !activeId || !bound) return undefined
+    let alive = true
+    let inFlight = false
+    const run = () => {
+      if (!alive || inFlight || ds.connector.isBusy()) return
+      inFlight = true
+      Promise.resolve(ds.connector.reconcileBindingStatus(activeId))
+        .catch(() => null)
+        .finally(() => { inFlight = false })
+    }
+    run()
+    const timer = setInterval(run, 6000)
+    return () => { alive = false; clearInterval(timer) }
+  }, [status, activeId, bound, ds.connector])
+
   const label = BRIDGE_COPY[status] || BRIDGE_COPY.disconnected
   const title = error?.message
     ? `${label} — ${error.message}`
@@ -40,17 +63,19 @@ export default function BridgeStatus() {
       : 'Click to test the browser bridge'
 
   const showDs = status === 'connected'
+  // "DeepSeek · Bound" is claimable only by a verified connector status —
+  // a stored binding plus a merely-ready page is not proof of identity.
   const dsLabel = ds.status === 'mismatch'
     ? DS_COPY.mismatch
     : ds.status === 'version'
       ? DS_COPY.version
       : ds.status === 'unverified'
         ? DS_COPY.unverified
+        : ds.status === 'bound'
+          ? (bound ? DS_COPY.bound : DS_COPY.ready)
       : (ds.status === 'unavailable' || ds.status === 'idle') && bound
         ? DS_COPY.missing
-        : (ds.status === 'ready' || ds.status === 'detected') && bound
-          ? DS_COPY.bound
-          : (DS_COPY[ds.status] || DS_COPY.unavailable)
+        : (DS_COPY[ds.status] || DS_COPY.unavailable)
   const dsTone = ds.status === 'ready' || ds.status === 'detected' || ds.status === 'bound'
     ? 'ok'
     : ds.status === 'sending' || ds.status === 'generating' || ds.status === 'streaming'

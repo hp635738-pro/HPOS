@@ -35,6 +35,19 @@
        answer appears within this grace window, the response is reported as
        missing instead of completing with thinking text. */
     thinkAnswerGapMs: 30000,
+    /* Sending: exactly ONE submit gesture, then confirm by observation.
+       The composer clearing / Stop appearing / a new turn row counts as
+       submitted; otherwise SEND_NOT_FOUND after the window. Background tabs
+       commit the SPA state late — never re-gesture inside the window
+       (that re-gesture is what delivered duplicate user messages). */
+    sendConfirmMs: 3500,
+    sendPollMs: 150,
+    sendSettleMs: 80,
+    /* DeepThink liveness: while reasoning is known and no final answer has
+       streamed yet, re-emit a throttled RESPONSE_START (marked thinking) so
+       the HPOS connector's first-response watchdog is activity-driven
+       instead of a fixed wall clock. */
+    thinkingPingMs: 3000,
     observeRoot: [
       '.ds-scroll-area',
       'main',

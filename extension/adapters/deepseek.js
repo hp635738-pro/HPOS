@@ -587,10 +587,27 @@
     var sawActivity = false
     var lastChangeAt = 0
     var lastEmitAt = 0
+    var lastThinkPingAt = Date.now()
     var pinned = null
 
     function current() {
       return pinned ? extractRow(pinned) : { answer: '', thinking: '', hasThinking: false }
+    }
+
+    /**
+     * DeepThink liveness for HPOS: while a reasoning block is known and no
+     * final answer has streamed, re-emit a throttled, empty RESPONSE_START
+     * (marked thinking) whenever reasoning is visibly progressing and,
+     * separately, whenever generation is clearly ongoing. Thinking text is
+     * never attached — this is a heartbeat, not content. It keeps the HPOS
+     * first-response watchdog activity-driven instead of wall-clock based.
+     */
+    function pingThinking() {
+      if (finished || answerSeen || !session) return
+      var now = Date.now()
+      if (now - lastThinkPingAt < (C.thinkingPingMs || 3000)) return
+      lastThinkPingAt = now
+      emit('RESPONSE_START', session, '', { thinking: true })
     }
 
     function finish(event, code, message) {
@@ -632,7 +649,10 @@
           session.firstTimer = null
         }
         if (thinkNext) thinkingSeen = true
-        if (thinkNext !== thinkingLast) thinkingLast = thinkNext
+        if (thinkNext !== thinkingLast) {
+          thinkingLast = thinkNext
+          if (thinkNext) pingThinking()
+        }
         if (next !== answerLast) {
           answerLast = next
           if (next) answerSeen = true
@@ -682,6 +702,10 @@
           finish('ERROR', P.ERROR.RESPONSE_NOT_DETECTED, 'Thinking finished without a final answer')
           return
         }
+        // Quiet DOM + visible generation = DeepSeek is still working (e.g.
+        // the DeepThink block is collapsed but the answer is coming): keep
+        // HPOS's watchdog fed. Completion above stays answer-gated.
+        if (thinkingSeen && !answerSeen && generating()) pingThinking()
         session.stableTimer = setTimeout(onStable, C.stableMs)
       }, C.stableMs)
     }
@@ -720,13 +744,67 @@
     return new Promise(function (resolve) { setTimeout(resolve, ms) })
   }
 
+  /* One send may sit inside its submit window before the observer starts;
+     `sending` makes that window part of busy() so a second DS_SEND cannot
+     submit the same page concurrently. */
+  var sending = false
+
+  /* Message ids already handed to the page. Re-delivering one of these
+     would duplicate the user message on DeepSeek, so it is refused. */
+  var recentSends = {}
+  var recentOrder = []
+
+  function seenRecently(messageId) {
+    return Boolean(messageId) && Object.prototype.hasOwnProperty.call(recentSends, messageId)
+  }
+
+  function rememberSend(messageId) {
+    if (!messageId) return
+    if (!seenRecently(messageId)) {
+      recentOrder.push(messageId)
+      if (recentOrder.length > 50) delete recentSends[recentOrder.shift()]
+    }
+    recentSends[messageId] = Date.now()
+  }
+
   function busy() {
-    return Boolean(session)
+    return Boolean(session) || sending
+  }
+
+  /**
+   * Confirm the ONE submit gesture by observation. Truthful signals only:
+   *   generation started (Stop control visible)         → submitted
+   *   composer no longer holds the exact prompt text    → cleared on send
+   *   a new turn row appeared                           → optimistic UI
+   * If the full window passes with the prompt untouched, it never went out
+   * and the caller gets SEND_NOT_FOUND — fast and honest, never a second
+   * gesture (re-gesturing is what duplicated user messages on real tabs).
+   */
+  async function waitForSubmit(input, text, beforeRows, beforeText) {
+    var wanted = String(text || '').trim()
+    var deadline = Date.now() + (C.sendConfirmMs || 3500)
+    var poll = C.sendPollMs || 150
+    for (;;) {
+      await sleep(poll)
+      if (!pageValid() || !document.body) return false
+      if (generating()) return true
+      var remaining = String((input && (input.value || input.innerText)) || '').trim()
+      if (remaining !== wanted) return true
+      if (pinRow(beforeRows, beforeText)) return true
+      if (Date.now() >= deadline) {
+        if (generating()) return true
+        var tail = String((input && (input.value || input.innerText)) || '').trim()
+        return tail !== wanted
+      }
+    }
   }
 
   async function sendPrompt(payload, requestId) {
     if (busy()) {
       return { success: false, error: { code: P.ERROR.BUSY, message: 'A response is still generating' } }
+    }
+    if (payload.messageId && seenRecently(payload.messageId)) {
+      return { success: false, error: { code: P.ERROR.BUSY, message: 'This message was already sent' } }
     }
     var snap = detect()
     if (!snap.ok) {
@@ -740,45 +818,45 @@
       return { success: false, error: { code: P.ERROR.INPUT_NOT_FOUND, message: 'Input not found' } }
     }
 
-    var beforeRows = listRows()
-    var beforeRow = beforeRows.length ? beforeRows[beforeRows.length - 1] : null
-    var beforeText = beforeRow ? rowText(beforeRow) : ''
+    rememberSend(payload.messageId)
+    sending = true
+    try {
+      var beforeRows = listRows()
+      var beforeRow = beforeRows.length ? beforeRows[beforeRows.length - 1] : null
+      var beforeText = beforeRow ? rowText(beforeRow) : ''
 
-    var ok = setNativeValue(input, payload.text)
-    if (!ok) {
-      input.focus()
-      try { document.execCommand('insertText', false, payload.text) } catch { /* ignore */ }
-    }
-    await sleep(80)
+      var ok = setNativeValue(input, payload.text)
+      if (!ok) {
+        input.focus()
+        try { document.execCommand('insertText', false, payload.text) } catch { /* ignore */ }
+      }
+      await sleep(C.sendSettleMs || 80)
 
-    var send = findSend(input)
-    if (send) send.click()
-    else pressEnter(input)
-    await sleep(350)
+      // Exactly one visible submit gesture: the real Send control when it is
+      // usable, otherwise a single Enter. Never both, never twice.
+      var send = findSend(input)
+      if (send) send.click()
+      else pressEnter(input)
 
-    var still = (input.value || input.innerText || '').trim()
-    if (still === payload.text.trim()) {
-      pressEnter(input)
-      await sleep(250)
-      still = (input.value || input.innerText || '').trim()
-    }
-    if (still === payload.text.trim() && !generating()) {
-      if (!send) {
+      var submitted = await waitForSubmit(input, payload.text, beforeRows, beforeText)
+      if (!submitted) {
         return { success: false, error: { code: P.ERROR.SEND_NOT_FOUND, message: 'Send button not found' } }
       }
-    }
 
-    startObserve(
-      { messageId: payload.messageId, requestId: requestId, conversationId: payload.conversationId },
-      beforeRows,
-      beforeText,
-    )
-    return {
-      success: true,
-      accepted: true,
-      messageId: payload.messageId,
-      requestId: requestId,
-      conversationId: payload.conversationId || '',
+      startObserve(
+        { messageId: payload.messageId, requestId: requestId, conversationId: payload.conversationId },
+        beforeRows,
+        beforeText,
+      )
+      return {
+        success: true,
+        accepted: true,
+        messageId: payload.messageId,
+        requestId: requestId,
+        conversationId: payload.conversationId || '',
+      }
+    } finally {
+      sending = false
     }
   }
 
