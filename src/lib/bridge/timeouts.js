@@ -11,6 +11,8 @@ export const TIMEOUTS = {
   scanCacheMs: 800,
   stopAckMs: 4000,
   statusMs: 4000,
+  /* Clicking "New chat" + verifying the new identity on the tab. */
+  newChatMs: 15000,
 }
 
 export function mergeTimeouts(overrides) {

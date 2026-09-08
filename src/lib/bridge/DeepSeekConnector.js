@@ -39,7 +39,9 @@ export const RECOVERY_COPY = {
 const BINDING_COPY = {
   [ERROR.DEEPSEEK_CONVERSATION_MISMATCH]: RECOVERY_COPY.mismatch,
   [ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED]: RECOVERY_COPY.unverified,
+  [ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED]: userMessage(ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED),
   [ERROR.DEEPSEEK_TAB_NOT_READY]: RECOVERY_COPY.tabNotReady,
+  [ERROR.BUSY]: USER_COPY[ERROR.BUSY],
   [ERROR.UNSUPPORTED_PAGE]: RECOVERY_COPY.unsupported,
   [ERROR.BRIDGE_DISCONNECTED]: RECOVERY_COPY.disconnected,
   [ERROR.REQUEST_INTERRUPTED]: RECOVERY_COPY.interrupted,
@@ -81,6 +83,7 @@ export class DeepSeekConnector extends WebsiteConnector {
     this._ackedIds = new Set()
     this._completed = null
     this._recovering = null
+    this._newChatChain = null
     this._scanCache = null
     this._onBridgeMessage = this._onBridgeMessage.bind(this)
     this._offBridge = null
@@ -546,7 +549,7 @@ export class DeepSeekConnector extends WebsiteConnector {
     const message = BINDING_COPY[code] || 'DeepSeek conversation could not be used'
     if (code === ERROR.DEEPSEEK_CONVERSATION_MISMATCH) {
       this._setStatus('mismatch', message)
-    } else if (code === ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED) {
+    } else if (code === ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED || code === ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED) {
       this._setStatus('unverified', message)
     } else if (code === ERROR.DEEPSEEK_TAB_NOT_READY) {
       this._setStatus('unavailable', message)
@@ -586,9 +589,89 @@ export class DeepSeekConnector extends WebsiteConnector {
         actual: plan.actual,
       })
     }
-    this._bindings.bindConversation(hposConversationId, plan.identity)
+    // No binding yet: this HPOS conversation must get its OWN DeepSeek
+    // conversation. The visible tab moves to a fresh chat via its normal
+    // "New chat" UI, the resulting identity is verified, bound, and only
+    // then is the message sent. Never reuse the previously open thread.
+    const created = await this._createVerifiedConversation(hposConversationId, current)
+    this._bindings.bindConversation(hposConversationId, created)
     this._setStatus('bound', 'DeepSeek bound')
     return this._bindings.getBinding(hposConversationId)
+  }
+
+  /** Serialize new-chat creation so overlapping first sends cannot double-create. */
+  _createVerifiedConversation(hposConversationId, prior) {
+    const head = this._newChatChain || Promise.resolve()
+    const run = head.catch(() => {}).then(() => this._requestNewChat(hposConversationId, prior))
+    this._newChatChain = run.catch(() => {})
+    return run
+  }
+
+  async _requestNewChat(hposConversationId, prior) {
+    const again = this._bindings.getBinding(hposConversationId)
+    if (again && again.deepseekConversationId) {
+      // A concurrent first send already created and bound a fresh chat.
+      this._diag('debug', DIAG.BINDING_VERIFY_SUCCESS, { hposConversationId, newChatSkipped: true })
+      return {
+        supported: true,
+        identity: again.deepseekConversationId,
+        url: again.deepseekUrl,
+        tabId: again.tabId,
+        confidence: again.confidence,
+      }
+    }
+    this._diag('info', DIAG.BINDING_VERIFY_START, { hposConversationId, newChat: true })
+    const priorIdentity = prior && prior.identity ? String(prior.identity) : ''
+    const priorHigh = prior && prior.confidence === 'high' ? priorIdentity : ''
+    const priorTabId = prior && typeof prior.tabId === 'number' ? prior.tabId : null
+
+    let res
+    try {
+      const payload = { previousIdentity: priorIdentity || undefined }
+      if (priorTabId != null) payload.tabId = priorTabId
+      res = await this.bridge.sendMessage(ACTION.DS_NEW_CHAT, payload, { timeout: this._t.newChatMs })
+    } catch (err) {
+      const mapped = this._mapNewChatError(err)
+      this._diag('warn', DIAG.BINDING_VERIFY_FAILED, { hposConversationId, errorCode: mapped, newChat: true })
+      throw this._bindingError(mapped)
+    }
+
+    const next = identityFromAdapter((res && res.payload) || res)
+    if (!res || res.success === false || !next || next.supported !== true || !next.identity) {
+      const code = (res && res.error && res.error.code) || ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED
+      this._diag('warn', DIAG.BINDING_VERIFY_FAILED, { hposConversationId, errorCode: code, newChat: true })
+      throw this._bindingError(code === ERROR.UNKNOWN_ACTION ? ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED : code)
+    }
+    if (priorHigh && next.identity === priorHigh) {
+      // The tab never left the thread we started from — creation unverified.
+      this._diag('warn', DIAG.BINDING_VERIFY_FAILED, {
+        hposConversationId, errorCode: ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED, newChat: true,
+      })
+      throw this._bindingError(ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED)
+    }
+    if (priorTabId != null && next.tabId != null && Number(next.tabId) !== Number(priorTabId)) {
+      // Never bind a conversation that materialised on a different tab.
+      this._diag('warn', DIAG.BINDING_VERIFY_FAILED, {
+        hposConversationId, errorCode: ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED, newChat: true,
+      })
+      throw this._bindingError(ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED)
+    }
+    const created = { ...next, tabId: next.tabId != null ? next.tabId : priorTabId }
+    this._diag('info', DIAG.BINDING_VERIFY_SUCCESS, { hposConversationId, tabId: created.tabId, newChat: true })
+    return created
+  }
+
+  _mapNewChatError(err) {
+    const code = err && err.code
+    if (code === ERROR.DEEPSEEK_TAB_NOT_READY || code === ERROR.DEEPSEEK_TAB_UNAVAILABLE) {
+      return ERROR.DEEPSEEK_TAB_NOT_READY
+    }
+    if (code === ERROR.UNSUPPORTED_PAGE) return ERROR.UNSUPPORTED_PAGE
+    if (code === ERROR.BUSY) return ERROR.BUSY
+    if (code === ERROR.BRIDGE_DISCONNECTED || code === ERROR.DISCONNECTED || code === ERROR.NOT_AVAILABLE || code === ERROR.BRIDGE_TIMEOUT) {
+      return ERROR.BRIDGE_DISCONNECTED
+    }
+    return ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED
   }
 
   _ensureBridgeListen() {

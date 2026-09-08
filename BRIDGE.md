@@ -134,7 +134,7 @@ Chip click = dubara detect (in-flight request ko overwrite nahi karta).
 
 ## Protocol allowlist (0.7.0)
 
-Page → extension requests: `PING`, `DS_STATUS`, `DS_SEND`, `DS_STOP`, `DS_IDENTITY`.
+Page → extension requests: `PING`, `DS_STATUS`, `DS_SEND`, `DS_STOP`, `DS_IDENTITY`, `DS_NEW_CHAT`.
 
 Connector events: `RESPONSE_START`, `RESPONSE_DELTA`, `RESPONSE_COMPLETE`, `ERROR`.
 
@@ -144,11 +144,19 @@ Connector events: `RESPONSE_START`, `RESPONSE_DELTA`, `RESPONSE_COMPLETE`, `ERRO
 
 `DS_SEND` may include `tabId` + `conversationId` so a bound chat cannot land on the wrong DeepSeek tab.
 
+`DS_NEW_CHAT` payload: `{ tabId, previousIdentity }`. The adapter clicks the normal visible **New chat** control on *that* tab, waits for the conversation identity to actually change (URL may not change instantly), and returns the new identity. If the identity cannot be verified → `DEEPSEEK_NEW_CONVERSATION_UNVERIFIED` and nothing is sent. Older extensions reject it as `UNKNOWN_ACTION`; HPOS maps that to `DEEPSEEK_NEW_CONVERSATION_UNVERIFIED` and does not send either.
+
 ---
 
 ## Conversation binding (Step 6)
 
-HPOS conversation A binds to the DeepSeek thread that is **visible on first send**. Later sends verify that identity. Mismatch → `DEEPSEEK_CONVERSATION_MISMATCH`, no send. Bindings live in `localStorage['hpos.deepseek.bindings']`, not in transcripts. No cookies/tokens.
+An HPOS conversation binds to its **own** DeepSeek conversation:
+
+- **First send on a genuinely new HPOS chat** (no binding): `DS_IDENTITY` picks the DeepSeek tab → `DS_NEW_CHAT` clicks the visible **New chat** control there → the adapter waits for the identity change (`newChatWaitMs`) and re-reads it. Verified == identity differs from the thread that was open, or the page was already on a fresh home/new-chat state. Only then is the binding persisted (`hpos.deepseek.bindings`) and the message sent. If verification fails → `DEEPSEEK_NEW_CONVERSATION_UNVERIFIED`, the old state is untouched, and **the message is not sent**.
+- **Existing bound chat**: the stored thread identity is re-verified against the open tab(s); mismatch → `DEEPSEEK_CONVERSATION_MISMATCH`, no send. No new DeepSeek chat is created.
+- DeepSeek assigns the real thread id only after the first message, so a first-time binding can be the low-confidence “new chat” state; after the send it upgrades low→high on the same tab (existing Step 6 rule).
+
+Binding order is always: create → detect → verify → persist → send. Old conversations never silently rebind; deleting a chat deletes its binding. No cookies/tokens.
 
 ---
 
@@ -238,9 +246,26 @@ Config: `extension/adapters/deepseek.config.js`
 - `button[aria-label="Stop"]` / `停止` (visible + enabled). Nahi mila to stop fail — reload nahi.
 
 **Assistant text:**
-- pinned `.ds-markdown` / `[class*="ds-markdown"]` `innerText`
-- naya node pehle; warna last node jiska text `beforeText` se alag
+- observer pins the **`.ds-message` turn row** (config `message:`), so a DeepThink turn that contains both a think block and an answer block is treated as one turn
+- final answer (preferred): `.ds-assistant-message-main-content` / `[class*="ds-assistant-message-main-content"]` (config `answer:`)
+- fallback: `.ds-markdown` / `[class*="ds-markdown"]` nodes **not inside** a thinking container
+- DeepThink reasoning: `.ds-think-content` / `[class*="ds-think-content"]` (config `thinking:`) — tracked internally only; **never** emitted as a delta and never completes a response
 - sirf visible transcript, cookies/localStorage nahi
+
+**DeepThink (response model):**
+
+Internally the turn is split into `{ reasoningText, answerText, phase }`:
+
+- THINKING — `.ds-think-content` is changing; HPOS deltas pause (bubble stays on “thinking”)
+- ANSWERING — final-answer text streams as normal `RESPONSE_DELTA` snapshots
+- COMPLETE — `RESPONSE_COMPLETE` fires only when **answer text exists**, it stayed stable for `stableMs`, and generation ended (no Stop control)
+
+Thinking mutations count as activity (they reset the first-token timeout) but **can never** complete the response. If generation ends and no final answer appears within `thinkAnswerGapMs` (30s), the adapter reports `RESPONSE_NOT_DETECTED` (“Thinking finished without a final answer”) instead of falsely completing with reasoning text. Normal (DeepThink OFF) mode is untouched.
+
+**New chat control:**
+- config `newChat:` — `[data-testid="new-chat"]`, `button/[role="button"][aria-label*="New chat"]`, `a[href="/a/chat"]`
+- exact text fallback (`newChatText:`): “New chat” / “新对话” / “开启新对话” among visible controls
+- the adapter waits for the real navigation/identity change (`newChatWaitMs` / `newChatPollMs`); it never invents a conversation id
 
 **Observe root:** `.ds-scroll-area`, `main`, warna `document.body`
 
@@ -313,6 +338,34 @@ Stores (`hpos.conversations`, `hpos.deepseek.bindings`) have explicit `version: 
 
 **Requires real Chrome/Edge + logged-in DeepSeek session.** Not run in this workspace. Do not treat fixtures as a live pass.
 
+**Test A — New Chat (binding isolation, not yet run against live DeepSeek):**
+
+1. Open HPOS.
+2. Open a logged-in DeepSeek tab.
+3. Create/send in HPOS Chat A.
+4. Confirm DeepSeek has Thread A.
+5. Click HPOS New Chat.
+6. Send a different message.
+7. Confirm DeepSeek moved to a NEW Thread B (sidebar shows a fresh conversation; Thread A untouched).
+8. Confirm HPOS Chat B receives B's response.
+9. Switch back to Chat A.
+10. Send another message.
+11. Confirm it goes to Thread A (Chat B / Thread B untouched).
+12. If New chat creation cannot be verified (e.g. blocked UI): the message is NOT sent and the chip reads *DeepSeek could not start a new conversation.*
+
+**Test B — DeepThink (final answer, not yet run against live DeepSeek):**
+
+1. Open/create a new HPOS chat.
+2. Enable DeepThink in DeepSeek's normal UI (the DeepThink switch next to the composer).
+3. Send a prompt from HPOS.
+4. Observe DeepSeek thinking. HPOS bubble stays on “thinking” — reasoning text must NOT appear in it.
+5. Wait for the final answer.
+6. Confirm HPOS displays the FINAL answer only.
+7. Confirm exactly one assistant bubble (no duplicate).
+8. Confirm completion happens after the final answer, NOT during thinking (chip leaves “Streaming” only at the end).
+
+**Regression checks:**
+
 1. HPOS connects (Browser connected).
 2. DeepSeek is detected (DeepSeek ready / Bound).
 3. Send a message.
@@ -342,7 +395,7 @@ Stores (`hpos.conversations`, `hpos.deepseek.bindings`) have explicit `version: 
 - Login session extension nahi chhutaati — browser ka existing session.
 - Selectors UI change par toot sakte hain; config file alag rakhi hai.
 - Streaming DeepSeek ke DOM update frequency par depend karti hai. Fake tokens nahi.
-- Reasoning/think blocks agar `.ds-markdown` hon to text mein aa sakte hain.
+- DeepThink reasoning (`.ds-think-content`) HPOS bubble mein nahi aata; final answer hi aata hai.
 - Prompt cap 8000 chars; observed reply cap 100k chars.
 - Arena iframe preview mein extension auto-inject nahi.
 - Koi API call DeepSeek servers pe HPOS/extension se nahi (page khud karti hai, jaise user type kare).

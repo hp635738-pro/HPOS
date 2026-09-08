@@ -271,6 +271,40 @@ async function handleDsSend(message, hposTabId) {
   })
 }
 
+async function handleDsNewChat(message) {
+  var packed = P.pickNewChatPayload ? P.pickNewChatPayload(message.payload) : {}
+  var wantTab = typeof packed.tabId === 'number' ? packed.tabId : null
+  var tab = await pickDeepSeekTab(wantTab, { strict: wantTab != null })
+  if (!tab || tab.id == null) {
+    return fail(
+      message.requestId,
+      message.action,
+      P.ERROR.DEEPSEEK_TAB_NOT_READY,
+      'DeepSeek tab is not ready',
+    )
+  }
+  var res = await askTab(tab.id, {
+    channel: P.CHANNEL,
+    type: P.TYPE.REQUEST,
+    action: P.ACTION.DS_NEW_CHAT,
+    requestId: message.requestId,
+    payload: packed,
+  })
+  if (!res || res.success === false) {
+    var err = readError(
+      res,
+      P.ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED || P.ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED,
+      'New conversation could not be verified',
+    )
+    return fail(message.requestId, message.action, err.code, err.message)
+  }
+  var body = res.payload || {}
+  if (typeof body !== 'object') body = {}
+  body.tabId = tab.id
+  D.info('DEEPSEEK_TAB_SELECTED', { tabId: tab.id, newChat: true })
+  return P.makeResponse(message.requestId, message.action, true, body)
+}
+
 async function handleDsStop(message) {
   var packed = P.pickStopPayload ? P.pickStopPayload(message.payload) : { messageId: '' }
   var wantTab = inflight && inflight.tabId != null ? inflight.tabId : null
@@ -488,6 +522,18 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (message.action === P.ACTION.DS_STOP) {
       handleDsStop(message).then(sendResponse).catch(function () {
         sendResponse(fail(message.requestId, message.action, P.ERROR.STOP_NOT_AVAILABLE, 'DeepSeek Stop control not found'))
+      })
+      return true
+    }
+
+    if (message.action === P.ACTION.DS_NEW_CHAT) {
+      handleDsNewChat(message).then(sendResponse).catch(function () {
+        sendResponse(fail(
+          message.requestId,
+          message.action,
+          P.ERROR.DEEPSEEK_NEW_CONVERSATION_UNVERIFIED || P.ERROR.DEEPSEEK_CONVERSATION_UNVERIFIED,
+          'New conversation could not be verified',
+        ))
       })
       return true
     }
