@@ -60,6 +60,20 @@ export function httpJson(method, { host = '127.0.0.1', port, path, headers = {},
   })
 }
 
+/**
+ * True while `pid` exists. EPERM counts as alive (we may not signal it, but it
+ * is running) — same rule endpoints.js uses for the endpoint-file liveness.
+ */
+export function pidAlive(pid) {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return Boolean(err && err.code === 'EPERM')
+  }
+}
+
 /** Poll fn until truthy or timeout. Returns the last value. */
 export async function waitFor(fn, { timeoutMs = 3000, intervalMs = 20 } = {}) {
   const deadline = Date.now() + timeoutMs

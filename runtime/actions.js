@@ -1,24 +1,28 @@
 /**
- * RPC action allowlist + handlers (M1).
+ * RPC action allowlist + handlers (M1 — Step 2).
  *
  * Only these actions exist on the runtime transport:
  *
  *   PING          → PONG           liveness + protocol version
  *   RT_STATUS     → runtime status (+ per-task record when taskId given)
- *   RT_TASK_RUN   → enqueues a stub task, returns { taskId, status }
+ *   RT_TASK_RUN   → enqueues a task on the supervised executor, returns { taskId, status }
  *   RT_TASK_STOP  → cancels an active task
  *
- * Everything else — including bridge actions (DS_SEND, DS_STATUS, ...)
- * and obvious attacks (EVAL, SCRAPE, GET_COOKIES) — is rejected with
- * UNKNOWN_ACTION. Same discipline as the browser bridge allowlist.
+ * Everything else — including bridge actions (DS_SEND, DS_STATUS, ...),
+ * anything that smells like a shell (`EVAL`, `EXEC`, `SPAWN`, `RUN_SHELL`)
+ * and the obvious attacks (SCRAPE, GET_COOKIES) — is rejected with
+ * UNKNOWN_ACTION. Same discipline as the browser bridge allowlist: there is no
+ * action that takes a command, a path, a URL or a program name.
  *
- * Payload handling follows the bridge's pick*Payload convention:
- * whitelist the fields, coerce/trim, drop the rest. Unknown input never
- * reaches a handler unexamined.
+ * Payload handling follows the bridge's pick*Payload convention: whitelist the
+ * fields, coerce/trim, drop the rest. Unknown input never reaches a handler
+ * unexamined — which is why `RT_TASK_RUN` cannot select an execution mode or a
+ * timeout below the configured floor.
  */
 
 import { ENGINE, ERROR, VERSION, makeResponse, rtError } from './protocol.js'
 import { isValidTaskId, MAX_DURATION_MS, DEFAULT_DURATION_MS } from './tasks.js'
+import { LIMIT_DEFAULTS, isPublicTimeoutAllowed, summarizeCapabilities } from './limits.js'
 
 export const ACTION = {
   PING: 'PING',
@@ -36,7 +40,7 @@ export function isAllowedRtAction(action) {
 const NOTE_MAX = 200
 const SERVICE_MAX = 32
 
-function pickTaskRunPayload(payload) {
+function pickTaskRunPayload(payload, limits = LIMIT_DEFAULTS) {
   const raw = payload && typeof payload === 'object' ? payload : {}
 
   const serviceRaw = raw.service
@@ -52,9 +56,25 @@ function pickTaskRunPayload(payload) {
     durationMs = n
   }
 
+  /* Per-task timeout, validated against the daemon's configured window: a
+     caller can shorten or lengthen a run but can never make it unbounded. */
+  let timeoutMs = limits.defaultTimeoutMs
+  if (raw.timeoutMs != null) {
+    const n = Number(raw.timeoutMs)
+    if (!isPublicTimeoutAllowed(n, limits)) {
+      throw rtError(
+        ERROR.INVALID_PAYLOAD,
+        `timeoutMs must be an integer between ${limits.minTimeoutMs} and ${limits.maxTimeoutMs}`,
+      )
+    }
+    timeoutMs = n
+  }
+
   const note = typeof raw.note === 'string' ? raw.note.slice(0, NOTE_MAX) : null
 
-  return { service, durationMs, note }
+  /* The returned object is the whole surface: there is no `mode`, `command`,
+     `argv`, `cwd`, `env` or `path` a caller can reach, whatever they send. */
+  return { service, durationMs, timeoutMs, note }
 }
 
 function pickTaskStopPayload(payload) {
@@ -79,12 +99,15 @@ function pickStatusPayload(payload) {
 }
 
 /**
- * Build the RPC dispatcher. `tasks` is the task registry; `startedAt`
- * and `log` are for status/diagnostics. Returns handleRpc(envelope) →
- * response envelope (never throws).
+ * Build the RPC dispatcher. `tasks` is the task registry; `startedAt` and
+ * `log` are for status/diagnostics; `limits`/`capabilities` describe what the
+ * executor will and will not enforce, so a client can see the real bounds
+ * before it asks for a task. Returns handleRpc(envelope) → response envelope
+ * (never throws).
  */
-export function createRpcHandler({ tasks, startedAt = Date.now(), log } = {}) {
+export function createRpcHandler({ tasks, startedAt = Date.now(), log, limits, capabilities = null } = {}) {
   const warn = log && log.warn ? (event, meta) => log.warn(event, meta) : () => {}
+  const bounds = limits || (tasks && tasks.limits) || LIMIT_DEFAULTS
 
   const handlers = {
     [ACTION.PING]: () => ({
@@ -104,7 +127,29 @@ export function createRpcHandler({ tasks, startedAt = Date.now(), log } = {}) {
         services: tasks.serviceNames,
         tasks: tasks.counters(),
         recent: tasks.list(),
+        /* Executor facts: the bounds a client must respect, plus live
+           processes. Capability notes are strings/booleans — never the
+           environment, never paths that could be probed for privilege. */
+        executor: {
+          model: 'child-process',
+          executesInDaemon: false,
+          maxActive: bounds.maxActive,
+          limits: {
+            defaultTimeoutMs: bounds.defaultTimeoutMs,
+            minTimeoutMs: bounds.minTimeoutMs,
+            maxTimeoutMs: bounds.maxTimeoutMs,
+            killGraceMs: bounds.killGraceMs,
+            maxOutputBytes: bounds.maxOutputBytes,
+            maxOldSpaceMb: bounds.maxOldSpaceMb,
+          },
+          /* Optional on a bare registry: an older/embedded task source that
+             has no supervisor view still answers status correctly. */
+          processes: typeof tasks.processes === 'function' ? tasks.processes() : [],
+          stats: typeof tasks.processStats === 'function' ? tasks.processStats() : null,
+        },
+        capabilities,
       }
+      if (capabilities) out.capabilityNotes = summarizeCapabilities(capabilities)
       if (taskId) {
         const task = tasks.get(taskId)
         if (!task) throw rtError(ERROR.TASK_NOT_FOUND, `Unknown taskId: ${taskId}`)
@@ -114,7 +159,7 @@ export function createRpcHandler({ tasks, startedAt = Date.now(), log } = {}) {
     },
 
     [ACTION.RT_TASK_RUN]: (payload) => {
-      const spec = pickTaskRunPayload(payload)
+      const spec = pickTaskRunPayload(payload, bounds)
       if (!tasks.services[spec.service]) {
         throw rtError(
           ERROR.UNKNOWN_SERVICE,

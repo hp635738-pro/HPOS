@@ -27,7 +27,8 @@ export const TYPE = {
 }
 
 /**
- * Runtime error codes. Transport-level codes (RT_UNAUTHORIZED,
+ * Runtime error codes (M1 Step 2 adds RT_EXECUTOR_UNAVAILABLE).
+ * Transport-level codes (RT_UNAUTHORIZED,
  * RT_INVALID_REQUEST) are returned by the HTTP layer; RPC-level codes
  * travel inside a well-formed response envelope with success: false.
  */
@@ -44,6 +45,8 @@ export const ERROR = {
   QUEUE_FULL: 'RT_QUEUE_FULL',
   TASK_NOT_FOUND: 'RT_TASK_NOT_FOUND',
   TASK_NOT_CANCELABLE: 'RT_TASK_NOT_CANCELABLE',
+  /* the executor refused the task before a child existed (no in-daemon fallback) */
+  EXECUTOR_UNAVAILABLE: 'RT_EXECUTOR_UNAVAILABLE',
 }
 
 const ID_RE = /^[A-Za-z0-9._:-]{8,80}$/
