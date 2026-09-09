@@ -86,6 +86,70 @@ for (const [code, expected, label] of [
   controller.stop()
 }
 
+/* ---------------------------------------------------------------------------
+   Browser "Illegal invocation" regression.
+
+   The runtime connection controller captures the native setInterval /
+   clearInterval as its defaults and invokes them through this instance
+   (this._setInterval(...) in start()). The browser's timer functions are
+   receiver-brand-checked Window natives: calling them as a method of the
+   controller throws `TypeError: Illegal invocation`, which surfaced as a
+   blank screen (RuntimeConnectionController.start -> RuntimeActivityController
+   .start -> useRuntimeActivity). The fix binds the timers to globalThis so the
+   receiver is always correct. Node's own timers tolerate a wrong receiver, so
+   a browser-native-shaped brand-check is used to lock the exact failure.
+   ------------------------------------------------------------------------ */
+
+/* Default/native-timer path: the controller is built with the real platform
+   timers (no injection) exactly as the browser singleton is, and must start,
+   run its authenticated probe, and stop cleanly. */
+{
+  let probeCalls = 0
+  const bridge = { probe: async () => { probeCalls += 1; return { ping: {}, status: {} } } }
+  const controller = new RuntimeConnectionController({ bridge, pollMs: 60000 })
+  controller.onChange(() => {})
+  await controller.start()
+  assert(probeCalls === 1, 'default timer path: initial lifecycle check runs once')
+  assert(controller.getSnapshot().status === RUNTIME_CONNECTION_STATE.CONNECTED,
+    'default timer path: authenticated probe connects')
+  controller.stop()
+  controller.stop() /* double-stop must not throw on the default timer path */
+  assert(true, 'default timer path: start/stop with native timers does not throw')
+}
+
+/* Brand-checked timer path that mirrors the browser's native Window timers.
+   A brand-checked function only accepts the global object as `this`; invoked
+   as a method of the controller (pre-fix) it throws Illegal invocation. */
+{
+  const ids = { n: 0 }
+  const brandCheckedSetInterval = function (fn) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation')
+    ids.n += 1
+    const id = ids.n
+    // Mimic the real behaviour only enough to be scheduled+cleared.
+    return { id, fn }
+  }
+  const brandCheckedClearInterval = function (handle) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation')
+    if (handle && typeof handle.fn === 'function') {
+      /* A no-op clear: this test verifies the receiver, not real timer firing. */
+    }
+  }
+  const bridge = { probe: async () => ({ ping: {}, status: {} }) }
+  const controller = new RuntimeConnectionController({
+    bridge,
+    pollMs: 60000,
+    setIntervalFn: brandCheckedSetInterval,
+    clearIntervalFn: brandCheckedClearInterval,
+  })
+  await controller.start()
+  assert(controller._timer && controller._timer.id === 1,
+    'brand-checked timer: start schedules the poller without Illegal invocation')
+  controller.stop()
+  assert(controller._timer === null,
+    'brand-checked timer: stop clears the poller without Illegal invocation')
+}
+
 if (failed) {
   console.error(`\n${failed} runtime connection test(s) failed`)
   process.exit(1)
