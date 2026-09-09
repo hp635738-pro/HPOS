@@ -181,7 +181,8 @@ try {
     assert(JSON.stringify(Object.keys(partial).sort()) === JSON.stringify(Object.keys(initialLinuxState()).sort()),
       'and the record always has exactly the documented page-side shape')
     for (const key of Object.keys(partial)) {
-      assert(!/dir|path|cwd|command|output/.test(key), `the page record has no "${key}" field`)
+      assert(!/dir|path|cwd|command|output|env|token/.test(key),
+        `no page-side field is path-, command- or credential-shaped (${key})`)
     }
 
     const gone = readLinuxCapability({ linux: linuxUnavailable })
