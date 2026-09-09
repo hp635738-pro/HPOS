@@ -28,7 +28,7 @@ Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke step
 
 Conversations local `localStorage` mein persist hoti hain — koi backend/API nahi.
 
-### Local runtime (M1 Step 3)
+### Local runtime (M1 Steps 3–4)
 
 The optional local `hpos-runtime` daemon is connected only during Vite development:
 
@@ -38,18 +38,28 @@ npm start       # listens on 127.0.0.1:5190 and writes ~/.hpos/runtime/endpoints
 ```
 
 With `npm run dev` running from the project root, the browser uses the fixed
-same-origin routes `/hpos-runtime/health` and `/hpos-runtime/rpc`. The Vite
-development proxy reads the local endpoint file, keeps the target on
-`127.0.0.1`, and adds `X-HPOS-Token` server-side. `LocalRuntimeBridge` never
-receives, stores, or sends that credential. `Runtime connected` means
-authenticated `PING` and `RT_STATUS` both succeeded; `/health` is liveness only.
+same-origin routes `/hpos-runtime/health`, `/hpos-runtime/rpc` and (Step 4)
+`/hpos-runtime/events` (SSE). The Vite development proxy reads the local
+endpoint file, keeps the target on `127.0.0.1`, and adds `X-HPOS-Token`
+server-side. `LocalRuntimeBridge` never receives, stores, or sends that
+credential. `Runtime connected` means authenticated `PING` and `RT_STATUS` both
+succeeded; `/health` is liveness only.
 
-The Step 3 status chip is intentionally small and polls conservatively. The
-runtime task surface remains a fixed stub smoke path; there is no arbitrary task
-or shell UI.
+Step 4 adds observability only: the runtime publishes allowlisted lifecycle
+events (`runtime.*`, `task.*`) over the SSE stream, and the header chip opens a
+small **Runtime Activity** popover — connection/stream state, running tasks with
+a Stop action for known active ids, bounded recent tasks, counters, and safe
+process metrics. It is deliberately **not a terminal**: no commands, output,
+environment, credentials or filesystem internals are shown or transmitted. Event
+history is a bounded in-memory ring (never written to disk). The runtime task
+surface remains a fixed stub smoke path; there is no arbitrary task or shell UI.
+
+Details: `runtime/README.md` (`/events`, event types, history/reconnect,
+metrics availability, Activity UI non-goals).
 
 ```bash
-npm test        # bridge, runtime-connection, proxy, and storage checks
+npm test        # bridge, runtime-connection, runtime-event-stream, runtime-activity,
+                # proxy, and storage checks (root) + `cd runtime && npm test`
 ```
 
 ---

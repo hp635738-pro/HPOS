@@ -13,15 +13,21 @@ behind the same registry boundary — the existing BrowserBridge /
 DeepSeekConnector / extension are untouched and remain the browser path.
 
 ```
-HPOS UI → LocalRuntimeBridge → Vite dev proxy
-   │  same hpos-bridge envelopes; credential stays on the dev host
+HPOS UI ── LocalRuntimeBridge ──▶ Vite dev proxy        (RPC: POST /hpos-runtime/rpc)
+   │   same hpos-bridge envelopes; credential stays on the dev host
    ▼
 hpos-runtime daemon  ── 127.0.0.1 only, origin-allowlisted CORS
    ├── GET  /health   liveness + version, no secrets
    ├── POST /rpc      authenticated RPC (envelope in/out)
+   ├── GET  /events   authenticated SSE event stream (Step 4)
+   ├── event bus       bounded in-memory history; registry publishes here
    ├── task registry   QUEUED → RUNNING → COMPLETE | FAILED | CANCELLED
    └── process supervisor
          └── child_process: node runner.js   (one per task, own workspace)
+
+HPOS UI ── RuntimeEventStream (EventSource) ──▶ Vite dev proxy   (GET /hpos-runtime/events)
+                the proxy injects the credential on the dev host; the browser
+                never holds it and it is never in the URL
 ```
 
 ## Architecture: the daemon supervises, the child executes
@@ -129,6 +135,106 @@ Responses are envelopes too (`success`, `payload` or `error: {code, message}`,
 size, content-type) are flat `{ error: { code, message } }` with `4xx`.
 
 Body must be `application/json`, capped at ~264 KB.
+
+### `GET /events`
+
+Authenticated Server-Sent Events stream (Step 4) — observability only.
+
+- Requires the **same** `X-HPOS-Token` header as `/rpc` (timing-safe
+  comparison). The token is **never** accepted in the URL/query string, and
+  the browser never holds it: in dev, `EventSource` connects to the
+  same-origin route `/hpos-runtime/events` and the Vite proxy injects the
+  header server-side, exactly like `/rpc`.
+- CORS behaves exactly like `/rpc`: origin-allowlisted, `Vary: Origin`, never
+  `*`. A request with no/foreign `Origin` gets no CORS headers.
+- SSE headers: `Content-Type: text/event-stream; charset=utf-8`,
+  `Cache-Control: no-cache, no-transform`, `Connection: keep-alive`.
+- The daemon writes a `: …` comment heartbeat every 15 s so proxies/browsers
+  cannot mistake a quiet stream for a dead one (test-tunable).
+- The number of simultaneous event clients is **bounded** (`maxEventClients`,
+  default 12); beyond it a new client is refused with
+  `503 RT_EVENTS_BUSY` instead of accumulating unbounded sockets.
+- Disconnected clients are removed immediately (socket close), and the
+  heartbeat stops when the last client leaves.
+
+Each SSE frame is an event envelope (see *Runtime events* below):
+
+```text
+id: 17
+data: {"channel":"hpos-runtime-events","id":17,"type":"task.completed","ts":…,"taskId":"task-…","payload":{…}}
+```
+
+## Runtime events (M1 Step 4)
+
+A small **explicit event allowlist** with a stable envelope. Events are how the
+UI knows *what the invisible runtime is doing*; they deliberately contain no
+commands, no paths, no output, no environment and no credentials.
+
+Envelope (JSON, one per SSE `data:` line):
+
+```json
+{ "channel": "hpos-runtime-events", "id": 17, "type": "task.completed", "ts": 1720000000000, "taskId": "task-…", "payload": { "taskId": "task-…", "service": "stub", "durationMs": 42 } }
+```
+
+`channel` is always `hpos-runtime-events`; `id` is a strictly increasing
+integer (used for `Last-Event-ID` and client deduplication); `ts` is a
+timestamp; `taskId` appears on task events only; `payload` is allowlisted per
+type — every other input field is dropped before the event exists.
+
+| Type | Payload | Meaning |
+| --- | --- | --- |
+| `runtime.started` | `{ pid, version }` | the daemon finished starting |
+| `runtime.stopped` | `{ reason: "shutdown" \| … }` | the daemon is stopping |
+| `runtime.status` | `{ status, pid, uptimeMs, tasks{…}, active[…], metrics{…} }` | snapshot/counters/metrcis |
+| `task.queued` | `{ taskId, service }` | task admitted to the queue |
+| `task.started` | `{ taskId, service }` | a supervised child was spawned |
+| `task.completed` | `{ taskId, service, durationMs }` | child exited 0 |
+| `task.failed` | `{ taskId, service, kind, exitCode }` | non-timeout failure |
+| `task.cancelled` | `{ taskId, service, reason: "stop" \| "shutdown" }` | cancelled (user or shutdown) |
+| `task.timeout` | `{ taskId, service, timeoutMs }` | the terminal event for a TIMEOUT failure |
+
+Failure `kind` is drawn from the same closed set the supervisor records
+(`NONZERO_EXIT`, `SPAWN_FAILED`, `TERMINATED`, `RUNNER_FAILURE`,
+`WORKSPACE_ERROR`, `CAPACITY`, `INTERNAL`, …). Messages that could carry a
+path are **not** published.
+
+**Exactly-once terminals.** A task emits one terminal event — `completed`,
+`cancelled`, or `timeout`/`failed` — and never more than one. The registry
+guards the transition, and a late child-process outcome (the kill settling
+after a cancel, a slow exit after a timeout) can never produce a second
+terminal event; the tests assert this.
+
+**History/reconnect.** The bus keeps only a **bounded in-memory** recent-event
+ring (default 128 events, configurable) — nothing is written to disk and the
+buffer cannot grow without a bound.
+
+- A new client receives the buffered snapshot, then a fresh `runtime.status`
+  convergence event with current counters/active tasks/metrics.
+- `Last-Event-ID` is honoured when the requested history is still in the
+  buffer (only newer events are replayed). When the requested history is no
+  longer available the client simply gets the safe `runtime.status` resync —
+  never an error and never a fabricated history.
+- The browser client replays through the same path on reconnect and
+  deduplicates by event id, so overlaps are harmless.
+
+**Publisher boundary.** Task code publishes through `runtime/events.js` (an
+event bus); the registry never knows about HTTP or SSE clients. The SSE
+transport subscribes to the bus. `runtime.status` is produced by the daemon
+from allowlisted counters + safe process metrics; it is never a serialization
+of internal task records.
+
+## Process metrics (Step 4)
+
+`runtime.status` payloads include a `metrics` object with **only** the daemon's
+own safe numbers: `pid`, `cpu: { userUs, systemUs }` and
+`memory: { rssBytes, heapUsedBytes, heapTotalBytes }` (all from
+`process.cpuUsage()` / `process.memoryUsage()`). No process lists, no command
+lines, no environment, no paths, no network state.
+
+A metric is reported as `null` (UI shows “unavailable”) when it cannot be
+measured reliably on the current platform — the daemon never invents a value.
+CPU/memory above are process-wide daemon values; per-child CPU/memory are not
+reported because they are not reliable cross-platform without extra tooling.
 
 ## Supported actions (allowlist — nothing else is executed)
 
@@ -301,7 +407,7 @@ required anywhere.
 - On clean shutdown the daemon deletes the file — but only if it still holds
   its own token.
 
-## Web UI integration (M1 Step 3)
+## Web UI integration (M1 Steps 3–4)
 
 During `npm run dev` from the repository root, Vite exposes only these
 same-origin development routes:
@@ -309,14 +415,42 @@ same-origin development routes:
 - `GET /hpos-runtime/health` — proxied to runtime `/health`; liveness only.
 - `POST /hpos-runtime/rpc` — proxied to runtime `/rpc`; the proxy reads the
   local endpoint file and injects `X-HPOS-Token` on the server side.
+- `GET /hpos-runtime/events` — proxied to runtime `/events` (SSE); same
+  server-side token injection, GET only, streaming passthrough.
 
-The proxy target is fixed to `127.0.0.1` and accepts only `/health` and `/rpc`;
+The proxy target is fixed to `127.0.0.1` and accepts only those three routes;
 it is not a generic forwarding endpoint. `src/lib/bridge/LocalRuntimeBridge.js`
 knows only those fixed browser routes, uses the existing HPOS envelope shape,
 and never receives the credential. Runtime status is `connected` only after an
 authenticated `PING` and `RT_STATUS`; a successful `/health` check cannot claim
 RPC connectivity. The header chip uses conservative polling and distinguishes
 `unknown`, `checking`, `connected`, `disconnected`, `unauthorized`, and `error`.
+
+### Runtime Activity UI (purpose and non-goals)
+
+The small **Runtime Activity** popover (open the header chip) shows what the
+invisible runtime is doing: connection state, live event-stream state, the
+current `Running` tasks (`taskId`, fixed `stub` service, `QUEUED`/`RUNNING`,
+with a **Stop** action for those known active task ids), a bounded `Recent`
+list of terminal tasks, basic counters, and safe process metrics
+(`pid`, `uptime`, active/queued counts, CPU and memory — `unavailable` when a
+platform cannot provide them reliably). Stop calls `RT_TASK_STOP` through the
+existing bridge for a task id already in the active set — never from raw user
+text — and the UI updates from server events/status, never by assuming the
+stop succeeded.
+
+**This Activity UI is deliberately NOT a terminal.** It shows no shell, no
+command strings, no raw process output, no environment variables, no
+credentials and no filesystem internals — by design, and because the runtime
+event payloads above cannot carry them. Its only job is answering *“what is
+the invisible HPOS runtime doing?”*, not *“give me a Linux terminal.”*
+
+Client-side, `RuntimeEventStream` (EventSource over `/hpos-runtime/events`)
+reconnects with conservative capped backoff, ignores malformed/unknown
+messages, deduplicates by event id, and cleans up listeners/timers on close.
+`RuntimeActivityController` keeps the bounded activity state; nothing about
+runtime activity is written to `localStorage` (it is live state, not
+conversation data).
 
 This is a development integration only. No production proxy or remote runtime
 deployment is defined in M1.
@@ -352,6 +486,15 @@ npm test
   transition, cancel-before-spawn (no process ever made), late-outcome cannot
   revive a cancelled task, counters, clamped timeouts on the record, snapshot
   immutability, refusal without a supervisor
+- `tests/events.test.mjs` — Step 4 event bus: envelope contract, event
+  allowlist (unknown types refused), payload sanitization (hostile fields never
+  reach an envelope), bounded history + eviction, `eventsAfter` replay /
+  stale-history semantics, subscriber isolation, per-client unpublished status
+- `tests/sse.test.mjs` — Step 4 SSE over real HTTP: `/events` auth (incl. token
+  never accepted in the query string), CORS/SSE headers, heartbeat, client-cap
+  refusal + disconnect cleanup, lifecycle event order, exactly-once terminal
+  events (cancel + timeout, incl. late child outcomes), `Last-Event-ID` replay,
+  stale-history resync, shutdown event
 - `tests/daemon.test.mjs` — full integration over real HTTP (ephemeral port):
   health, auth, PING/PONG, RT_STATUS incl. executor + capabilities, task
   run/stop/timeout over RPC, payload that tries to steer the executor, queue
@@ -380,6 +523,12 @@ npm test
   in-memory and bounded, and nothing survives a restart.
 - **Multi-user or remote access.** A single-user local daemon on loopback; the
   token is a same-machine secret, not an identity system.
+- **A terminal or shell surface.** The Runtime Activity UI answers “what is the
+  runtime doing?” — there is no UI, endpoint, action or event that accepts or
+  renders commands, output, env vars, cookies or filesystem internals.
+- **An event database.** The event history is a bounded in-memory ring; nothing
+  about runtime activity is persisted, and there is no replay of history older
+  than the buffer (a reconnect gets the safe status resync instead).
 
 ## File map
 
@@ -387,11 +536,14 @@ npm test
 runtime/
 ├── bin/hpos-runtime.js   CLI entrypoint
 ├── daemon.js             composition root: endpoint → limits → workspaces →
-│                         supervisor → registry → actions → transport → shutdown
-├── transport.js          HTTP surface (127.0.0.1, token, CORS allowlist, size caps)
+│                         supervisor → registry → event bus → actions → transport
+├── transport.js          HTTP surface (127.0.0.1, token, CORS, size caps, SSE)
+├── events.js             Step 4 event bus: allowlist + envelope + bounded history
+├── metrics.js            Step 4 safe process metrics (cpu/memory/pid or null)
 ├── actions.js            RPC allowlist + payload pickers
 ├── protocol.js           envelope contract, error codes
-├── tasks.js              task registry: state machine, admission, counters
+├── tasks.js              task registry: state machine, admission, counters,
+│                         publishes lifecycle events to the bus
 ├── supervisor.js         the process supervisor: spawn, watch, kill, tidy
 ├── runner.js             the child entrypoint (fixed mode table, no shell)
 ├── env.js                environment allowlist + scrubbing

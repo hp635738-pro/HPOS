@@ -24,11 +24,19 @@
  * Task records are plain, JSON-safe data. Process handles, timers and stdout
  * live in the supervisor and are never serialized into a response.
  *
+ * Observability (M1 — Step 4): when the registry is handed an event `bus`
+ * (runtime/events.js), it publishes task lifecycle events through that bus
+ * (queued → started → one terminal event exactly once). The registry never
+ * knows about HTTP/SSE clients — it only talks to the bus, whose payloads are
+ * allowlisted before an event exists. Without a bus everything behaves exactly
+ * as before; publishing failures are logged, never thrown.
+ *
  * No dependencies, Node 18+.
  */
 
 import { ERROR, rtError } from './protocol.js'
 import { LIMIT_DEFAULTS } from './limits.js'
+import { CANCEL_REASON, EVENT_TYPE } from './events.js'
 
 export const TASK_STATE = {
   QUEUED: 'QUEUED',
@@ -97,6 +105,8 @@ export function createTaskRegistry({
   limits = LIMIT_DEFAULTS,
   /* Test/embedding hook: widen the observable QUEUED window. */
   startDelayMs = START_DELAY_MS,
+  /* Step 4: optional event bus (see events.js). Absent → no events, no change. */
+  bus = null,
 } = {}) {
   /** taskId → { start, supervisorOwned } — timers stay out of the records. */
   const slots = new Map()
@@ -104,6 +114,21 @@ export function createTaskRegistry({
   const counters = { total: 0, completed: 0, cancelled: 0, failed: 0 }
   const debug = log && log.debug ? (event, meta) => log.debug(event, meta) : () => {}
   const warn = log && log.warn ? (event, meta) => log.warn(event, meta) : () => {}
+
+  /** Publish through the bus when one is present. Never throws. */
+  function publish(type, fields) {
+    if (!bus || typeof bus.publish !== 'function') return
+    try {
+      bus.publish(type, fields)
+    } catch (err) {
+      /* A publishing fault must never derail the task state machine. */
+      warn('event_publish_failed', {
+        type,
+        code: String(err && err.code ? err.code : err && err.name ? err.name : 'ERR'),
+      })
+    }
+  }
+
 
   function recordState(task, state, at = now()) {
     task.status = state
@@ -151,9 +176,10 @@ export function createTaskRegistry({
 
   /**
    * Move a task to a terminal state. Idempotent by construction: a task that
-   * already left the active set never changes state again.
+   * already left the active set never changes state again — which is also what
+   * guarantees a terminal event is emitted at most once per task.
    */
-  function finish(task, state, extra = null) {
+  function finish(task, state, extra = null, meta = {}) {
     if (TERMINAL_STATES.has(task.status)) return task
     clearStartTimer(task.taskId)
     recordState(task, state)
@@ -163,6 +189,33 @@ export function createTaskRegistry({
     else if (state === TASK_STATE.FAILED) counters.failed += 1
     if (extra) Object.assign(task, extra)
     debug('task_finished', { taskId: task.taskId, state, failure: task.failure ? task.failure.kind : null })
+
+    /* One allowlisted terminal event, derived from the record (never the raw
+       child outcome). A late child process cannot emit a second one because
+       finish() above already refused to touch a terminal task. */
+    const base = { taskId: task.taskId, service: task.service }
+    if (state === TASK_STATE.COMPLETE) {
+      publish(EVENT_TYPE.TASK_COMPLETED, {
+        ...base,
+        durationMs: Math.max(0, task.endedAt - (task.startedAt || task.createdAt)),
+      })
+    } else if (state === TASK_STATE.CANCELLED) {
+      publish(EVENT_TYPE.TASK_CANCELLED, {
+        ...base,
+        reason: meta.cancelReason || CANCEL_REASON.STOP,
+      })
+    } else {
+      const kind = (task.failure && task.failure.kind) || 'FAILED'
+      if (kind === 'TIMEOUT') {
+        publish(EVENT_TYPE.TASK_TIMEOUT, { ...base, timeoutMs: task.timeoutMs })
+      } else {
+        publish(EVENT_TYPE.TASK_FAILED, {
+          ...base,
+          kind,
+          exitCode: Number.isInteger(task.exitCode) ? task.exitCode : null,
+        })
+      }
+    }
     return task
   }
 
@@ -231,6 +284,7 @@ export function createTaskRegistry({
     if (slot.start.unref) slot.start.unref()
 
     debug('task_queued', { taskId: task.taskId, service, timeoutMs: task.timeoutMs })
+    publish(EVENT_TYPE.TASK_QUEUED, { taskId: task.taskId, service: task.service })
     return snapshot(task)
   }
 
@@ -268,6 +322,7 @@ export function createTaskRegistry({
        the record can never advertise a timeout that does not exist. */
     if (Number.isInteger(started.timeoutMs)) task.timeoutMs = started.timeoutMs
     debug('task_process_assigned', { taskId: task.taskId, pid: started.pid })
+    publish(EVENT_TYPE.TASK_STARTED, { taskId: task.taskId, service: task.service })
 
     started.done
       .then((outcome) => applyOutcome(task, outcome || {}))
@@ -345,7 +400,7 @@ export function createTaskRegistry({
       throw rtError(ERROR.TASK_NOT_CANCELABLE, `Task ${taskId} is already ${task.status}`)
     }
     const wasRunning = task.status === TASK_STATE.RUNNING
-    finish(task, TASK_STATE.CANCELLED)
+    finish(task, TASK_STATE.CANCELLED, null, { cancelReason: CANCEL_REASON.STOP })
     if (wasRunning && supervisor) {
       const res = supervisor.cancel(taskId)
       task.cancelNote = res && res.cancelled ? 'terminating' : res && res.reason ? res.reason : 'unknown'
@@ -379,21 +434,22 @@ export function createTaskRegistry({
   }
 
   /** Cancel everything without waiting (back-compatible sync path). */
-  function stopAll() {
+  function stopAll(cancelReason = CANCEL_REASON.STOP) {
     for (const t of tasks.values()) {
       if (!ACTIVE_STATES.has(t.status)) continue
       const wasRunning = t.status === TASK_STATE.RUNNING
-      finish(t, TASK_STATE.CANCELLED)
+      finish(t, TASK_STATE.CANCELLED, null, { cancelReason })
       if (wasRunning && supervisor) supervisor.cancel(t.taskId)
     }
   }
 
   /**
    * Daemon shutdown: cancel every task, then wait for the children to leave so
-   * no orphaned process outlives the daemon.
+   * no orphaned process outlives the daemon. Cancellations announce themselves
+   * with `task.cancelled` events whose reason is `shutdown`.
    */
   async function shutdown(opts = {}) {
-    stopAll()
+    stopAll(CANCEL_REASON.SHUTDOWN)
     if (supervisor && typeof supervisor.shutdown === 'function') {
       return supervisor.shutdown(opts)
     }

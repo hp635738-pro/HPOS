@@ -3,13 +3,17 @@
  *
  *   GET  /health  no auth, no secrets — liveness + version only
  *   POST /rpc     token auth via X-HPOS-Token header, JSON envelopes
+ *   GET  /events  token auth via X-HPOS-Token header, SSE event stream
  *
  * Security posture:
  *   - Binds to 127.0.0.1 only (enforced by the caller: server.listen(port, '127.0.0.1')).
  *   - The token is compared with timingSafeEqual; it is never logged,
- *     never echoed in responses, never accepted in URLs.
+ *     never echoed in responses, never accepted in URLs. /events accepts the
+ *     token in the header exactly like /rpc — never in the query string.
  *   - CORS is origin-allowlisted (local dev + Tauri origins), never '*'.
  *   - Body size is capped; only application/json is accepted on /rpc.
+ *   - SSE clients are bounded (maxEventClients), heartbeated, and removed the
+ *     moment their socket closes. No unbounded client accumulation.
  *
  * Response conventions:
  *   - Transport-level failures: flat { error: { code, message } } with 4xx.
@@ -42,9 +46,33 @@ export function isAllowedOrigin(origin) {
   return typeof origin === 'string' && ALLOWED_ORIGINS.has(origin)
 }
 
-export function createHttpServer({ token, onRpc, log, meta }) {
+/** Default SSE tuning — injectable via createHttpServer for tests. */
+export const SSE_DEFAULTS = Object.freeze({
+  HEARTBEAT_MS: 15000,
+  MAX_CLIENTS: 12,
+  RECENT_SNAPSHOT: 128,
+})
+
+export function createHttpServer({
+  token,
+  onRpc,
+  log,
+  meta,
+  /* Step 4: event bus handle — { subscribe, history, eventsAfter,
+     makeUnpublished }. When absent, /events answers 503. */
+  events = null,
+  eventHeartbeatMs = SSE_DEFAULTS.HEARTBEAT_MS,
+  maxEventClients = SSE_DEFAULTS.MAX_CLIENTS,
+}) {
   const debug = log && log.debug ? (event, m) => log.debug(event, m) : () => {}
   const warn = log && log.warn ? (event, m) => log.warn(event, m) : () => {}
+
+  const heartbeatMs = Number.isFinite(eventHeartbeatMs) && eventHeartbeatMs > 0
+    ? Math.floor(eventHeartbeatMs)
+    : SSE_DEFAULTS.HEARTBEAT_MS
+  const clientCap = Number.isInteger(maxEventClients) && maxEventClients > 0
+    ? maxEventClients
+    : SSE_DEFAULTS.MAX_CLIENTS
 
   function checkToken(header) {
     if (typeof header !== 'string' || header.length === 0) return false
@@ -67,6 +95,144 @@ export function createHttpServer({ token, onRpc, log, meta }) {
     }
     res.writeHead(status, headers)
     res.end(data)
+  }
+
+  /* ------------------------------------------------------------ SSE state */
+
+  /** Live SSE responses. Bounded by clientCap; never grows unbounded. */
+  const sseClients = new Set()
+  let heartbeatTimer = null
+  let busUnsub = null
+
+  function writeSseFrame(res, text) {
+    if (!res || res.destroyed || res.writableEnded) return false
+    try {
+      res.write(text)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function sseEventFrame(envelope) {
+    return `id: ${envelope.id}\ndata: ${JSON.stringify(envelope)}\n\n`
+  }
+
+  function dropSseClient(res) {
+    if (!sseClients.delete(res)) return
+    try { res.destroy() } catch { /* already gone */ }
+    if (sseClients.size === 0 && heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+  }
+
+  function broadcast(envelope) {
+    for (const res of sseClients) {
+      if (!writeSseFrame(res, sseEventFrame(envelope))) dropSseClient(res)
+    }
+  }
+
+  function ensureBus() {
+    if (busUnsub || !events || typeof events.subscribe !== 'function') return
+    busUnsub = events.subscribe((envelope) => broadcast(envelope))
+  }
+
+  function startHeartbeat() {
+    if (heartbeatTimer || sseClients.size === 0) return
+    heartbeatTimer = setInterval(() => {
+      if (sseClients.size === 0) {
+        clearInterval(heartbeatTimer)
+        heartbeatTimer = null
+        return
+      }
+      const nowIso = new Date().toISOString()
+      for (const res of sseClients) {
+        /* Comment frames keep intermediaries (and the browser) from deciding
+           the stream is dead. They carry no data. */
+        if (!writeSseFrame(res, `: hpos-runtime ${nowIso}\n\n`)) dropSseClient(res)
+      }
+    }, heartbeatMs)
+  }
+
+  /** Parse the SSE Last-Event-ID header. Invalid → null (fresh snapshot). */
+  function parseLastEventId(header) {
+    if (typeof header !== 'string' || header.length === 0) return null
+    const n = Number(header)
+    return Number.isInteger(n) && n > 0 ? n : null
+  }
+
+  function closeAllSseClients() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+    if (busUnsub) {
+      try { busUnsub() } catch { /* ignore */ }
+      busUnsub = null
+    }
+    for (const res of [...sseClients]) dropSseClient(res)
+  }
+
+  function handleEvents(req, res, origin) {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, flatError('METHOD_NOT_ALLOWED', 'Use GET for /events'), origin)
+      return
+    }
+    if (!checkToken(req.headers['x-hpos-token'])) {
+      warn('events_rejected', { reason: 'unauthorized' })
+      sendJson(res, 401, flatError('RT_UNAUTHORIZED', 'Missing or invalid token'), origin)
+      return
+    }
+    if (!events || typeof events.subscribe !== 'function') {
+      sendJson(res, 503, flatError('RT_EVENTS_UNAVAILABLE', 'The runtime event stream is not available'), origin)
+      return
+    }
+    if (sseClients.size >= clientCap) {
+      warn('events_rejected', { reason: 'client_cap', clients: sseClients.size })
+      sendJson(res, 503, flatError('RT_EVENTS_BUSY', 'Too many event stream clients'), origin)
+      return
+    }
+
+    const headers = {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    }
+    if (isAllowedOrigin(origin)) {
+      headers['Access-Control-Allow-Origin'] = origin
+      headers.Vary = 'Origin'
+    }
+    res.writeHead(200, headers)
+    res.write('retry: 4000\n\n')
+
+    sseClients.add(res)
+    ensureBus()
+    startHeartbeat()
+    debug('events_connected', { clients: sseClients.size })
+
+    /* Bounded replay + a fresh convergence status. The subscribe happened
+       first; everything between this tick and the replay below is still
+       delivered through the bus, and publish order is preserved because this
+       whole block is synchronous. */
+    const lastEventId = parseLastEventId(req.headers['last-event-id'])
+    let replay = typeof events.eventsAfter === 'function' ? events.eventsAfter(lastEventId) : []
+    if (replay == null) replay = []
+    if (typeof events.makeUnpublished === 'function') {
+      replay.push(events.makeUnpublished('runtime.status', {
+        ...(typeof events.statusFields === 'function' ? events.statusFields() : {}),
+        status: 'up',
+      }))
+    }
+    for (const envelope of replay) {
+      if (!writeSseFrame(res, sseEventFrame(envelope))) break
+    }
+
+    const cleanup = () => dropSseClient(res)
+    req.on('close', cleanup)
+    res.on('close', cleanup)
+    res.on('error', cleanup)
   }
 
   const server = createServer((req, res) => {
@@ -103,6 +269,13 @@ export function createHttpServer({ token, onRpc, log, meta }) {
         uptimeMs: Math.max(0, Date.now() - meta.startedAt),
         time: new Date().toISOString(),
       }, origin)
+      return
+    }
+
+    /* /events — authenticated SSE stream (Step 4). Token in the header only;
+       the query string is already stripped above and never inspected. */
+    if (path === '/events') {
+      handleEvents(req, res, origin)
       return
     }
 
@@ -166,6 +339,13 @@ export function createHttpServer({ token, onRpc, log, meta }) {
 
     sendJson(res, 404, flatError('NOT_FOUND', 'Unknown path'), origin)
   })
+
+  /* The daemon needs to force SSE clients closed on shutdown before it closes
+     the listener, otherwise server.close() would wait on open streams. */
+  server.sseClients = {
+    closeAll: closeAllSseClients,
+    size: () => sseClients.size,
+  }
 
   return server
 }
