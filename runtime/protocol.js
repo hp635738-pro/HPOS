@@ -47,6 +47,10 @@ export const ERROR = {
   TASK_NOT_CANCELABLE: 'RT_TASK_NOT_CANCELABLE',
   /* the executor refused the task before a child existed (no in-daemon fallback) */
   EXECUTOR_UNAVAILABLE: 'RT_EXECUTOR_UNAVAILABLE',
+  /* Step 5: the service asked for an execution backend that does not exist here.
+     Both codes are refusals — neither is a capability, and neither has a way in. */
+  UNKNOWN_EXECUTOR: 'RT_UNKNOWN_EXECUTOR',
+  WORKSPACE_REFUSED: 'RT_WORKSPACE_REFUSED',
 }
 
 const ID_RE = /^[A-Za-z0-9._:-]{8,80}$/

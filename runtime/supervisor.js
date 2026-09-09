@@ -30,7 +30,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import { ERROR, rtError } from './protocol.js'
-import { sanitizeEnv } from './env.js'
+import { sanitizeEnv, isSensitiveEnvName } from './env.js'
 import { createTaskWorkspace, disposeTaskWorkspace, measureWorkspace } from './workspace.js'
 import { TASK_STATE } from './tasks.js'
 
@@ -56,6 +56,10 @@ const MAX_INTERNAL_TIMEOUT_MS = 7200000
 const SHUTDOWN_WAIT_MS = 4000
 const STDERR_TAIL_CAP = 8192
 const EXCERPT_MAX = 240
+/* A launch plan is a fixed argv, so its size is a constant, not a variable:
+   an argv the supervisor cannot describe in one line is a bug, not a feature. */
+const MAX_PLAN_ARGV = 16
+const MAX_PLAN_ARG_LEN = 4096
 
 function bounded(n, min, max, fallback) {
   const v = Number(n)
@@ -165,6 +169,9 @@ export function createProcessSupervisor({
     spawned: 0, exited: 0, timedOut: 0, cancelled: 0,
     terminateRequested: 0, forceKilled: 0, spawnFailed: 0,
     workspacesRemoved: 0, workspacesRetained: 0, workspacesRefused: 0,
+    /* Step 5: plans a backend offered and the supervisor refused. A refusal is
+       never retried and never falls back onto the native path. */
+    plansRefused: 0, externalPlans: 0,
   }
 
   const debug = log && log.debug ? (e, m) => log.debug(e, m) : () => {}
@@ -174,12 +181,118 @@ export function createProcessSupervisor({
   /* ---------------------------------------------------------------- spawn */
 
   /**
-   * Spawn one supervised child for one task.
-   * Throws synchronously for rejections that happen *before* a child exists
-   * (capacity, bad id, workspace failure); after that every failure arrives
-   * through `done`, never as a rejection.
+   * The plan used when no backend is involved — the daemon's own path, byte for
+   * byte what Steps 1–4 spawned. Kept as a function so a backend plan and the
+   * native plan have one shape and one validator.
    */
-  function start({ taskId, mode = 'noop', durationMs = 0, timeoutMs, exitCode, bytes } = {}) {
+  function nativePlan({ timeout, ws }) {
+    /* Environment: allowlisted names only; the report is names-only too. */
+    const sanitized = sanitizeEnv(env, {
+      platform,
+      extra: { NO_COLOR: '1', HPOS_ENGINE: 'hpos-runtime' },
+    })
+    return {
+      executor: 'native',
+      argv: [execPath, ...heapArgs, runnerPath],
+      cwd: ws ? ws.dir : process.cwd(),
+      env: sanitized.env,
+      envReport: sanitized.report,
+      detached: useGroups,
+      timeoutMs: timeout,
+      maxOutputBytes,
+      selfLimitMs: timeout + killGraceMs + 5000,
+    }
+  }
+
+  /**
+   * Validate a plan handed over by a backend. A backend is internal code, so
+   * this is not a hostile-input filter — it is the guarantee that no backend,
+   * present or future, can turn the supervisor into a generic exec endpoint:
+   *
+   *   - the executable must be the daemon's own interpreter, and only that;
+   *   - argv is a short list of plain strings, so nothing task-chosen lands in
+   *     the process table;
+   *   - shell is never true, stdio is always three pipes;
+   *   - the cwd must be the workspace this supervisor just created for this
+   *     task (or the daemon's own, when there is none) — never a path from a
+   *     payload;
+   *   - the environment must be a flat string map with no sensitive name;
+   *   - output caps may shrink, never grow.
+   *
+   * A rejected plan is an ordinary synchronous refusal, exactly like a
+   * workspace refusal: no child is ever made.
+   */
+  function validatePlan(plan, { ws, executor, timeout }) {
+    if (!plan || typeof plan !== 'object') throw failWith(ERROR.INVALID_PAYLOAD, 'backend returned no plan', FAILURE.INTERNAL)
+    const argv = plan.argv
+    if (!Array.isArray(argv) || argv.length < 1 || argv.length > MAX_PLAN_ARGV) {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'plan argv must be a short fixed array', FAILURE.SPAWN_FAILED)
+    }
+    for (const arg of argv) {
+      const printable = typeof arg === 'string' && arg.length > 0 && arg.length <= MAX_PLAN_ARG_LEN
+        && !arg.includes('\u0000') && !arg.includes('\n') && !arg.includes('\r')
+      if (!printable) {
+        throw failWith(ERROR.INVALID_PAYLOAD, 'plan argv must be plain strings', FAILURE.SPAWN_FAILED)
+      }
+    }
+    if (argv[0] !== execPath) {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'a plan may only spawn the daemon interpreter', FAILURE.SPAWN_FAILED)
+    }
+    if (plan.shell === true) {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'a plan may not request a shell', FAILURE.SPAWN_FAILED)
+    }
+    if (plan.stdio != null && plan.stdio !== 'pipe') {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'a plan may only pipe stdio', FAILURE.SPAWN_FAILED)
+    }
+    const expectedCwd = ws ? ws.dir : process.cwd()
+    if (typeof plan.cwd !== 'string' || plan.cwd !== expectedCwd) {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'plan cwd must be the task workspace', FAILURE.WORKSPACE_ERROR)
+    }
+    if (!plan.env || typeof plan.env !== 'object' || Array.isArray(plan.env)) {
+      throw failWith(ERROR.INVALID_PAYLOAD, 'plan must carry an explicit environment', FAILURE.INTERNAL)
+    }
+    const cleanEnv = {}
+    for (const [name, value] of Object.entries(plan.env)) {
+      if (typeof name !== 'string' || name.length === 0 || name.length > 128) {
+        throw failWith(ERROR.INVALID_PAYLOAD, 'plan environment has a bad name', FAILURE.INTERNAL)
+      }
+      if (isSensitiveEnvName(name)) {
+        /* A secret-named variable never reaches a child, and never reaches a
+           log: the refusal carries the name and no value. */
+        throw failWith(ERROR.INVALID_PAYLOAD, `plan environment name "${name}" is not permitted`, FAILURE.INTERNAL)
+      }
+      if (typeof value !== 'string') {
+        throw failWith(ERROR.INVALID_PAYLOAD, 'plan environment values must be strings', FAILURE.INTERNAL)
+      }
+      cleanEnv[name] = value
+    }
+
+    return {
+      executor: typeof plan.executor === 'string' ? plan.executor.slice(0, 32) : executor,
+      argv: argv.slice(),
+      cwd: plan.cwd,
+      env: Object.freeze(cleanEnv),
+      envReport: plan.envReport && typeof plan.envReport === 'object'
+        ? {
+            keptCount: Number.isInteger(plan.envReport.keptCount) ? plan.envReport.keptCount : Object.keys(cleanEnv).length,
+            droppedCount: Number.isInteger(plan.envReport.droppedCount) ? plan.envReport.droppedCount : 0,
+          }
+        : { keptCount: Object.keys(cleanEnv).length, droppedCount: 0 },
+      detached: plan.detached === true,
+      timeoutMs: bounded(plan.timeoutMs, MIN_INTERNAL_TIMEOUT_MS, maxTimeoutMs, timeout),
+      maxOutputBytes: bounded(plan.maxOutputBytes, 1024, maxOutputBytes, maxOutputBytes),
+      selfLimitMs: bounded(plan.selfLimitMs, MIN_INTERNAL_TIMEOUT_MS, MAX_INTERNAL_TIMEOUT_MS, timeout + killGraceMs + 5000),
+    }
+  }
+
+  /**
+   * Spawn one supervised child for one task.
+   * `backend` (Step 5) may supply the launch plan; it may not supply anything
+   * else. Throws synchronously for rejections that happen *before* a child
+   * exists (capacity, bad id, workspace failure, refused plan); after that
+   * every failure arrives through `done`, never as a rejection.
+   */
+  function start({ taskId, mode = 'noop', durationMs = 0, timeoutMs, exitCode, bytes, backend = null } = {}) {
     if (typeof taskId !== 'string' || taskId.length === 0) {
       throw failWith(ERROR.INVALID_PAYLOAD, 'supervisor.start requires a taskId', FAILURE.INTERNAL)
     }
@@ -203,20 +316,52 @@ export function createProcessSupervisor({
       }
     }
 
-    /* Environment: allowlisted names only; the report is names-only too. */
-    const sanitized = sanitizeEnv(env, {
-      platform,
-      extra: { NO_COLOR: '1', HPOS_ENGINE: 'hpos-runtime' },
-    })
-    const cwd = ws ? ws.dir : process.cwd()
+    /* ---- launch plan ------------------------------------------------------
+       Steps 1–4 (no backend): the daemon's own native plan — its interpreter,
+       its heap flags, its runner, the task workspace as cwd, a scrubbed
+       environment. Step 5 (a backend is given): the backend supplies the plan
+       and the supervisor validates it before a process can exist. Either way
+       everything after this point — the spec on stdin, the timeout, the kill
+       chain, classification, cleanup — is identical, because it is the same
+       code. A backend can change *how* a child starts; it cannot change who
+       owns the lifecycle. */
+    let plan = null
+    try {
+      plan = backend && typeof backend.plan === 'function'
+        ? validatePlan(
+          backend.plan({
+            taskId,
+            mode,
+            durationMs: bounded(durationMs, 0, 600000, 0),
+            timeoutMs: timeout,
+            workspace: ws,
+          }),
+          { ws, executor: backend.name || 'backend', timeout },
+        )
+        : nativePlan({ timeout, ws })
+    } catch (err) {
+      if (ws) cleanupWorkspace(taskId, ws, 'plan-refused')
+      const kind = err && err.failureKind
+        ? err.failureKind
+        : err && err.code === ERROR.WORKSPACE_REFUSED
+          ? FAILURE.WORKSPACE_ERROR
+          : FAILURE.SPAWN_FAILED
+      stats.plansRefused += 1
+      warn('task_plan_refused', { taskId, executor: (backend && backend.name) || 'native', kind, code: String(err && err.code ? err.code : 'ERR') })
+      throw failWith(
+        ERROR.INVALID_REQUEST,
+        `The task launch plan was refused (${String(err && (err.reason || err.code) || 'invalid')})`,
+        kind,
+      )
+    }
 
     let child = null
     try {
-      child = spawnImpl(execPath, [...heapArgs, runnerPath], {
-        cwd,
-        env: sanitized.env,
+      child = spawnImpl(plan.argv[0], plan.argv.slice(1), {
+        cwd: plan.cwd,
+        env: plan.env,
         stdio: ['pipe', 'pipe', 'pipe'],
-        detached: useGroups,
+        detached: plan.detached,
         windowsHide: true,
         shell: false,
       })
@@ -228,9 +373,12 @@ export function createProcessSupervisor({
     const entry = {
       taskId,
       child,
+      executor: plan.executor,
       pid: typeof child.pid === 'number' ? child.pid : null,
       workspace: ws,
-      timeout,
+      /* The timer authority is the supervisor; a plan can only restate the
+         timeout it was handed (validated into the same window). */
+      timeout: plan.timeoutMs,
       timedOut: false,
       cancelled: false,
       killStarted: false,
@@ -239,7 +387,7 @@ export function createProcessSupervisor({
       spawnError: null,
       timeoutTimer: null,
       killTimer: null,
-      stdout: createCapture(maxOutputBytes),
+      stdout: createCapture(plan.maxOutputBytes),
       stderr: createCapture(STDERR_TAIL_CAP),
       startedAt: Date.now(),
       done: null,
@@ -248,6 +396,7 @@ export function createProcessSupervisor({
     entry.done = new Promise((resolveOutcome) => { entry.resolve = resolveOutcome })
     entries.set(taskId, entry)
     stats.spawned += 1
+    if (plan.executor !== 'native') stats.externalPlans += 1
 
     /* The spec is the only thing ever written to the child. stdin stays open
        on purpose: its EOF is the runner's orphan guard. */
@@ -255,11 +404,13 @@ export function createProcessSupervisor({
       taskId,
       mode,
       durationMs: bounded(durationMs, 0, 600000, 0),
-      timeoutMs: timeout,
+      /* The plan's enforced timeout, which is the supervisor's own for a native
+         task and the launcher's (bounded here) for a backend plan. */
+      timeoutMs: plan.timeoutMs,
       /* Back-stop for the child itself, deliberately past our kill window so it
          can never pre-empt (or mask) the escalation being exercised. */
-      selfLimitMs: timeout + killGraceMs + 5000,
-      maxOutputBytes,
+      selfLimitMs: plan.selfLimitMs,
+      maxOutputBytes: plan.maxOutputBytes,
     }
     if (exitCode != null) spec.exitCode = bounded(exitCode, 1, 255, 1)
     if (bytes != null) spec.bytes = bounded(bytes, 1, 4 * 1024 * 1024, 4096)
@@ -278,17 +429,18 @@ export function createProcessSupervisor({
 
     entry.timeoutTimer = setTimeout(() => onTimeout(entry), entry.timeout)
     debug('task_process_spawned', {
-      taskId, pid: entry.pid, mode, timeoutMs: timeout, workspace: Boolean(ws),
+      taskId, pid: entry.pid, mode, executor: plan.executor, timeoutMs: plan.timeoutMs, workspace: Boolean(ws),
       /* A count, never the environment itself. */
-      envKeys: sanitized.report.keptCount, envDropped: sanitized.report.droppedCount,
+      envKeys: plan.envReport.keptCount, envDropped: plan.envReport.droppedCount,
     })
 
     return {
       taskId,
       pid: entry.pid,
       workspaceDir: ws ? ws.dir : null,
-      timeoutMs: timeout,
-      envReport: sanitized.report,
+      timeoutMs: plan.timeoutMs,
+      executor: plan.executor,
+      envReport: plan.envReport,
       done: entry.done,
     }
   }
@@ -441,6 +593,7 @@ export function createProcessSupervisor({
     const outcome = classify(entry, { code, signal, result })
 
     outcome.taskId = entry.taskId
+    outcome.executor = entry.executor
     outcome.workspaceDir = entry.workspace ? entry.workspace.dir : null
     outcome.workspaceCleanup = cleanup
     outcome.runtimeMs = Math.max(0, Date.now() - entry.startedAt)
@@ -592,6 +745,7 @@ export function createProcessSupervisor({
       out.push({
         taskId: e.taskId,
         pid: e.pid,
+        executor: e.executor,
         timedOut: e.timedOut,
         cancelled: e.cancelled,
         terminating: e.killStarted,

@@ -45,6 +45,20 @@ server-side. `LocalRuntimeBridge` never receives, stores, or sends that
 credential. `Runtime connected` means authenticated `PING` and `RT_STATUS` both
 succeeded; `/health` is liveness only.
 
+Step 5 adds the **Linux execution backend foundation**: an internal,
+capability-driven executor layer, not a desktop environment. A task runs on
+Linux only when its *service* is registered on the Linux executor
+(`runtime/executors.js`), and that executor exists only when
+`runtime/linux/capabilities.js` finds an implemented backend adapter — on a
+Linux host that is `host-linux` (reported as `support: "partial"`, because M1
+enforces no namespaces or privilege drop); on Windows or macOS the runtime
+simply reports `available: false` with a reason, keeps working, and installs
+nothing (no WSL, Docker or VM workflow exists or is offered). The one registered
+Linux service is `linux-stub`, whose child does nothing. `RT_STATUS` gained a
+safe `linux` section and the Runtime Activity popover one `Linux` row. DeepSeek,
+Python, FFmpeg, Git and Docker are **not** implemented — they are placeholders
+that cannot be run. Details: `runtime/linux/README.md`.
+
 Step 4 adds observability only: the runtime publishes allowlisted lifecycle
 events (`runtime.*`, `task.*`) over the SSE stream, and the header chip opens a
 small **Runtime Activity** popover — connection/stream state, running tasks with
@@ -59,7 +73,8 @@ metrics availability, Activity UI non-goals).
 
 ```bash
 npm test        # bridge, runtime-connection, runtime-event-stream, runtime-activity,
-                # proxy, and storage checks (root) + `cd runtime && npm test`
+                # linux-capability state, proxy and storage checks (root)
+                # + `cd runtime && npm test` (includes the Step 5 linux suites)
 ```
 
 ---

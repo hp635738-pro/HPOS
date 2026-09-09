@@ -24,7 +24,7 @@
  * No dependencies, Node 18+.
  */
 
-import { readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
 const RESULT_MARKER = 'HPOS_RESULT '
@@ -55,6 +55,14 @@ const MODES = {
   'inspect-env': { gracefulStop: true },
   /** Report cwd/realpath/entries and drop a file, to prove workspace isolation. */
   'inspect-workspace': { gracefulStop: true },
+  /**
+   * Step 5: prove a task really executed on a Linux host. Booleans and short
+   * labels only — no paths, no version strings, no `uname` output, no listing
+   * of anything. The presence of a shell binary is *reported* (it is a fact
+   * about the host) and never used: this process has no shell, no exec, no
+   * dynamic import, and no command line of its own to give one.
+   */
+  'inspect-linux': { gracefulStop: true },
   /** Write a bounded amount of stdout, to prove the daemon's capture cap holds. */
   flood: { gracefulStop: true },
 }
@@ -261,6 +269,32 @@ async function main() {
       break
     }
 
+    case 'inspect-linux': {
+      /* Refuse to claim anything we cannot see from inside the child. */
+      const isLinux = process.platform === 'linux'
+      data.linuxHost = isLinux
+      data.arch = typeof process.arch === 'string' ? process.arch.slice(0, 16) : null
+      data.procVisible = isLinux && safeExists('/proc')
+      /* Diagnostic only — HPOS never invokes a shell, and this mode proves the
+         claim by existing without one. */
+      data.shellBinaryPresent = isLinux && safeExists('/bin/sh')
+      data.executedViaShell = false
+      data.runsAsDaemonUser = typeof process.getuid === 'function'
+        ? process.getuid() === 0 ? 'root' : 'unprivileged'
+        : 'unknown'
+      data.executor = typeof process.env.HPOS_EXECUTOR === 'string'
+        ? process.env.HPOS_EXECUTOR.slice(0, 16)
+        : null
+      /* The only path-shaped fact a child may report is that its cwd is exactly
+         the directory named after itself — a boolean, not a path. */
+      data.workspaceIsTaskDir = basename(resolve(process.cwd())) === taskId
+      if (!isLinux) {
+        data.refused = 'not-a-linux-host'
+        exitCode = 3
+      }
+      break
+    }
+
     case 'flood': {
       /* Exactly `bytes` bytes of stdout, so the daemon's accounting can be
          checked against a known number. Line-sized writes, no spilling. */
@@ -286,6 +320,14 @@ async function main() {
   }
 
   finish({ ok: exitCode === 0, taskId, mode, exitCode, data }, exitCode)
+}
+
+function safeExists(p) {
+  try {
+    return existsSync(p)
+  } catch {
+    return false
+  }
 }
 
 function realpathOr(p) {

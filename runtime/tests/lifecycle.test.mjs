@@ -209,7 +209,10 @@ try {
       badSvc = e
     }
     assert(badSvc && badSvc.code === ERROR.UNKNOWN_SERVICE, 'an unregistered service is refused at the registry too')
-    assert(EXEC_MODES.length === 7 && EXEC_MODES.includes('noop'), 'the mode table is closed and known')
+    /* Step 5 adds exactly one entry (inspect-linux: a booleans-only probe that
+       proves a task ran on a Linux host). The table is still closed. */
+    assert(EXEC_MODES.length === 8 && EXEC_MODES.includes('noop') && EXEC_MODES.includes('inspect-linux'),
+      'the mode table is closed and known (Step 5 added inspect-linux, nothing else)')
   }
 
   /* ---------------- maxActive admits, then refuses --------------------- */
