@@ -23,6 +23,8 @@
 import { ENGINE, ERROR, VERSION, makeResponse, rtError } from './protocol.js'
 import { isValidTaskId, MAX_DURATION_MS, DEFAULT_DURATION_MS } from './tasks.js'
 import { LIMIT_DEFAULTS, isPublicTimeoutAllowed, summarizeCapabilities } from './limits.js'
+import { BROWSER_TASK_LIMITS, cleanPrompt, isCorrelationId } from './browser/contracts.js'
+import { SERVICE } from './executors/services.js'
 import { publicLinuxCapabilities } from './linux/capabilities.js'
 
 export const ACTION = {
@@ -41,21 +43,23 @@ export function isAllowedRtAction(action) {
 const NOTE_MAX = 200
 const SERVICE_MAX = 32
 
-function pickTaskRunPayload(payload, limits = LIMIT_DEFAULTS) {
-  const raw = payload && typeof payload === 'object' ? payload : {}
+const SENSITIVE_INPUT_KEY = /cookie|password|passwd|token|secret|authorization|credential|captcha|session/i
+
+function rejectSensitiveFields(raw) {
+  for (const key of Object.keys(raw)) {
+    if (SENSITIVE_INPUT_KEY.test(key)) {
+      throw rtError(ERROR.SECRET_FIELD, 'Credential, session and CAPTCHA fields are not accepted by runtime tasks')
+    }
+  }
+}
+
+export function pickTaskRunPayload(payload, limits = LIMIT_DEFAULTS) {
+  const raw = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}
+  rejectSensitiveFields(raw)
 
   const serviceRaw = raw.service
-  const service = typeof serviceRaw === 'string' ? serviceRaw.trim().slice(0, SERVICE_MAX) : 'stub'
+  const service = typeof serviceRaw === 'string' ? serviceRaw.trim().slice(0, SERVICE_MAX) : SERVICE.STUB
   if (!service) throw rtError(ERROR.INVALID_PAYLOAD, 'service must be a non-empty string')
-
-  let durationMs = DEFAULT_DURATION_MS
-  if (raw.durationMs != null) {
-    const n = Number(raw.durationMs)
-    if (!Number.isInteger(n) || n < 0 || n > MAX_DURATION_MS) {
-      throw rtError(ERROR.INVALID_PAYLOAD, `durationMs must be an integer between 0 and ${MAX_DURATION_MS}`)
-    }
-    durationMs = n
-  }
 
   /* Per-task timeout, validated against the daemon's configured window: a
      caller can shorten or lengthen a run but can never make it unbounded. */
@@ -71,13 +75,40 @@ function pickTaskRunPayload(payload, limits = LIMIT_DEFAULTS) {
     timeoutMs = n
   }
 
+  if (service === SERVICE.DEEPSEEK_BROWSER) {
+    const prompt = cleanPrompt(raw.prompt)
+    if (!prompt) {
+      throw rtError(
+        ERROR.INVALID_PAYLOAD,
+        `prompt must be a non-empty string of at most ${BROWSER_TASK_LIMITS.MAX_PROMPT_CHARS} characters`,
+      )
+    }
+    const correlationId = typeof raw.correlationId === 'string' ? raw.correlationId.trim() : ''
+    const conversationId = typeof raw.conversationId === 'string' ? raw.conversationId.trim() : ''
+    const messageId = typeof raw.messageId === 'string' ? raw.messageId.trim() : ''
+    if (!isCorrelationId(correlationId) || !isCorrelationId(conversationId) || !isCorrelationId(messageId)) {
+      throw rtError(ERROR.INVALID_PAYLOAD, 'DeepSeek tasks require valid correlationId, conversationId and messageId values')
+    }
+    /* This exact object is the complete public browser-task contract. A URL,
+       selector, provider module, browser method, executable or credential can
+       never be forwarded. */
+    return { service, timeoutMs, prompt, correlationId, conversationId, messageId }
+  }
+
+  let durationMs = DEFAULT_DURATION_MS
+  if (raw.durationMs != null) {
+    const n = Number(raw.durationMs)
+    if (!Number.isInteger(n) || n < 0 || n > MAX_DURATION_MS) {
+      throw rtError(ERROR.INVALID_PAYLOAD, `durationMs must be an integer between 0 and ${MAX_DURATION_MS}`)
+    }
+    durationMs = n
+  }
   const note = typeof raw.note === 'string' ? raw.note.slice(0, NOTE_MAX) : null
 
-  /* The returned object is the whole surface: there is no `mode`, `command`,
-     `argv`, `cwd`, `env`, `path` or `executor` a caller can reach, whatever they
-     send. Which backend runs a task is a property of the registered service
-     (Step 5), never a field in a request — so `executor` here is dropped, not
-     validated. */
+  /* The returned object is the whole non-provider surface: there is no `mode`,
+     `command`, `argv`, `cwd`, `env`, `path` or `executor` a caller can reach,
+     whatever they send. Which backend runs a task is a property of the
+     registered service, never a field in a request. */
   return { service, durationMs, timeoutMs, note }
 }
 
@@ -140,6 +171,17 @@ export function createRpcHandler({
         version: VERSION,
         uptimeMs: Math.max(0, Date.now() - startedAt),
         services: tasks.serviceNames,
+        browserProviders: tasks.services[SERVICE.DEEPSEEK_BROWSER]
+          ? [{
+              id: 'deepseek',
+              service: SERVICE.DEEPSEEK_BROWSER,
+              session: 'user-authenticated-chromium-cdp',
+              host: '127.0.0.1',
+              port: tasks.browserSession?.port || BROWSER_TASK_LIMITS.DEFAULT_CDP_PORT,
+              credentialsAccepted: false,
+              autoRetry: false,
+            }]
+          : [],
         tasks: tasks.counters(),
         recent: tasks.list(),
         /* Executor facts: the bounds a client must respect, plus live
@@ -196,7 +238,12 @@ export function createRpcHandler({
         )
       }
       const task = tasks.run(spec)
-      return { taskId: task.taskId, status: task.status, service: task.service }
+      return {
+        taskId: task.taskId,
+        status: task.status,
+        service: task.service,
+        ...(task.correlationId ? { correlationId: task.correlationId } : {}),
+      }
     },
 
     [ACTION.RT_TASK_STOP]: (payload) => {

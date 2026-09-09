@@ -22,20 +22,37 @@ npm run preview # build ko locally serve karo
 npm run lint    # oxlint
 ```
 
-**Requirements:** Node 18+ (Node 20 pe test kiya hua)
+**Requirements:** Node 18+ (Step 6 verification Node 22 par chali hai)
 
 Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke steps `BRIDGE.md` mein hain.
 
-Conversations local `localStorage` mein persist hoti hain — koi backend/API nahi.
+Conversations local `localStorage` mein persist hoti hain — koi cloud sync ya
+DeepSeek API nahi; Step 6 execution localhost runtime ke through hota hai.
 
-### Local runtime (M1 Steps 3–4)
+### Local runtime + browser DeepSeek (Step 6)
 
-The optional local `hpos-runtime` daemon is connected only during Vite development:
+The local `hpos-runtime` daemon is connected during Vite development and now
+owns the AI task lifecycle:
 
 ```bash
 cd runtime
+npm install     # playwright-core transport only; no browser download
 npm start       # listens on 127.0.0.1:5190 and writes ~/.hpos/runtime/endpoints.json
 ```
+
+Start a visible Chromium/Chrome instance with a dedicated profile and loopback
+CDP, open exactly one `https://chat.deepseek.com/` tab, then sign in normally:
+
+```bash
+chromium --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hpos/deepseek-browser"
+```
+
+HPOS Chat submits the fixed `browser.deepseek` service to the runtime; it does
+not use the extension Browser Bridge as its primary execution path. The runtime
+never receives browser credentials/session data, never reads cookies/storage,
+and never retries a prompt after an uncertain send, timeout, disconnect or
+restart. See `runtime/README.md` for browser variants, lifecycle and security.
 
 With `npm run dev` running from the project root, the browser uses the fixed
 same-origin routes `/hpos-runtime/health`, `/hpos-runtime/rpc` and (Step 4)
@@ -54,19 +71,19 @@ Linux host that is `host-linux` (reported as `support: "partial"`, because M1
 enforces no namespaces or privilege drop); on Windows or macOS the runtime
 simply reports `available: false` with a reason, keeps working, and installs
 nothing (no WSL, Docker or VM workflow exists or is offered). The one registered
-Linux service is `linux-stub`, whose child does nothing. `RT_STATUS` gained a
-safe `linux` section and the Runtime Activity popover one `Linux` row. DeepSeek,
-Python, FFmpeg, Git and Docker are **not** implemented — they are placeholders
-that cannot be run. Details: `runtime/linux/README.md`.
+Linux service is `linux-stub`, whose child does nothing. `RT_STATUS` includes a
+safe `linux` section and Runtime Activity includes a `Linux` capability row.
+Planned Linux services for Python, FFmpeg, Git and a future Linux DeepSeek route
+remain non-runnable placeholders; the Step 6 `browser.deepseek` service is a
+separate fixed, native supervised provider path. Details: `runtime/linux/README.md`.
 
-Step 4 adds observability only: the runtime publishes allowlisted lifecycle
-events (`runtime.*`, `task.*`) over the SSE stream, and the header chip opens a
-small **Runtime Activity** popover — connection/stream state, running tasks with
-a Stop action for known active ids, bounded recent tasks, counters, and safe
-process metrics. It is deliberately **not a terminal**: no commands, output,
-environment, credentials or filesystem internals are shown or transmitted. Event
-history is a bounded in-memory ring (never written to disk). The runtime task
-surface remains a fixed stub smoke path; there is no arbitrary task or shell UI.
+The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`) over
+SSE, including `GENERATING`/`STREAMING` and the bounded final assistant response
+for Chat. The header **Runtime Activity** popover shows connection/stream state,
+running tasks with Stop, Linux executor labels, bounded recent tasks, counters,
+and safe process metrics; it deliberately discards chat output and remains
+**not a terminal**. Event history is a bounded in-memory ring (never written to
+disk), and there is no arbitrary task, browser, command or shell UI.
 
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
@@ -118,7 +135,7 @@ src/
 │   ├── colour.js           hex/rgb/hsv/hsl, contrast, harmony
 │   ├── chat/               message factory + conversation hook
 │   ├── storage/            local conversation store (Step 5)
-│   └── bridge/             BrowserBridge + LocalRuntimeBridge + DeepSeek connector
+│   └── bridge/             BrowserBridge compatibility + runtime DeepSeek client
 │
 ├── pages/
 │   ├── Blank.jsx           empty canvas
@@ -189,7 +206,8 @@ resolved                      // 'light' ya 'dark' (system resolve ho ke)
 
 ## Conversations (Step 5)
 
-AI chats **local** persistent conversations hain. Koi server, cloud sync, ya AI title API nahi.
+AI chat transcripts **local** persistent conversations hain. Koi cloud sync,
+DeepSeek API, ya AI title API nahi; browser execution localhost runtime own karta hai.
 
 ### Storage
 

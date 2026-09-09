@@ -514,12 +514,12 @@ async function waitLife(ds, life, tries = 30) {
   assert(!isBusyLife(life), 'life: interrupted is not busy')
 }
 
-/* source: ChatPage interrupt + recover chip, no BrowserBridge rewrite */
+/* source: runtime Chat interruption + legacy bridge recovery remain explicit */
 {
   const chat = readFileSync(join(root, 'pages/ChatPage.jsx'), 'utf8')
-  assert(chat.includes('REQUEST_INTERRUPTED'), 'ChatPage handles interrupted streams')
-  assert(chat.includes('err.partial'), 'ChatPage keeps partial text')
-  assert(chat.includes('BRIDGE_DISCONNECTED'), 'ChatPage does not mock a bound chat')
+  assert(chat.includes('DEEPSEEK_RUNTIME_ERROR.INTERRUPTED'), 'ChatPage handles interrupted runtime tasks')
+  assert(chat.includes('getConversation(convId)'), 'ChatPage preserves already-persisted partial text')
+  assert(!chat.includes('getDeepSeekConnector'), 'ChatPage does not fall back to the Browser Bridge')
   const status = readFileSync(join(root, 'components/chat/BridgeStatus.jsx'), 'utf8')
   assert(status.includes('recoverConnection'), 'BridgeStatus offers recover')
   const bg = readFileSync(join(root, '../extension/background.js'), 'utf8')

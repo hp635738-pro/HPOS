@@ -161,10 +161,13 @@ try {
       'the launch went through the linux backend, which handed it to the shared supervisor')
     assert(backends.statusAll().linux.counts.launched === 1, 'and the backend counted exactly that one launch')
     const byEx = registry.servicesByExecutor()
-    assert(JSON.stringify(byEx.native) === JSON.stringify(['stub']) && JSON.stringify(byEx.linux) === JSON.stringify(['linux-stub']),
-      'the service table groups by executor for status reporting')
-    assert(registry.executorFor('stub') === 'native' && registry.executorFor('linux-stub') === 'linux',
-      'executorFor answers from the registration only')
+    assert(JSON.stringify(byEx.native) === JSON.stringify(['stub', 'browser.deepseek'])
+      && JSON.stringify(byEx.linux) === JSON.stringify(['linux-stub']),
+    'the combined service table groups Step 5 and Step 6 routes by executor')
+    assert(registry.executorFor('stub') === 'native'
+      && registry.executorFor('browser.deepseek') === 'native'
+      && registry.executorFor('linux-stub') === 'linux',
+    'executorFor answers from each service registration only')
     assert(registry.executorFor('nope') === null, 'and an unknown service has none')
 
     /* the caller cannot choose an executor */
@@ -188,6 +191,30 @@ try {
     await waitFor(() => supNoRouter.calls.length === 1)
     assert(supNoRouter.calls.length === 1 && supNoRouter.calls[0].backend === undefined,
       'and it reached the supervisor with no backend attached (the Step 1–4 call, unchanged)')
+
+    /* Even a malformed/racing router that claims availability and then returns
+       no backend must fail the queued Linux task, never fall through native. */
+    const vanishedSup = fakeSupervisor()
+    const vanishedRouter = {
+      availability: () => ({ ok: true, reason: 'ready' }),
+      get: () => null,
+    }
+    const vanishedRegistry = createTaskRegistry({
+      maxActive: 3,
+      limits,
+      supervisor: vanishedSup,
+      backends: vanishedRouter,
+      startDelayMs: 1,
+    })
+    const vanished = vanishedRegistry.run({ service: 'linux-stub', durationMs: 1 })
+    const vanishedResult = await waitFor(() => {
+      const task = vanishedRegistry.get(vanished.taskId)
+      return task?.status === TASK_STATE.FAILED ? task : null
+    })
+    assert(vanishedResult?.failure?.kind === 'EXECUTOR_UNAVAILABLE',
+      'a backend that disappears after admission becomes an explicit failed task')
+    assert(vanishedSup.calls.length === 0,
+      'a missing non-native backend never falls through to native supervision')
 
     /* cancel goes through the backend, and the supervisor stays the authority */
     const sup2 = fakeSupervisor({ hold: true })
@@ -445,8 +472,9 @@ try {
     assert(Object.keys(completed.payload).sort().join(',') === 'durationMs,service,taskId',
       'and the payload stayed allowlisted — no executor field crept in, because none is needed')
     assert(!JSON.stringify(bus.history()).includes(base), 'no path from the linux path reached the stream')
-    assert(EVENT_TYPE_SET.size === 9 && !EVENT_TYPE_SET.has('linux.status'),
-      'Step 5 added no event type: linux is a status section, not a new channel')
+    assert(EVENT_TYPE_SET.size === 11 && EVENT_TYPE_SET.has('task.generating')
+      && EVENT_TYPE_SET.has('task.streaming') && !EVENT_TYPE_SET.has('linux.status'),
+    'Step 5 adds no Linux event channel; Step 6 adds only fixed browser progress events')
     let threw = false
     try { bus.publish('linux.command', { cmd: 'id' }) } catch { threw = true }
     assert(threw, 'and the bus refuses a linux event of any kind')

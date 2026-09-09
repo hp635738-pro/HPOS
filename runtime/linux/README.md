@@ -84,14 +84,17 @@ registered on the Linux executor":
 | Service | Executor | Status |
 | --- | --- | --- |
 | `stub` | `native` | Steps 1–4 lifecycle stub, unchanged |
+| `browser.deepseek` | `native` | Step 6 fixed browser provider in the same supervised native child model |
 | `linux-stub` | `linux` | Step 5 boundary proof: a supervised child that does nothing |
 | `future-python`, `future-ffmpeg`, `future-git`, `future-deepseek` | `linux` | **placeholders only** — `PLANNED_SERVICES` in `runtime/executors.js`, deliberately *not* registered, so they cannot be run |
 
-`RT_TASK_RUN` accepts `{ service, durationMs, timeoutMs, note }`. It has **no**
-field for an executable, a command, a shell string, a URL, a working directory
-or an environment — and `executor` is one of the fields the picker drops, so a
-caller cannot choose a backend. The service table decides; `assertExecutorMatch`
-refuses a direct caller that tries to promote or downgrade a service anyway.
+For `stub` and `linux-stub`, `RT_TASK_RUN` accepts only
+`{ service, durationMs, timeoutMs, note }`; the separate fixed browser provider
+has its own bounded prompt/correlation contract. Neither shape has a field for
+an executable, command, shell string, URL, working directory, environment or
+executor. The picker drops those fields, so a caller cannot choose a backend.
+The service table decides; `assertExecutorMatch` refuses a direct caller that
+tries to promote or downgrade a service anyway.
 
 Adding a real Linux-backed service later means: one row in `SERVICES`
 (`executor: 'linux'`, a fixed `execMode`), the mode's behaviour in the runner's
@@ -207,10 +210,12 @@ service — never a feature the user or a page can drive.
 
 ## Not implemented here (by design)
 
-DeepSeek (any part of it), Python, FFmpeg, Git, Docker, a connector router,
+The Linux backend does not implement DeepSeek, Python, FFmpeg, Git, Docker,
 Tauri packaging, a Linux desktop environment, WSL/VM auto-installation, remote
-runtime support, and any real Linux workload. `linux-stub`'s child runs the
-same fixed mode table as the native stub and does nothing.
+runtime support, or any real Linux workload. `linux-stub`'s child runs a fixed
+no-op mode. The `future-*` Linux services remain unreachable placeholders.
 
-The browser bridge, `DeepSeekConnector`, the extension and the existing DeepSeek
-browser workflow are untouched and remain the browser path.
+Step 6's `browser.deepseek` is deliberately separate: it uses the native
+supervised runner and an isolated fixed provider module, not this Linux backend.
+The extension Browser Bridge remains for compatibility but is not HPOS Chat's
+primary DeepSeek execution path.

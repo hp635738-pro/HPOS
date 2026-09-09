@@ -45,7 +45,7 @@ import { assert, finish } from './helpers.mjs'
     try { bus.publish(bogus, {}) } catch { threw = true }
     assert(threw, `publish("${bogus}") is refused`)
   }
-  assert(EVENT_TYPE_SET.size === 9, 'allowlist has exactly the nine documented event types')
+  assert(EVENT_TYPE_SET.size === 11, 'allowlist has exactly the eleven documented event types')
   for (const t of Object.values(EVENT_TYPE)) assert(isRuntimeEventType(t), `type registry knows ${t}`)
   assert(isTaskEventType('task.queued') && !isTaskEventType('runtime.status'), 'task event predicate works')
 }
@@ -84,6 +84,21 @@ import { assert, finish } from './helpers.mjs'
 
   const unknownKind = bus.publish(EVENT_TYPE.TASK_FAILED, { taskId: 'task-abcdefgh', kind: 'MAGIC' })
   assert(unknownKind.payload.kind === null, 'unknown failure kind is dropped, not trusted')
+
+  const streaming = bus.publish(EVENT_TYPE.TASK_STREAMING, {
+    taskId: 'task-abcdefgh',
+    service: 'browser.deepseek',
+    correlationId: 'message-abcdefgh',
+    sequence: 2,
+    op: 'append',
+    text: 'visible assistant response',
+    prompt: 'must not be published',
+    cookie: 'LEAK-CANARY',
+  })
+  assert(streaming.payload.text === 'visible assistant response' && streaming.payload.op === 'append',
+    'task.streaming carries only allowlisted assistant output')
+  assert(!JSON.stringify(streaming).includes('must not be published') && !JSON.stringify(streaming).includes('LEAK-CANARY'),
+    'task.streaming never exposes prompt/session-shaped extras')
 
   const timeout = bus.publish(EVENT_TYPE.TASK_TIMEOUT, { taskId: 'task-abcdefgh', timeoutMs: 1000 })
   assert(timeout.type === 'task.timeout' && timeout.payload.timeoutMs === 1000,

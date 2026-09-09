@@ -10,24 +10,33 @@
  *     this file's path, so nothing here can be steered by an RPC caller.
  *   - One JSON spec line arrives on stdin, then stdin stays OPEN: its EOF is
  *     the orphan guard (if the daemon goes away, the pipe closes and we leave).
- *   - Behaviour comes from the fixed MODES table below. No eval, no dynamic
- *     import, no require of anything task-supplied, no shell, no child
- *     processes of our own, no network.
+ *   - Behaviour comes from the fixed MODES table below. No eval, no import of
+ *     anything task-supplied, no shell and no task-supplied executable/URL.
+ *     The one network-capable mode is the fixed loopback browser-provider.
  *   - We stay inside our configured bounds (duration, output, a self-imposed
  *     deadline) and end with one `HPOS_RESULT {"ok":..}` line the supervisor
  *     parses. The daemon, not us, is what caps how much output it retains.
  *
- * In M1 every mode is a harmless no-op by design: this file exists to prove
- * supervised process execution, isolation and lifecycle handling. There is no
- * DeepSeek work here yet.
+ * Step 6 routes browser-provider to an isolated, fixed DeepSeek module; all
+ * earlier lifecycle/test modes remain closed and harmless.
  *
- * No dependencies, Node 18+.
+ * Node 18+.
  */
 
 import { existsSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
+import { executeBrowserProvider } from './browser/executor.js'
+import {
+  BROWSER_FAILURE,
+  BROWSER_FAILURE_SET,
+  BROWSER_PROGRESS,
+  BROWSER_TASK_LIMITS,
+  STREAM_OP,
+} from './browser/contracts.js'
+
 const RESULT_MARKER = 'HPOS_RESULT '
+const PROGRESS_MARKER = 'HPOS_PROGRESS '
 const MAX_SPEC_BYTES = 64 * 1024
 const MAX_DURATION_MS = 600000
 const MAX_FLOOD_BYTES = 4 * 1024 * 1024
@@ -39,8 +48,8 @@ const EXIT_BAD_SPEC = 65
 
 /**
  * The complete set of behaviours a task child can have. Internal only:
- * nothing in the RPC payload can name one of these — the registry maps a
- * service onto a mode, and M1 has one service.
+ * nothing in the RPC payload can name one of these — the closed service table
+ * maps `stub` or `browser.deepseek` onto a mode.
  */
 const MODES = {
   /** Prove the process model works: start, do nothing, succeed. */
@@ -65,6 +74,8 @@ const MODES = {
   'inspect-linux': { gracefulStop: true },
   /** Write a bounded amount of stdout, to prove the daemon's capture cap holds. */
   flood: { gracefulStop: true },
+  /** Fixed provider router; its browser interaction contract is source-owned. */
+  'browser-provider': { gracefulStop: true },
 }
 
 function boundedInt(value, { min, max, fallback }) {
@@ -81,7 +92,10 @@ function boundedInt(value, { min, max, fallback }) {
  * this last write implies everything before it reached the pipe. The watchdog
  * covers a broken pipe that will never drain — the daemon kills us regardless.
  */
+let finishing = false
 function finish(resultFields, code) {
+  if (finishing) return
+  finishing = true
   let done = false
   const leave = () => {
     if (done) return
@@ -102,6 +116,25 @@ function logErr(line) {
   try {
     process.stderr.write(line + '\n')
   } catch { /* ignore */ }
+}
+
+/** Allowlisted lifecycle/output line consumed by the supervisor, never logs. */
+function emitProgress(value) {
+  const p = value && typeof value === 'object' ? value : {}
+  if (!Object.values(BROWSER_PROGRESS).includes(p.state)) return
+  if (!Number.isInteger(p.sequence) || p.sequence < 1) return
+  const out = {
+    state: p.state,
+    sequence: p.sequence,
+    correlationId: p.correlationId,
+  }
+  if (p.state === BROWSER_PROGRESS.STREAMING) {
+    if (p.op !== STREAM_OP.APPEND && p.op !== STREAM_OP.REPLACE) return
+    if (typeof p.text !== 'string' || !p.text) return
+    out.op = p.op
+    out.text = p.text.slice(0, BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS)
+  }
+  try { process.stdout.write(PROGRESS_MARKER + JSON.stringify(out) + '\n') } catch { /* supervisor will time out */ }
 }
 
 /**
@@ -192,10 +225,22 @@ async function main() {
   if (selfLimit.unref) selfLimit.unref()
 
   let stopping = false
+  const aborter = new AbortController()
   const stopGracefully = () => {
     if (stopping) return
     stopping = true
-    finish({ ok: false, taskId, mode, reason: 'terminated', data }, 143)
+    try { aborter.abort() } catch { /* best effort */ }
+    if (mode !== 'browser-provider') {
+      finish({ ok: false, taskId, mode, reason: 'terminated', data }, 143)
+      return
+    }
+    /* Give the fixed provider a short chance to click DeepSeek's visible Stop
+       control. The daemon's existing grace→force kill remains authoritative. */
+    const fallback = setTimeout(
+      () => finish({ ok: false, taskId, mode, reason: 'terminated', data }, 143),
+      600,
+    )
+    if (fallback.unref) fallback.unref()
   }
   if (MODES[mode].gracefulStop) {
     process.on('SIGTERM', stopGracefully)
@@ -205,7 +250,10 @@ async function main() {
     process.on('SIGTERM', () => {})
     process.on('SIGINT', () => {})
   }
-  watchParent(() => finish({ ok: false, taskId, mode, reason: 'parent-gone', data }, EXIT_ORPHANED))
+  watchParent(() => {
+    try { aborter.abort() } catch { /* parent is already gone */ }
+    finish({ ok: false, taskId, mode, reason: 'parent-gone', data }, EXIT_ORPHANED)
+  })
 
   let exitCode = 0
   switch (mode) {
@@ -310,6 +358,40 @@ async function main() {
       data.bytesWritten = written
       data.outputCap = maxOutputBytes
       break
+    }
+
+    case 'browser-provider': {
+      try {
+        const completed = await executeBrowserProvider({
+          execution: spec.execution,
+          signal: aborter.signal,
+          emit: emitProgress,
+        })
+        const responseLimit = boundedInt(spec.responseLimitChars, {
+          min: 256,
+          max: BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS,
+          fallback: Math.min(16000, BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS),
+        })
+        data.provider = completed.provider
+        data.phase = completed.phase
+        data.correlationId = completed.correlationId
+        data.response = String(completed.response || '').slice(0, responseLimit)
+        finish({ ok: true, taskId, mode, exitCode: 0, data }, 0)
+        return
+      } catch (err) {
+        const kind = BROWSER_FAILURE_SET.has(err?.code)
+          ? err.code
+          : BROWSER_FAILURE.PROVIDER_FAILURE
+        finish({
+          ok: false,
+          taskId,
+          mode,
+          reason: kind,
+          failure: { kind },
+          data: { provider: 'deepseek' },
+        }, 70)
+        return
+      }
     }
 
     default:

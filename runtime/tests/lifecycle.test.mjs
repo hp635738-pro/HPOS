@@ -209,10 +209,11 @@ try {
       badSvc = e
     }
     assert(badSvc && badSvc.code === ERROR.UNKNOWN_SERVICE, 'an unregistered service is refused at the registry too')
-    /* Step 5 adds exactly one entry (inspect-linux: a booleans-only probe that
-       proves a task ran on a Linux host). The table is still closed. */
-    assert(EXEC_MODES.length === 8 && EXEC_MODES.includes('noop') && EXEC_MODES.includes('inspect-linux'),
-      'the mode table is closed and known (Step 5 added inspect-linux, nothing else)')
+    /* Step 5 adds inspect-linux and Step 6 adds the one fixed browser-provider
+       route. The mode table remains closed and mirrors runner.js exactly. */
+    assert(EXEC_MODES.length === 9 && EXEC_MODES.includes('noop')
+      && EXEC_MODES.includes('inspect-linux') && EXEC_MODES.includes('browser-provider'),
+    'the mode table is closed and includes both fixed Step 5/Step 6 routes')
   }
 
   /* ---------------- maxActive admits, then refuses --------------------- */

@@ -230,15 +230,16 @@ function store(opts = {}) {
   assert(s.getConversation(c.id).provider === 'deepseek', 'M: provider survives switch')
 }
 
-/* N O P — existing flows not rewritten by storage */
+/* N O P — storage stays provider-agnostic; Chat uses the runtime adapter */
 {
   const storeSrc = readFileSync(join(root, 'src/lib/storage/conversationStore.js'), 'utf8')
   assert(!storeSrc.includes('DeepSeekConnector'), 'N: store does not import DeepSeekConnector')
   assert(!storeSrc.includes('BrowserBridge'), 'N: store does not import BrowserBridge')
   assert(!storeSrc.includes('chat.deepseek.com'), 'N: store has no DeepSeek DOM')
   const chatSrc = readFileSync(join(root, 'src/pages/ChatPage.jsx'), 'utf8')
-  assert(chatSrc.includes('getDeepSeekConnector'), 'N: ChatPage still sends through DeepSeekConnector')
-  assert(chatSrc.includes('ds.sendMessage'), 'N: ChatPage still calls sendMessage')
+  assert(chatSrc.includes('getDeepSeekRuntimeClient'), 'N: ChatPage sends through the runtime adapter')
+  assert(chatSrc.includes('getDeepSeekRuntimeClient().send('), 'N: ChatPage calls the one-shot runtime send')
+  assert(!chatSrc.includes('getDeepSeekConnector'), 'N: ChatPage does not use the Browser Bridge connector')
   const bridgeSrc = readFileSync(join(root, 'src/components/chat/BridgeStatus.jsx'), 'utf8')
   assert(bridgeSrc.includes('useBrowserBridge'), 'O: BridgeStatus still uses the browser bridge')
   assert(bridgeSrc.includes('useDeepSeek'), 'O: BridgeStatus still shows DeepSeek status')

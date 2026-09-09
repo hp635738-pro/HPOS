@@ -33,9 +33,18 @@ import { ERROR, rtError } from './protocol.js'
 import { sanitizeEnv, isSensitiveEnvName } from './env.js'
 import { createTaskWorkspace, disposeTaskWorkspace, measureWorkspace } from './workspace.js'
 import { TASK_STATE } from './tasks.js'
+import {
+  BROWSER_FAILURE_SET,
+  BROWSER_PROGRESS,
+  BROWSER_TASK_LIMITS,
+  STREAM_OP,
+  isCorrelationId,
+  sealBrowserExecution,
+} from './browser/contracts.js'
 
 export const DEFAULT_RUNNER_PATH = fileURLToPath(new URL('./runner.js', import.meta.url))
 export const RESULT_MARKER = 'HPOS_RESULT '
+export const PROGRESS_MARKER = 'HPOS_PROGRESS '
 
 /** Reason codes recorded on a FAILED task. Stable strings, safe to display. */
 export const FAILURE = {
@@ -100,6 +109,55 @@ function createCapture(cap) {
   }
 }
 
+/** Parse allowlisted progress lines without ever logging their text. */
+function createProgressDecoder(onProgress) {
+  let pending = ''
+  /* JSON escaping can expand one UTF-16 code unit to six bytes (`\\uXXXX`).
+     Bound for that worst case so a legal response patch is not mistaken for
+     malformed output, while still keeping decoder memory strictly finite. */
+  const maxLine = BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS * 6 + 4096
+
+  function deliver(line) {
+    if (!line.startsWith(PROGRESS_MARKER) || line.length > maxLine) return
+    let value
+    try { value = JSON.parse(line.slice(PROGRESS_MARKER.length)) } catch { return }
+    if (!value || typeof value !== 'object') return
+    if (!Object.values(BROWSER_PROGRESS).includes(value.state)) return
+    if (!Number.isInteger(value.sequence) || value.sequence < 1) return
+    if (!isCorrelationId(value.correlationId)) return
+    const clean = {
+      state: value.state,
+      sequence: value.sequence,
+      correlationId: value.correlationId,
+    }
+    if (value.state === BROWSER_PROGRESS.STREAMING) {
+      if (value.op !== STREAM_OP.APPEND && value.op !== STREAM_OP.REPLACE) return
+      if (typeof value.text !== 'string' || !value.text) return
+      clean.op = value.op
+      clean.text = value.text.slice(0, BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS)
+    }
+    try { onProgress(clean) } catch { /* registry progress cannot break stdio */ }
+  }
+
+  return {
+    push(chunk) {
+      pending += String(chunk)
+      if (pending.length > maxLine * 2 && !pending.includes('\n')) {
+        pending = ''
+        return
+      }
+      let newline = pending.indexOf('\n')
+      while (newline >= 0) {
+        const line = pending.slice(0, newline).replace(/\r$/, '')
+        pending = pending.slice(newline + 1)
+        deliver(line)
+        newline = pending.indexOf('\n')
+      }
+      if (pending.length > maxLine) pending = ''
+    },
+  }
+}
+
 /** Pull the runner's structured result out of the captured tail. */
 function parseResult(captured) {
   const text = captured.text()
@@ -121,7 +179,7 @@ function parseResult(captured) {
  * in memory. Shape is preserved; oversized data is dropped, not truncated into
  * garbage.
  */
-const RESULT_MAX_JSON = 16384
+const RESULT_MAX_JSON = 60 * 1024
 
 function boundResult(result) {
   if (!result || typeof result !== 'object') return null
@@ -292,7 +350,17 @@ export function createProcessSupervisor({
    * exists (capacity, bad id, workspace failure, refused plan); after that
    * every failure arrives through `done`, never as a rejection.
    */
-  function start({ taskId, mode = 'noop', durationMs = 0, timeoutMs, exitCode, bytes, backend = null } = {}) {
+  function start({
+    taskId,
+    mode = 'noop',
+    durationMs = 0,
+    timeoutMs,
+    exitCode,
+    bytes,
+    backend = null,
+    execution = null,
+    onProgress = () => {},
+  } = {}) {
     if (typeof taskId !== 'string' || taskId.length === 0) {
       throw failWith(ERROR.INVALID_PAYLOAD, 'supervisor.start requires a taskId', FAILURE.INTERNAL)
     }
@@ -305,6 +373,14 @@ export function createProcessSupervisor({
     }
 
     const timeout = bounded(timeoutMs, MIN_INTERNAL_TIMEOUT_MS, maxTimeoutMs, defaultTimeoutMs)
+    let safeExecution = null
+    if (mode === 'browser-provider') {
+      try {
+        safeExecution = sealBrowserExecution(execution)
+      } catch {
+        throw failWith(ERROR.INVALID_PAYLOAD, 'Browser task execution contract was rejected', FAILURE.INTERNAL)
+      }
+    }
 
     /* Workspace first — a child without a cwd would inherit the daemon's. */
     let ws = null
@@ -389,6 +465,7 @@ export function createProcessSupervisor({
       killTimer: null,
       stdout: createCapture(plan.maxOutputBytes),
       stderr: createCapture(STDERR_TAIL_CAP),
+      progress: createProgressDecoder(typeof onProgress === 'function' ? onProgress : () => {}),
       startedAt: Date.now(),
       done: null,
       resolve: null,
@@ -411,6 +488,13 @@ export function createProcessSupervisor({
          can never pre-empt (or mask) the escalation being exercised. */
       selfLimitMs: plan.selfLimitMs,
       maxOutputBytes: plan.maxOutputBytes,
+    }
+    if (safeExecution) {
+      spec.execution = safeExecution
+      spec.responseLimitChars = Math.max(
+        256,
+        Math.min(BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS, maxOutputBytes - 2048),
+      )
     }
     if (exitCode != null) spec.exitCode = bounded(exitCode, 1, 255, 1)
     if (bytes != null) spec.bytes = bounded(bytes, 1, 4 * 1024 * 1024, 4096)
@@ -459,7 +543,10 @@ export function createProcessSupervisor({
     }
     if (child.stdout) {
       child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (c) => entry.stdout.push(c))
+      child.stdout.on('data', (c) => {
+        entry.stdout.push(c)
+        entry.progress.push(c)
+      })
     }
     if (child.stderr) {
       child.stderr.setEncoding('utf8')
@@ -659,10 +746,25 @@ export function createProcessSupervisor({
     if (entry.timedOut) {
       return {
         status: TASK_STATE.FAILED,
-        failure: { kind: FAILURE.TIMEOUT, message: `Task exceeded its ${entry.timeout}ms timeout and was terminated` },
+        failure: { kind: FAILURE.TIMEOUT, code: FAILURE.TIMEOUT, message: `Task exceeded its ${entry.timeout}ms timeout and was terminated` },
         killed: true,
         timedOut: true,
         forceKilled: entry.forceKilled,
+      }
+    }
+    const providerKind = result?.failure?.kind
+    if (result?.ok === false && BROWSER_FAILURE_SET.has(providerKind)) {
+      return {
+        status: TASK_STATE.FAILED,
+        failure: {
+          kind: providerKind,
+          code: providerKind,
+          message: `Browser provider failed (${providerKind})`,
+        },
+        killed: false,
+        timedOut: false,
+        forceKilled: false,
+        exitCode: Number.isInteger(code) ? code : null,
       }
     }
     if (code === 0 && (!result || result.ok === true)) {

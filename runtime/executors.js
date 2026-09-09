@@ -2,20 +2,22 @@
  * Executor + service model (M1 — Step 5).
  *
  * The one question this file answers: **which execution backend is a service
- * allowed to run on?** Nothing else. It has no knowledge of Linux, WSL, Docker,
- * DeepSeek, processes or paths — it is the small closed vocabulary the task
- * registry and the backend router both speak, so that "executor" is a property
- * of a *registered service* and never a field a caller can choose.
+ * allowed to run on?** Nothing else. It has no knowledge of backend
+ * implementations, provider behavior, processes or paths — it is the small
+ * closed vocabulary the task registry and backend router both speak, so that
+ * "executor" is a property of a *registered service* and never a field a caller
+ * can choose.
  *
- *   RT_TASK_RUN { service }            service ──▶ SERVICES table ──▶ executor
- *        │                                                          │
- *        └── `executor` in the payload is *ignored*, then refused │
+ *   RT_TASK_RUN { service }   service ──▶ executors/services.js ──▶ executor
+ *        │                                                         │
+ *        └── public `executor` input is dropped; direct mismatches refused
  *                                                                  ▼
  *                                                    native │ linux (Step 5)
  *
- * Adding a future service means adding one row to the table below (and, when it
- * needs a new kind of execution, one backend module) — the supervisor and the
- * registry never change. That is the whole point of Step 5.
+ * Adding a runnable service means adding one source-owned row to the service
+ * table (and, when needed, one backend module) — never accepting a backend from
+ * the caller. The table below this vocabulary is documentation for planned,
+ * deliberately unregistered Linux services.
  *
  * No dependencies beyond protocol.js, Node 18+.
  */

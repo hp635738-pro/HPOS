@@ -123,6 +123,22 @@ export class LocalRuntimeBridge {
     return this._rpc(RUNTIME_ACTION.RT_TASK_RUN, payload)
   }
 
+  /**
+   * Fixed Step 6 browser-AI contract. Callers cannot provide a URL, selector,
+   * browser method, executable, environment, provider module or session data.
+   */
+  async runDeepSeekTask({ prompt, correlationId, conversationId, messageId, timeoutMs } = {}) {
+    const payload = {
+      service: 'browser.deepseek',
+      prompt,
+      correlationId,
+      conversationId,
+      messageId,
+    }
+    if (timeoutMs !== undefined) payload.timeoutMs = timeoutMs
+    return this._rpc(RUNTIME_ACTION.RT_TASK_RUN, payload)
+  }
+
   async stopTask(taskId) {
     return this._rpc(RUNTIME_ACTION.RT_TASK_STOP, { taskId })
   }

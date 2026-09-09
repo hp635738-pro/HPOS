@@ -31,6 +31,8 @@ export const RUNTIME_EVENT_TYPE = Object.freeze({
   STATUS: 'runtime.status',
   TASK_QUEUED: 'task.queued',
   TASK_STARTED: 'task.started',
+  TASK_GENERATING: 'task.generating',
+  TASK_STREAMING: 'task.streaming',
   TASK_COMPLETED: 'task.completed',
   TASK_FAILED: 'task.failed',
   TASK_CANCELLED: 'task.cancelled',

@@ -84,6 +84,32 @@ function rpcFetch(payloadFor) {
   assert(JSON.parse(calls[1].options.body).action === RUNTIME_ACTION.RT_TASK_STOP, 'stopTask sends RT_TASK_STOP')
 }
 
+/* Browser DeepSeek task uses a second fixed contract, never generic browser data. */
+{
+  const { calls, fetchImpl } = rpcFetch((request) => ({
+    taskId: 'task-deepseek01',
+    status: 'QUEUED',
+    service: request.payload.service,
+    correlationId: request.payload.correlationId,
+  }))
+  const bridge = new LocalRuntimeBridge({ fetchImpl })
+  await bridge.runDeepSeekTask({
+    prompt: 'hello',
+    correlationId: 'message-abcdefgh',
+    conversationId: 'conversation-abcdefgh',
+    messageId: 'message-abcdefgh',
+    cookies: 'must not cross',
+    browserUrl: 'https://evil.example',
+    command: 'arbitrary',
+  })
+  const payload = JSON.parse(calls[0].options.body).payload
+  assert(payload.service === 'browser.deepseek', 'DeepSeek chat is pinned to browser.deepseek')
+  assert(Object.keys(payload).sort().join(',') === 'conversationId,correlationId,messageId,prompt,service',
+    'only the fixed DeepSeek fields are forwarded')
+  assert(!JSON.stringify(payload).includes('must not cross') && !JSON.stringify(payload).includes('evil.example'),
+    'session/browser extras are absent from RPC')
+}
+
 /* unauthorized HTTP response */
 {
   const bridge = new LocalRuntimeBridge({

@@ -17,10 +17,10 @@
  * event loop that answers RPC. The daemon owns only the bounds — timeout, kill
  * chain, environment, workspace, concurrency.
  *
- * Still M1 infrastructure only: NO DeepSeek logic, NO shell, NO outbound
- * network calls, NO generic exec endpoint. The Linux backend (Step 5) is an
- * invisible execution capability behind that router: it reports a verdict, runs
- * registered stub services when a real adapter exists, and installs nothing.
+ * Step 5 adds a capability-gated Linux backend behind the service router;
+ * Step 6 adds a fixed browser.deepseek route in an isolated provider child.
+ * The daemon still has NO shell or generic exec/browser endpoint, installs
+ * nothing, and performs no provider work in its own event loop.
  *
  * Exports:
  *   createRuntime(opts) → { start(), stop(), tasks, supervisor, capabilities,
@@ -44,11 +44,11 @@ import { ERROR, ENGINE, VERSION, isWellFormedRequest, flatError } from './protoc
 import { createLogger } from './log.js'
 import { EVENT_TYPE, STOP_REASON, createEventBus } from './events.js'
 import { measureRuntimeMetrics, uptimeMs } from './metrics.js'
+import { resolveBrowserSessionConfig } from './browser/contracts.js'
 import { createBackendRouter, createNativeBackend, createLinuxBackend } from './backend.js'
-import { executorOf } from './executors.js'
+import { EXECUTOR, PLANNED_SERVICE_NAMES, executorOf } from './executors.js'
 import { detectLinuxCapabilities, publicLinuxCapabilities, summarizeLinuxCapabilities } from './linux/capabilities.js'
 import { createLinuxLauncher } from './linux/launcher.js'
-import { EXECUTOR, PLANNED_SERVICE_NAMES } from './executors.js'
 
 export const DEFAULT_PORT = 5190
 
@@ -81,6 +81,7 @@ export function createRuntime({
 
   const limits = resolveLimits({ env, overrides: maxActive == null ? {} : { maxActive } })
   const capabilities = detectCapabilities({ limits })
+  const browserSession = resolveBrowserSessionConfig(env)
   const workspaceRoot = resolveWorkspaceRoot({ stateDir: dir, env })
   const prepared = prepareWorkspaceRoot({ root: workspaceRoot })
 
@@ -100,8 +101,12 @@ export function createRuntime({
      has to answer "can Linux execution run here" — and it may honestly answer
      no. An unavailable Linux backend must not stop the daemon, and must not
      fall through to the native path either. */
-  const linuxServices = Object.keys(SERVICES).filter(
+  const registeredServices = Object.keys(SERVICES)
+  const linuxServices = registeredServices.filter(
     (name) => executorOf(SERVICES[name]) === EXECUTOR.LINUX,
+  )
+  const nativeServices = registeredServices.filter(
+    (name) => executorOf(SERVICES[name]) === EXECUTOR.NATIVE,
   )
   const linuxCapabilities = publicLinuxCapabilities(
     detectLinuxCapabilities({ platform, env, probeExists, execPath: process.execPath, services: linuxServices }),
@@ -129,7 +134,7 @@ export function createRuntime({
   })
   const backends = injectedBackends || createBackendRouter({
     backends: [
-      createNativeBackend({ supervisor, capabilities, services: Object.keys(SERVICES), log }),
+      createNativeBackend({ supervisor, capabilities, services: nativeServices, log }),
       linuxBackend,
     ],
     log,
@@ -137,8 +142,23 @@ export function createRuntime({
   /* Step 4: the in-memory event bus. Registry publishes lifecycle events here;
      the SSE transport subscribes here. Nothing is written to disk. */
   const events = createEventBus({ log, historyLimit: eventHistoryLimit })
-  const tasks = createTaskRegistry({ maxActive: limits.maxActive, log, supervisor, limits, bus: events, backends })
-  const rpcHandler = createRpcHandler({ tasks, startedAt, log, limits, capabilities, linux: linuxCapabilities })
+  const tasks = createTaskRegistry({
+    maxActive: limits.maxActive,
+    log,
+    supervisor,
+    limits,
+    bus: events,
+    backends,
+    browserConfig: browserSession,
+  })
+  const rpcHandler = createRpcHandler({
+    tasks,
+    startedAt,
+    log,
+    limits,
+    capabilities,
+    linux: linuxCapabilities,
+  })
 
   const claimed = claimEndpoint({ stateDir: dir, port, protocol: VERSION })
   const file = claimed.file
@@ -152,7 +172,7 @@ export function createRuntime({
     const metrics = measureRuntimeMetrics()
     const active = tasks
       .list()
-      .filter((t) => t.status === 'QUEUED' || t.status === 'RUNNING')
+      .filter((t) => ['QUEUED', 'RUNNING', 'GENERATING', 'STREAMING'].includes(t.status))
       .map((t) => ({ taskId: t.taskId, service: t.service, status: t.status }))
     return {
       status: 'up',
@@ -216,6 +236,7 @@ export function createRuntime({
     backends,
     backendStatus,
     limits,
+    browserSession,
     log,
     workspaceRoot: prepared.root,
     endpoint: { file, token, host: '127.0.0.1', port },

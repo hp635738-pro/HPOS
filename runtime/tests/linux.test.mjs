@@ -253,6 +253,8 @@ try {
   {
     assert(Object.keys(SERVICES).includes('linux-stub'), 'a linux service is registered to prove the boundary')
     assert(executorOf(SERVICES.stub) === EXECUTOR.NATIVE, 'the M1 stub stays native')
+    assert(executorOf(SERVICES['browser.deepseek']) === EXECUTOR.NATIVE,
+      'the fixed browser provider stays on the supervised native child path')
     assert(executorOf(SERVICES['linux-stub']) === EXECUTOR.LINUX, 'the linux stub declares the linux executor')
     assert(executorOf({ name: 'legacy' }) === EXECUTOR.NATIVE, 'a service with no executor is native (Steps 1–4)')
     assert(executorOf(undefined) === EXECUTOR.NATIVE, 'and an unknown definition is native too')
@@ -276,8 +278,9 @@ try {
       assert(SERVICES[planned.service] === undefined, `${planned.service} is not registered as runnable`)
       assert(planned.executor === EXECUTOR.LINUX, `${planned.service} would need the linux executor`)
     }
-    assert(PLANNED_SERVICES.length === 4 && isPlannedService('future-deepseek'),
-      'DeepSeek is named as future work only — it is not a service')
+    assert(PLANNED_SERVICES.length === 4 && isPlannedService('future-deepseek')
+      && SERVICES['browser.deepseek'] && !SERVICES['future-deepseek'],
+    'the future Linux placeholder remains unreachable and distinct from browser.deepseek')
   }
 
   /* --------------------------- 4. the workspace gate --------------------- */

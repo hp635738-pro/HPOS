@@ -1,27 +1,28 @@
 import { useRef } from 'react'
 import MessageList from '../components/chat/MessageList'
 import MessageComposer from '../components/chat/MessageComposer'
-import BridgeStatus from '../components/chat/BridgeStatus'
-import { createMessage, getAssistantReply } from '../lib/chat/mock'
-import { getBrowserBridge } from '../lib/bridge'
-import { getDeepSeekConnector } from '../lib/bridge/DeepSeekConnector.js'
-import { ERROR } from '../lib/bridge/protocol.js'
-import { getBinding } from '../lib/storage/deepseekBindingStore.js'
+import RuntimeDeepSeekStatus from '../components/chat/RuntimeDeepSeekStatus'
+import { createMessage } from '../lib/chat/mock'
+import {
+  DEEPSEEK_RUNTIME_ERROR,
+  getDeepSeekRuntimeClient,
+} from '../lib/bridge/DeepSeekRuntimeClient.js'
 import { useConversations } from '../lib/chat/useConversations.js'
 import {
   createConversation,
   getActiveId,
+  getConversation,
   patchMessage,
   saveMessage,
 } from '../lib/storage/conversationStore.js'
 
 /**
- * The AI chats page. Renders the active conversation from the store.
- * When the browser bridge is connected, prompts route to DeepSeekConnector.
- * Otherwise Step 1 local replies keep the composer usable.
+ * AI Chat → local runtime → supervised browser.deepseek task.
  *
- * Streaming patches the same assistant message in the store (debounced to
- * disk; flushed on complete) so switching chats never mixes transcripts.
+ * The legacy extension bridge remains available elsewhere, but it is not the
+ * execution path here. Every prompt is submitted once to the runtime and is
+ * correlated by the pending assistant-message id. Streaming patches the same
+ * persisted HPOS conversation even when the visible conversation changes.
  */
 export default function ChatPage() {
   const { ready, active } = useConversations()
@@ -33,15 +34,21 @@ export default function ChatPage() {
     return createConversation({ provider: 'deepseek' }).id
   }
 
-  const stop = (id) => {
-    const convId = inflight.current?.conversationId || getActiveId()
-    const ds = getDeepSeekConnector()
-    ds.stop().catch((err) => {
-      if (!convId) return
-      patchMessage(convId, id, {
-        notice: err?.code === ERROR.STOP_NOT_AVAILABLE
-          ? (err.message || 'Stop is not available on this page')
-          : (err?.message || 'Could not stop'),
+  const stop = (messageId) => {
+    const current = inflight.current
+    if (!current || current.messageId !== messageId || !current.taskId) {
+      const convId = current?.conversationId || getActiveId()
+      if (convId) {
+        patchMessage(convId, messageId, {
+          notice: 'The runtime task is not ready to stop yet.',
+        }, { persist: 'flush' })
+      }
+      return
+    }
+    getDeepSeekRuntimeClient().stop(current.taskId).then((result) => {
+      if (result.ok) return
+      patchMessage(current.conversationId, messageId, {
+        notice: 'Could not stop the runtime task.',
       }, { persist: 'flush' })
     })
   }
@@ -51,94 +58,98 @@ export default function ChatPage() {
     const userMsg = createMessage({ role: 'user', content })
     const pending = createMessage({ role: 'assistant', content: '', status: 'thinking' })
 
-    const bridge = getBrowserBridge()
-    if (bridge.getStatus() === 'connected') {
-      const ds = getDeepSeekConnector()
-      if (ds.isBusy() || inflight.current) {
-        const blocked = createMessage({
-          role: 'assistant',
-          content: 'A response is still generating',
-          status: 'sent',
-          meta: { error: true, code: ERROR.BUSY },
-        })
-        saveMessage(convId, userMsg, { persist: 'flush' })
-        saveMessage(convId, blocked, { persist: 'flush' })
-        return
-      }
-      if (ds.getStatus() === 'version') {
-        saveMessage(convId, userMsg, { persist: 'flush' })
-        saveMessage(convId, {
-          ...pending,
-          content: 'Extension update required.',
-          status: 'sent',
-          meta: { error: true, code: ERROR.BRIDGE_VERSION_MISMATCH },
-        }, { persist: 'flush' })
-        return
-      }
-
-      saveMessage(convId, userMsg, { persist: 'flush' })
-      saveMessage(convId, { ...pending, stoppable: true }, { persist: 'flush' })
-      inflight.current = { conversationId: convId, messageId: pending.id }
-
-      ds.sendMessage(content, {
-        messageId: pending.id,
-        conversationId: convId,
-        onDelta: (text) => {
-          patchMessage(convId, pending.id, { content: text, status: 'thinking' }, { persist: 'debounce' })
-        },
-        onComplete: (text) => {
-          patchMessage(convId, pending.id, {
-            content: text,
-            status: 'sent',
-            stoppable: false,
-            notice: null,
-          }, { persist: 'flush' })
-          if (inflight.current?.messageId === pending.id) inflight.current = null
-        },
-      }).then((text) => {
-        patchMessage(convId, pending.id, {
-          content: text || '',
-          status: 'sent',
-          stoppable: false,
-          notice: null,
-        }, { persist: 'flush' })
-        if (inflight.current?.messageId === pending.id) inflight.current = null
-      }).catch((err) => {
-        const interrupted = Boolean(err?.interrupted || err?.code === ERROR.REQUEST_INTERRUPTED)
-        const patch = {
-          status: 'sent',
-          stoppable: false,
-          meta: { error: !interrupted, code: err?.code, interrupted },
-        }
-        if (interrupted) {
-          patch.notice = err?.message || 'Connection dropped. Response may be incomplete.'
-          if (typeof err.partial === 'string' && err.partial) patch.content = err.partial
-        } else {
-          patch.content = err?.message || 'Connection error'
-        }
-        patchMessage(convId, pending.id, patch, { persist: 'flush' })
-        if (inflight.current?.messageId === pending.id) inflight.current = null
-      })
-      return
-    }
-
-    if (getBinding(convId)) {
-      saveMessage(convId, userMsg, { persist: 'flush' })
-      saveMessage(convId, {
-        ...pending,
-        content: 'DeepSeek disconnected. Reconnect to continue.',
+    if (inflight.current) {
+      const blocked = createMessage({
+        role: 'assistant',
+        content: 'A DeepSeek response is still running. Stop it or wait before sending another message.',
         status: 'sent',
-        meta: { error: true, code: ERROR.BRIDGE_DISCONNECTED },
-      }, { persist: 'flush' })
+        meta: { error: true, code: DEEPSEEK_RUNTIME_ERROR.BUSY },
+      })
+      saveMessage(convId, userMsg, { persist: 'flush' })
+      saveMessage(convId, blocked, { persist: 'flush' })
       return
     }
 
     saveMessage(convId, userMsg, { persist: 'flush' })
-    saveMessage(convId, pending, { persist: 'flush' })
-    inflight.current = { conversationId: convId, messageId: pending.id }
-    getAssistantReply(content).then((reply) => {
-      patchMessage(convId, pending.id, { content: reply, status: 'sent' }, { persist: 'flush' })
+    saveMessage(convId, { ...pending, stoppable: true }, { persist: 'flush' })
+    inflight.current = {
+      conversationId: convId,
+      messageId: pending.id,
+      taskId: null,
+    }
+
+    const clearIfCurrent = () => {
       if (inflight.current?.messageId === pending.id) inflight.current = null
+    }
+
+    getDeepSeekRuntimeClient().send(content, {
+      correlationId: pending.id,
+      conversationId: convId,
+      messageId: pending.id,
+      timeoutMs: 180000,
+      onQueued: ({ taskId }) => {
+        if (inflight.current?.messageId === pending.id) inflight.current.taskId = taskId
+      },
+      onGenerating: () => {
+        patchMessage(convId, pending.id, {
+          status: 'thinking',
+          stoppable: true,
+          notice: null,
+        }, { persist: 'debounce' })
+      },
+      onDelta: (text) => {
+        patchMessage(convId, pending.id, {
+          content: text,
+          status: 'thinking',
+          stoppable: true,
+          notice: null,
+        }, { persist: 'debounce' })
+      },
+      onComplete: (text) => {
+        patchMessage(convId, pending.id, {
+          content: text,
+          status: 'sent',
+          stoppable: false,
+          notice: null,
+          meta: { provider: 'deepseek', executor: 'runtime-browser' },
+        }, { persist: 'flush' })
+        clearIfCurrent()
+      },
+    }).then((text) => {
+      patchMessage(convId, pending.id, {
+        content: text || '',
+        status: 'sent',
+        stoppable: false,
+        notice: null,
+        meta: { provider: 'deepseek', executor: 'runtime-browser' },
+      }, { persist: 'flush' })
+      clearIfCurrent()
+    }).catch((err) => {
+      const cancelled = err?.code === DEEPSEEK_RUNTIME_ERROR.CANCELLED || err?.cancelled === true
+      const interrupted = err?.code === DEEPSEEK_RUNTIME_ERROR.INTERRUPTED
+      const partial = getConversation(convId)?.messages.find((message) => message.id === pending.id)?.content || ''
+      patchMessage(convId, pending.id, {
+        /* Streaming text already persisted by onDelta; never erase it with an
+           error. With no partial output, the structured failure is the bubble. */
+        ...(!partial ? { content: err?.message || 'DeepSeek runtime task failed.' } : {}),
+        status: 'sent',
+        stoppable: false,
+        notice: cancelled
+          ? 'Generation stopped.'
+          : interrupted
+            ? (err?.message || 'Runtime interrupted. The prompt was not sent again.')
+            : partial
+              ? (err?.message || 'DeepSeek runtime task failed.')
+              : null,
+        meta: {
+          error: !cancelled,
+          interrupted,
+          cancelled,
+          code: err?.code || DEEPSEEK_RUNTIME_ERROR.INTERRUPTED,
+          executor: 'runtime-browser',
+        },
+      }, { persist: 'flush' })
+      clearIfCurrent()
     })
   }
 
@@ -153,7 +164,7 @@ export default function ChatPage() {
         onSuggestion={send}
         onStop={stop}
       />
-      <BridgeStatus />
+      <RuntimeDeepSeekStatus />
       <MessageComposer key={active?.id || 'none'} onSend={send} />
     </section>
   )

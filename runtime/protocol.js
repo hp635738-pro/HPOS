@@ -47,6 +47,9 @@ export const ERROR = {
   TASK_NOT_CANCELABLE: 'RT_TASK_NOT_CANCELABLE',
   /* the executor refused the task before a child existed (no in-daemon fallback) */
   EXECUTOR_UNAVAILABLE: 'RT_EXECUTOR_UNAVAILABLE',
+  DUPLICATE_TASK: 'RT_DUPLICATE_TASK',
+  PROVIDER_BUSY: 'RT_PROVIDER_BUSY',
+  SECRET_FIELD: 'RT_SECRET_FIELD_REJECTED',
   /* Step 5: the service asked for an execution backend that does not exist here.
      Both codes are refusals — neither is a capability, and neither has a way in. */
   UNKNOWN_EXECUTOR: 'RT_UNKNOWN_EXECUTOR',
