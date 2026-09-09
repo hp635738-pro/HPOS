@@ -14,5 +14,17 @@ export { isCompatibleProtocol } from './protocol.js'
 export { USER_COPY, userMessage } from './errors.js'
 
 export { BrowserBridge, getBrowserBridge } from './BrowserBridge.js'
+export {
+  LocalRuntimeBridge,
+  LocalRuntimeBridgeError,
+  getLocalRuntimeBridge,
+  RUNTIME_ACTION,
+  RUNTIME_ERROR,
+} from './LocalRuntimeBridge.js'
+export {
+  RuntimeConnectionController,
+  RUNTIME_CONNECTION_STATE,
+  getRuntimeConnectionController,
+} from './runtimeConnection.js'
 export { Connector, WebsiteConnector } from './connectors.js'
 export { DeepSeekConnector, getDeepSeekConnector } from './DeepSeekConnector.js'

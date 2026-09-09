@@ -28,8 +28,28 @@ Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke step
 
 Conversations local `localStorage` mein persist hoti hain — koi backend/API nahi.
 
+### Local runtime (M1 Step 3)
+
+The optional local `hpos-runtime` daemon is connected only during Vite development:
+
 ```bash
-npm test        # bridge + conversation store checks
+cd runtime
+npm start       # listens on 127.0.0.1:5190 and writes ~/.hpos/runtime/endpoints.json
+```
+
+With `npm run dev` running from the project root, the browser uses the fixed
+same-origin routes `/hpos-runtime/health` and `/hpos-runtime/rpc`. The Vite
+development proxy reads the local endpoint file, keeps the target on
+`127.0.0.1`, and adds `X-HPOS-Token` server-side. `LocalRuntimeBridge` never
+receives, stores, or sends that credential. `Runtime connected` means
+authenticated `PING` and `RT_STATUS` both succeeded; `/health` is liveness only.
+
+The Step 3 status chip is intentionally small and polls conservatively. The
+runtime task surface remains a fixed stub smoke path; there is no arbitrary task
+or shell UI.
+
+```bash
+npm test        # bridge, runtime-connection, proxy, and storage checks
 ```
 
 ---
@@ -73,7 +93,7 @@ src/
 │   ├── colour.js           hex/rgb/hsv/hsl, contrast, harmony
 │   ├── chat/               message factory + conversation hook
 │   ├── storage/            local conversation store (Step 5)
-│   └── bridge/             BrowserBridge + DeepSeek connector
+│   └── bridge/             BrowserBridge + LocalRuntimeBridge + DeepSeek connector
 │
 ├── pages/
 │   ├── Blank.jsx           empty canvas
