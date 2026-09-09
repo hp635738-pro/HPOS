@@ -78,8 +78,14 @@ function targetPath(req) {
   }
 }
 
-function allowedRoute(pathname, method) {
+/**
+ * Fixed development-route allowlist. /events is an SSE stream — GET only —
+ * proxied exactly like /rpc (the token is injected server-side; the browser
+ * never sees it, and it is never a query parameter).
+ */
+export function isAllowedRuntimeRoute(pathname, method) {
   if (pathname === '/health') return method === 'GET'
+  if (pathname === '/events') return method === 'GET'
   if (pathname === '/rpc') return method === 'POST'
   return false
 }
@@ -123,7 +129,7 @@ function runtimeProxyMiddleware(req, res) {
     sendJson(res, 400, proxyError('RT_INVALID_REQUEST', 'Invalid runtime path'))
     return
   }
-  if (!allowedRoute(pathname, req.method)) {
+  if (!isAllowedRuntimeRoute(pathname, req.method)) {
     sendJson(res, 404, proxyError('NOT_FOUND', 'Unknown runtime path'))
     return
   }

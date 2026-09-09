@@ -26,5 +26,17 @@ export {
   RUNTIME_CONNECTION_STATE,
   getRuntimeConnectionController,
 } from './runtimeConnection.js'
+export {
+  RuntimeEventStream,
+  RUNTIME_EVENT_CHANNEL,
+  RUNTIME_EVENT_TYPE,
+  RUNTIME_STREAM_STATE,
+  isRuntimeEvent,
+} from './runtimeEvents.js'
+export {
+  RuntimeActivityController,
+  ACTIVITY_LIMITS,
+  getRuntimeActivityController,
+} from './runtimeActivity.js'
 export { Connector, WebsiteConnector } from './connectors.js'
 export { DeepSeekConnector, getDeepSeekConnector } from './DeepSeekConnector.js'

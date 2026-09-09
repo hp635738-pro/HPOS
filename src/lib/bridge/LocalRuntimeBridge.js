@@ -17,6 +17,7 @@ import {
   makeRequest,
   makeRequestId,
 } from './protocol.js'
+import { RuntimeEventStream } from './runtimeEvents.js'
 
 export const RUNTIME_ACTION = Object.freeze({
   PING: 'PING',
@@ -39,6 +40,7 @@ export const RUNTIME_ERROR = Object.freeze({
 const RUNTIME_BASE = '/hpos-runtime'
 const RPC_PATH = `${RUNTIME_BASE}/rpc`
 const HEALTH_PATH = `${RUNTIME_BASE}/health`
+const EVENTS_PATH = `${RUNTIME_BASE}/events`
 const DEFAULT_TIMEOUT_MS = 3000
 const RUNTIME_ACTIONS = new Set(Object.values(RUNTIME_ACTION))
 
@@ -123,6 +125,16 @@ export class LocalRuntimeBridge {
 
   async stopTask(taskId) {
     return this._rpc(RUNTIME_ACTION.RT_TASK_STOP, { taskId })
+  }
+
+  /**
+   * Subscribe to the runtime event stream (Step 4). The EventSource talks to
+   * the same-origin dev route; the credential is added by the Vite proxy, so
+   * no token exists in this module. Returns a RuntimeEventStream (start with
+   * `.start()`, stop with `.close()`).
+   */
+  openEventStream(options = {}) {
+    return new RuntimeEventStream({ url: EVENTS_PATH, ...options })
   }
 
   /**
@@ -255,4 +267,4 @@ export function getLocalRuntimeBridge() {
   return singleton
 }
 
-export { RUNTIME_BASE, RPC_PATH, HEALTH_PATH }
+export { RUNTIME_BASE, RPC_PATH, HEALTH_PATH, EVENTS_PATH }

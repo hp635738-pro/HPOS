@@ -7,7 +7,8 @@
  *       ──▶ process supervisor                   (one child process per task)
  *       ──▶ task registry                        (QUEUED → RUNNING → …)
  *       ──▶ actions allowlist (PING, RT_STATUS, RT_TASK_RUN, RT_TASK_STOP)
- *       ──▶ HTTP transport (127.0.0.1 only)
+ *       ──▶ event bus + metrics                  (Step 4 observability)
+ *       ──▶ HTTP transport (127.0.0.1 only; /health, /rpc, /events)
  *
  * The daemon is a supervisor, not an execution environment: task code runs in a
  * child process, so nothing a task does can block, crash or be trusted by the
@@ -19,7 +20,7 @@
  *
  * Exports:
  *   createRuntime(opts) → { start(), stop(), tasks, supervisor, capabilities,
- *                           workspaceRoot, log, endpoint, ... }
+ *                           workspaceRoot, log, endpoint, events, ... }
  *                          (used by tests: port 0 + temp state dir)
  *   main()               → CLI entrypoint (env-driven)
  */
@@ -31,8 +32,10 @@ import { createProcessSupervisor } from './supervisor.js'
 import { detectCapabilities, heapArgs, resolveLimits } from './limits.js'
 import { prepareWorkspaceRoot, pruneWorkspaceRoot, resolveWorkspaceRoot } from './workspace.js'
 import { claimEndpoint, releaseEndpoint, resolveStateDir, updateEndpointPort } from './endpoints.js'
-import { ERROR, VERSION, isWellFormedRequest, flatError } from './protocol.js'
+import { ERROR, ENGINE, VERSION, isWellFormedRequest, flatError } from './protocol.js'
 import { createLogger } from './log.js'
+import { EVENT_TYPE, STOP_REASON, createEventBus } from './events.js'
+import { measureRuntimeMetrics, uptimeMs } from './metrics.js'
 
 export const DEFAULT_PORT = 5190
 
@@ -42,6 +45,9 @@ export function createRuntime({
   logLevel = 'info',
   maxActive,
   env = process.env,
+  eventHistoryLimit,
+  eventHeartbeatMs,
+  maxEventClients,
   /* Test seam: drive the daemon with a stand-in supervisor. The workspace root
      is not injectable — HPOS_RUNTIME_TASK_WORKSPACE_ROOT is the one knob. */
   supervisor: injectedSupervisor = null,
@@ -64,12 +70,43 @@ export function createRuntime({
     maxConcurrent: limits.maxActive,
     log,
   })
-  const tasks = createTaskRegistry({ maxActive: limits.maxActive, log, supervisor, limits })
+  /* Step 4: the in-memory event bus. Registry publishes lifecycle events here;
+     the SSE transport subscribes here. Nothing is written to disk. */
+  const events = createEventBus({ log, historyLimit: eventHistoryLimit })
+  const tasks = createTaskRegistry({ maxActive: limits.maxActive, log, supervisor, limits, bus: events })
   const rpcHandler = createRpcHandler({ tasks, startedAt, log, limits, capabilities })
 
   const claimed = claimEndpoint({ stateDir: dir, port, protocol: VERSION })
   const file = claimed.file
   const token = claimed.token
+
+  /** Allowlisted, metric-only status payload (no env, no paths, no token). */
+  function statusFields() {
+    const metrics = measureRuntimeMetrics()
+    const active = tasks
+      .list()
+      .filter((t) => t.status === 'QUEUED' || t.status === 'RUNNING')
+      .map((t) => ({ taskId: t.taskId, service: t.service, status: t.status }))
+    return {
+      status: 'up',
+      pid: metrics.pid,
+      uptimeMs: uptimeMs(startedAt),
+      engine: ENGINE,
+      version: VERSION,
+      tasks: tasks.counters(),
+      active,
+      metrics: { cpu: metrics.cpu, memory: metrics.memory },
+    }
+  }
+
+  /** The transport-facing event handle — bus plus a status snapshot factory. */
+  const eventsHub = {
+    bus: events,
+    subscribe: (listener) => events.subscribe(listener),
+    eventsAfter: (lastId) => events.eventsAfter(lastId),
+    makeUnpublished: (type, fields) => events.makeUnpublished(type, fields),
+    statusFields,
+  }
 
   function handleRpc(envelope) {
     if (!isWellFormedRequest(envelope)) {
@@ -83,6 +120,9 @@ export function createRuntime({
     log,
     meta: { version: VERSION, startedAt },
     onRpc: handleRpc,
+    events: eventsHub,
+    eventHeartbeatMs,
+    maxEventClients,
   })
 
   let stopping = false
@@ -96,6 +136,7 @@ export function createRuntime({
     log,
     workspaceRoot: prepared.root,
     endpoint: { file, token, host: '127.0.0.1', port },
+    events: eventsHub,
 
     /** Listen on 127.0.0.1 only. Returns the bound address. */
     start() {
@@ -114,6 +155,11 @@ export function createRuntime({
             maxActive: limits.maxActive,
             defaultTimeoutMs: limits.defaultTimeoutMs,
           })
+          /* Seed the event stream: the runtime is up, and the first status
+             snapshot gives a reconnecting client counters + metrics even if
+             no task ever runs. */
+          events.publish(EVENT_TYPE.STARTED, { pid: process.pid, version: VERSION })
+          events.publish(EVENT_TYPE.STATUS, statusFields())
           resolve(addr)
         })
       })
@@ -133,6 +179,12 @@ export function createRuntime({
       } catch (err) {
         log.warn('runtime_task_shutdown_failed', { code: String(err && err.code ? err.code : 'ERR') })
         supervisor.killAllSync()
+      }
+      /* Last word to any connected event stream, then force those streams shut
+         so server.close() below does not wait on open keep-alive sockets. */
+      events.publish(EVENT_TYPE.STOPPED, { reason: STOP_REASON.SHUTDOWN })
+      if (server.sseClients && typeof server.sseClients.closeAll === 'function') {
+        server.sseClients.closeAll()
       }
       await new Promise((resolve) => {
         server.close(() => resolve())

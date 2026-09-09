@@ -3,7 +3,12 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readRuntimeEndpoint, LOOPBACK_HOST, RUNTIME_PROXY_PREFIX } from './vite-runtime-plugin.js'
+import {
+  readRuntimeEndpoint,
+  LOOPBACK_HOST,
+  RUNTIME_PROXY_PREFIX,
+  isAllowedRuntimeRoute,
+} from './vite-runtime-plugin.js'
 
 const root = dirname(fileURLToPath(import.meta.url))
 
@@ -46,6 +51,13 @@ try {
 const bridgeSource = readFileSync(join(root, 'src/lib/bridge/LocalRuntimeBridge.js'), 'utf8')
 assert(!bridgeSource.includes('X-HPOS-Token'), 'browser-facing bridge cannot inject the runtime credential')
 assert(!bridgeSource.includes('endpoints.json'), 'browser-facing bridge cannot read endpoint files')
+
+/* /events is an SSE stream through the same server-side token boundary. */
+assert(isAllowedRuntimeRoute('/events', 'GET'), 'proxy forwards GET /events')
+assert(!isAllowedRuntimeRoute('/events', 'POST'), 'proxy refuses non-GET /events')
+assert(!isAllowedRuntimeRoute('/events?token=abc', 'GET'), 'proxy strips query strings before routing')
+assert(!isAllowedRuntimeRoute('/rpc', 'GET'), 'proxy refuses GET /rpc')
+assert(!isAllowedRuntimeRoute('/anything', 'GET'), 'proxy refuses unknown runtime paths')
 
 if (failed) {
   console.error(`\n${failed} runtime proxy test(s) failed`)
