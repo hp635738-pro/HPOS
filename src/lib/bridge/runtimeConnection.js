@@ -60,8 +60,13 @@ export class RuntimeConnectionController {
     }
     this._bridge = bridge
     this._pollMs = Number.isFinite(pollMs) && pollMs > 0 ? Math.floor(pollMs) : DEFAULT_POLL_MS
-    this._setInterval = setIntervalFn
-    this._clearInterval = clearIntervalFn
+    /* Browser-safe timer receivers. The native setInterval/clearInterval (the
+       defaults here) must be invoked with the global object as their `this`;
+       calling them as methods of this instance throws `TypeError: Illegal
+       invocation` in the browser. Binding to globalThis fixes the receiver
+       while keeping the injected-function test seam intact. */
+    this._setInterval = typeof setIntervalFn === 'function' ? setIntervalFn.bind(globalThis) : setIntervalFn
+    this._clearInterval = typeof clearIntervalFn === 'function' ? clearIntervalFn.bind(globalThis) : clearIntervalFn
     this._now = now
     this._snapshot = initialSnapshot()
     this._listeners = new Set()
