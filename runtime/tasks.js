@@ -1,22 +1,34 @@
 /**
- * Task registry + stub executor (M1).
+ * Task registry + supervised executor (M1 — Step 2).
  *
- * Proves the UI → daemon → task registry → task status path with a
- * minimal lifecycle state machine per task:
+ * The registry owns the task state machine; the process supervisor owns the
+ * operating-system child. A task never executes here.
  *
- *   QUEUED → RUNNING → COMPLETE
- *     ↘ CANCELLED     ↗  (RT_TASK_STOP from either non-terminal state)
+ *   QUEUED ──(slot fires → supervisor.start)──▶ RUNNING ──▶ COMPLETE
+ *     │                                          │
+ *     │ cancel: no process is ever made          │ cancel: child is terminated
+ *     ▼                                          ▼
+ *   CANCELLED ◀──────────────────────────────── CANCELLED
  *
- * M1 has exactly one registered service — `stub` — which does nothing
- * but run for a bounded duration. No process spawning, no shell, no
- * network, no DeepSeek. The shape (registry + per-service limits +
- * lifecycle + correlation ids) is what later services plug into.
+ *   RUNNING ──▶ FAILED   (non-zero exit, spawn failure, timeout, workspace
+ *                         refusal — see FAILURE kinds in supervisor.js)
  *
- * Task records are plain data (JSON-safe). Timers live in a WeakMap so
- * they are never serialized into responses.
+ * Cancellation is reachable from both non-terminal states, and the terminal
+ * state a cancelled task reaches can never be overwritten by the child's late
+ * outcome.
+ *
+ * Concurrency is admitted at enqueue time (`maxActive`), so a queued task is
+ * always inside the configured bound, and the supervisor applies the same cap
+ * again at spawn time. Nothing here re-runs a task: a FAILED outcome is final.
+ *
+ * Task records are plain, JSON-safe data. Process handles, timers and stdout
+ * live in the supervisor and are never serialized into a response.
+ *
+ * No dependencies, Node 18+.
  */
 
 import { ERROR, rtError } from './protocol.js'
+import { LIMIT_DEFAULTS } from './limits.js'
 
 export const TASK_STATE = {
   QUEUED: 'QUEUED',
@@ -27,15 +39,31 @@ export const TASK_STATE = {
 }
 
 const ACTIVE_STATES = new Set([TASK_STATE.QUEUED, TASK_STATE.RUNNING])
+const TERMINAL_STATES = new Set([TASK_STATE.COMPLETE, TASK_STATE.CANCELLED, TASK_STATE.FAILED])
 const TASK_ID_RE = /^task-[A-Za-z0-9._:-]{8,72}$/
 
-/** The only service registered in M1. */
+/**
+ * The only service registered in M1. `execMode` is what the child is told to
+ * do — a fixed keyword from EXEC_MODES, never caller-chosen text.
+ */
 export const SERVICES = {
   stub: {
     name: 'stub',
-    description: 'M1 lifecycle stub — runs for durationMs, no side effects',
+    description: 'M1 lifecycle stub — runs a supervised child for durationMs, no side effects',
+    execMode: 'sleep',
+    idleMode: 'noop',
   },
 }
+
+/**
+ * Behaviour the child runner may be asked to perform. Internal, closed set,
+ * and every entry is a no-op by design (see runner.js). Nothing in the RPC
+ * payload can name a mode: the allowlist here is applied *after* the payload
+ * pickers have dropped unknown fields, so a caller cannot reach past `stub`.
+ * Kept in sync with MODES in runner.js, which re-validates independently — the
+ * child is where enforcement actually lives.
+ */
+export const EXEC_MODES = Object.freeze(['noop', 'sleep', 'hang', 'fail', 'inspect-env', 'inspect-workspace', 'flood'])
 
 const MAX_TASKS_HELD = 512
 const DEFAULT_DURATION_MS = 50
@@ -53,11 +81,29 @@ export function isValidTaskId(id) {
   return typeof id === 'string' && TASK_ID_RE.test(id)
 }
 
-export function createTaskRegistry({ maxActive = 16, now = () => Date.now(), log } = {}) {
-  const timers = new WeakMap()
+export function isTerminalStatus(status) {
+  return TERMINAL_STATES.has(status)
+}
+
+/**
+ * @param supervisor process supervisor (see supervisor.js). Required to run:
+ *        without one, `run()` refuses rather than quietly executing in-process.
+ */
+export function createTaskRegistry({
+  maxActive = LIMIT_DEFAULTS.maxActive,
+  now = () => Date.now(),
+  log,
+  supervisor = null,
+  limits = LIMIT_DEFAULTS,
+  /* Test/embedding hook: widen the observable QUEUED window. */
+  startDelayMs = START_DELAY_MS,
+} = {}) {
+  /** taskId → { start, supervisorOwned } — timers stay out of the records. */
+  const slots = new Map()
   const tasks = new Map()
   const counters = { total: 0, completed: 0, cancelled: 0, failed: 0 }
   const debug = log && log.debug ? (event, meta) => log.debug(event, meta) : () => {}
+  const warn = log && log.warn ? (event, meta) => log.warn(event, meta) : () => {}
 
   function recordState(task, state, at = now()) {
     task.status = state
@@ -70,119 +116,308 @@ export function createTaskRegistry({ maxActive = 16, now = () => Date.now(), log
     return n
   }
 
+  function liveCount() {
+    return supervisor ? supervisor.activeCount() : 0
+  }
+
   function evictIfFull() {
     if (tasks.size < MAX_TASKS_HELD) return
     for (const [id, t] of tasks) {
       if (!ACTIVE_STATES.has(t.status)) {
         tasks.delete(id)
+        slots.delete(id)
         return
       }
     }
-    /* all tasks active and over the hold cap: keep them all (bounded by maxActive anyway) */
+    /* all held tasks are active and over the cap: keep them (bounded by maxActive anyway) */
   }
 
-  function finish(task, state, at = now()) {
-    const entry = timers.get(task)
-    if (entry) {
-      clearTimeout(entry.start)
-      clearTimeout(entry.stop)
+  function snapshot(task) {
+    return {
+      ...task,
+      history: task.history.slice(),
+      failure: task.failure ? { ...task.failure } : null,
+      result: task.result ? { ...task.result } : null,
+      resources: task.resources ? { ...task.resources } : null,
     }
-    recordState(task, state, at)
-    task.endedAt = at
+  }
+
+  function clearStartTimer(taskId) {
+    const slot = slots.get(taskId)
+    if (!slot || !slot.start) return
+    clearTimeout(slot.start)
+    slot.start = null
+  }
+
+  /**
+   * Move a task to a terminal state. Idempotent by construction: a task that
+   * already left the active set never changes state again.
+   */
+  function finish(task, state, extra = null) {
+    if (TERMINAL_STATES.has(task.status)) return task
+    clearStartTimer(task.taskId)
+    recordState(task, state)
+    task.endedAt = now()
     if (state === TASK_STATE.COMPLETE) counters.completed += 1
     else if (state === TASK_STATE.CANCELLED) counters.cancelled += 1
     else if (state === TASK_STATE.FAILED) counters.failed += 1
-    debug('task_finished', { taskId: task.taskId, state })
+    if (extra) Object.assign(task, extra)
+    debug('task_finished', { taskId: task.taskId, state, failure: task.failure ? task.failure.kind : null })
+    return task
   }
 
-  function start(task, at = now()) {
-    if (task.status !== TASK_STATE.QUEUED) return
-    const entry = timers.get(task)
-    if (entry) clearTimeout(entry.start)
-    recordState(task, TASK_STATE.RUNNING, at)
-    task.startedAt = at
-    debug('task_started', { taskId: task.taskId, service: task.service })
-    if (entry) {
-      entry.stop = setTimeout(() => finish(task, TASK_STATE.COMPLETE), task.durationMs)
+  /* ------------------------------------------------------------- enqueue */
+
+  function run({ service, durationMs, note, timeoutMs, mode } = {}) {
+    if (!supervisor) {
+      /* Loud refusal — this is what guarantees task code never runs in the
+         daemon. A registry without a supervisor cannot execute anything. */
+      throw rtError(ERROR.EXECUTOR_UNAVAILABLE, 'The task executor is unavailable (no process supervisor)')
     }
-  }
-
-  function run({ service, durationMs, note }) {
     if (activeCount() >= maxActive) {
       throw rtError(ERROR.QUEUE_FULL, `Task queue is full (maxActive=${maxActive})`)
     }
+
+    /* Belt and braces: the RPC picker only ever forwards known services, but a
+       caller that reaches the registry directly is validated here too. */
+    const def = SERVICES[service]
+    if (!def) throw rtError(ERROR.UNKNOWN_SERVICE, `Unknown service "${String(service).slice(0, 32)}"`)
+
+    /* `mode` is an internal override. Unknown values are refused, not run. */
+    let execMode = def.execMode
+    if (mode != null) {
+      if (!EXEC_MODES.includes(mode)) {
+        throw rtError(ERROR.INVALID_PAYLOAD, `Unknown execution mode "${String(mode).slice(0, 32)}"`)
+      }
+      execMode = mode
+    }
+    if (durationMs === 0 && def.idleMode) execMode = mode == null ? def.idleMode : execMode
+
     const task = {
       taskId: makeTaskId(),
       service,
       note: note || null,
       durationMs,
+      timeoutMs: timeoutMs == null ? limits.defaultTimeoutMs : timeoutMs,
+      mode: execMode,
       status: TASK_STATE.QUEUED,
       createdAt: now(),
       startedAt: null,
       endedAt: null,
       history: [],
+      /* process facts, filled in by the supervisor */
+      pid: null,
+      workspaceDir: null,
+      exitCode: null,
+      exitSignal: null,
+      timedOut: false,
+      failure: null,
+      result: null,
+      resources: null,
+      workspaceRemoved: null,
+      processEndedAt: null,
+      cancelNote: null,
+      /* Documented once, never incremented: M1 does not retry a task. */
+      attempts: 1,
     }
     recordState(task, TASK_STATE.QUEUED)
     tasks.set(task.taskId, task)
     counters.total += 1
     evictIfFull()
-    timers.set(task, {
-      start: setTimeout(() => start(task), START_DELAY_MS),
-      stop: null,
-    })
-    debug('task_queued', { taskId: task.taskId, service })
-    return task
+    slots.set(task.taskId, { start: null })
+
+    const slot = slots.get(task.taskId)
+    slot.start = setTimeout(() => { clearStartTimer(task.taskId); begin(task) }, startDelayMs)
+    if (slot.start.unref) slot.start.unref()
+
+    debug('task_queued', { taskId: task.taskId, service, timeoutMs: task.timeoutMs })
+    return snapshot(task)
   }
+
+  /* ---------------------------------------------------------------- launch */
+
+  function begin(task) {
+    if (task.status !== TASK_STATE.QUEUED) return
+    const slot = slots.get(task.taskId)
+    recordState(task, TASK_STATE.RUNNING)
+    task.startedAt = now()
+    debug('task_started', { taskId: task.taskId, service: task.service, mode: task.mode, pid: null })
+
+    let started
+    try {
+      started = supervisor.start({
+        taskId: task.taskId,
+        mode: task.mode,
+        durationMs: task.durationMs,
+        timeoutMs: task.timeoutMs,
+      })
+    } catch (err) {
+      finish(task, TASK_STATE.FAILED, {
+        failure: {
+          kind: err && err.failureKind ? err.failureKind : 'SPAWN_FAILED',
+          message: err && err.message ? String(err.message).slice(0, 200) : 'Task process could not be started',
+        },
+      })
+      if (slot) slots.delete(task.taskId)
+      return
+    }
+
+    task.pid = started.pid
+    task.workspaceDir = started.workspaceDir
+    /* What the supervisor actually enforced wins over what was asked for, so
+       the record can never advertise a timeout that does not exist. */
+    if (Number.isInteger(started.timeoutMs)) task.timeoutMs = started.timeoutMs
+    debug('task_process_assigned', { taskId: task.taskId, pid: started.pid })
+
+    started.done
+      .then((outcome) => applyOutcome(task, outcome || {}))
+      .catch(() => {
+        /* The supervisor promises never reject; this is the paranoid path. */
+        warn('task_outcome_lost', { taskId: task.taskId })
+        applyOutcome(task, { status: TASK_STATE.FAILED, failure: { kind: 'INTERNAL', message: 'Task outcome was lost' } })
+      })
+  }
+
+  /** Fold the supervisor's outcome into the record, without reviving a dead task. */
+  function applyOutcome(task, outcome) {
+    const resources = outcome.resources || null
+    task.resources = resources
+    if (resources) {
+      task.exitCode = resources.exitCode == null ? null : resources.exitCode
+      task.exitSignal = resources.exitSignal == null ? null : resources.exitSignal
+    }
+    task.timedOut = outcome.timedOut === true
+    /* Compact summary only — a future service's payload does not belong in a
+       status response, and neither does anything unbounded. */
+    task.result = outcome.result
+      ? { ok: outcome.result.ok === true, mode: outcome.result.mode || null, reason: outcome.result.reason || null }
+      : null
+    if (outcome.workspaceDir) task.workspaceDir = outcome.workspaceDir
+    task.workspaceRemoved = outcome.workspaceCleanup ? outcome.workspaceCleanup.removed === true : null
+    task.processEndedAt = now()
+    /* The child is gone either way. */
+    task.pid = null
+
+    const slot = slots.get(task.taskId)
+    if (slot) slots.delete(task.taskId)
+
+    if (!ACTIVE_STATES.has(task.status)) {
+      /* Cancelled while the child was running: CANCELLED stands, facts recorded. */
+      return
+    }
+    if (outcome.status === TASK_STATE.COMPLETE) finish(task, TASK_STATE.COMPLETE)
+    else if (outcome.status === TASK_STATE.CANCELLED) finish(task, TASK_STATE.CANCELLED)
+    else finish(task, TASK_STATE.FAILED, { failure: outcome.failure || { kind: 'FAILED', message: 'Task failed' } })
+  }
+
+  /* --------------------------------------------------------------- queries */
 
   function get(taskId) {
     const t = tasks.get(taskId)
-    return t ? { ...t } : null
+    return t ? snapshot(t) : null
   }
 
   function list() {
     const out = []
-    for (const t of tasks.values()) out.push({ taskId: t.taskId, status: t.status, service: t.service })
+    for (const t of tasks.values()) {
+      out.push({ taskId: t.taskId, status: t.status, service: t.service, pid: t.pid })
+    }
     return out
   }
 
+  /** Raw record for in-process consumers (tests); copies like `get` otherwise. */
+  function peek(taskId) {
+    return tasks.get(taskId) || null
+  }
+
+  /* -------------------------------------------------------------- cancel */
+
+  /**
+   * Cancel a task. QUEUED → no process is ever spawned; RUNNING → the
+   * supervisor kills the child. The registry-side transition is immediate so
+   * the RPC answer is synchronous, and the outcome handler will not overwrite
+   * CANCELLED when the child finally settles.
+   */
   function stop(taskId) {
     const task = tasks.get(taskId)
     if (!task) throw rtError(ERROR.TASK_NOT_FOUND, `Unknown taskId: ${taskId}`)
     if (!ACTIVE_STATES.has(task.status)) {
       throw rtError(ERROR.TASK_NOT_CANCELABLE, `Task ${taskId} is already ${task.status}`)
     }
+    const wasRunning = task.status === TASK_STATE.RUNNING
     finish(task, TASK_STATE.CANCELLED)
-    return { ...task }
+    if (wasRunning && supervisor) {
+      const res = supervisor.cancel(taskId)
+      task.cancelNote = res && res.cancelled ? 'terminating' : res && res.reason ? res.reason : 'unknown'
+    } else if (supervisor) {
+      /* Never spawned, but make the supervisor's idempotency explicit. */
+      supervisor.cancel(taskId)
+    }
+    return snapshot(task)
   }
 
   function countersSnapshot() {
+    let queued = 0
+    let running = 0
+    for (const t of tasks.values()) {
+      if (t.status === TASK_STATE.QUEUED) queued += 1
+      else if (t.status === TASK_STATE.RUNNING) running += 1
+    }
     return {
       total: counters.total,
       active: activeCount(),
       completed: counters.completed,
       cancelled: counters.cancelled,
       failed: counters.failed,
+      queued,
+      running,
+      /* Children the supervisor holds right now; `running` follows it within a
+         microtask, since the record is only settled after the outcome lands. */
+      processes: liveCount(),
+      held: tasks.size,
     }
   }
 
-  /** Cancel everything (daemon shutdown). */
+  /** Cancel everything without waiting (back-compatible sync path). */
   function stopAll() {
     for (const t of tasks.values()) {
-      if (ACTIVE_STATES.has(t.status)) finish(t, TASK_STATE.CANCELLED)
+      if (!ACTIVE_STATES.has(t.status)) continue
+      const wasRunning = t.status === TASK_STATE.RUNNING
+      finish(t, TASK_STATE.CANCELLED)
+      if (wasRunning && supervisor) supervisor.cancel(t.taskId)
     }
+  }
+
+  /**
+   * Daemon shutdown: cancel every task, then wait for the children to leave so
+   * no orphaned process outlives the daemon.
+   */
+  async function shutdown(opts = {}) {
+    stopAll()
+    if (supervisor && typeof supervisor.shutdown === 'function') {
+      return supervisor.shutdown(opts)
+    }
+    return { cancelled: 0, forced: 0, drained: true }
   }
 
   return {
     states: TASK_STATE,
     services: SERVICES,
     serviceNames: Object.keys(SERVICES),
+    execModes: EXEC_MODES,
+    limits,
     run,
     get,
+    peek,
     list,
     stop,
     stopAll,
+    shutdown,
     counters: countersSnapshot,
+    /** Supervisor-side view of the same tasks (pid, timers), for RT_STATUS. */
+    processes: () => (supervisor ? supervisor.list() : []),
+    processStats: () => (supervisor ? supervisor.stats() : null),
   }
 }
 
-export { DEFAULT_DURATION_MS, MAX_DURATION_MS }
+export { DEFAULT_DURATION_MS, MAX_DURATION_MS, START_DELAY_MS, TASK_ID_RE }
