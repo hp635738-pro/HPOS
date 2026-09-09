@@ -30,7 +30,7 @@ export const ACTIVITY_LIMITS = Object.freeze({
   TERMINAL_DEDUPE_WINDOW: 128,
 })
 
-const ACTIVE_STATUSES = new Set(['QUEUED', 'RUNNING'])
+const ACTIVE_STATUSES = new Set(['QUEUED', 'RUNNING', 'GENERATING', 'STREAMING'])
 const TERMINAL_EVENT_TO_STATUS = {
   'task.completed': 'COMPLETE',
   'task.failed': 'FAILED',
@@ -165,7 +165,7 @@ export class RuntimeActivityController {
     /* Connection state + periodic RPC probe (existing controller). */
     this._offConnection = this._connection.onChange((snapshot) => {
       this._setConnection(snapshot)
-      if (snapshot.state === RUNTIME_CONNECTION_STATE.CONNECTED) {
+      if ((snapshot.status || snapshot.state) === RUNTIME_CONNECTION_STATE.CONNECTED) {
         /* Seed/refresh counters + active list from an authenticated RT_STATUS
            (a status event may not have arrived yet, and this also re-syncs
            after any RPC-only reconnect). */
@@ -266,13 +266,16 @@ export class RuntimeActivityController {
   /* ------------------------------------------------------------ state ops */
 
   _setConnection(snapshot) {
+    /* RuntimeConnectionController exposes `status`; accept the older test seam's
+       `state` spelling as a compatibility fallback. */
+    const state = snapshot.status || snapshot.state || RUNTIME_CONNECTION_STATE.UNKNOWN
     this._snapshot.connection = {
-      state: snapshot.state,
+      state,
       detail: snapshot.detail || 'Runtime status has not been checked',
       errorCode: snapshot.errorCode || null,
       checkedAt: snapshot.checkedAt || null,
     }
-    if (snapshot.state === RUNTIME_CONNECTION_STATE.CONNECTED) this._lastError = null
+    if (state === RUNTIME_CONNECTION_STATE.CONNECTED) this._lastError = null
     this._emit()
   }
 
@@ -313,6 +316,14 @@ export class RuntimeActivityController {
         break
       case 'task.started':
         this._upsertActive(payload.taskId, payload.service, 'RUNNING')
+        this._syncActive()
+        break
+      case 'task.generating':
+        this._upsertActive(payload.taskId, payload.service, 'GENERATING')
+        this._syncActive()
+        break
+      case 'task.streaming':
+        this._upsertActive(payload.taskId, payload.service, 'STREAMING')
         this._syncActive()
         break
       case 'task.completed':

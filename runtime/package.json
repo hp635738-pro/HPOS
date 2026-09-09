@@ -2,7 +2,7 @@
   "name": "hpos-runtime",
   "version": "0.1.0",
   "private": true,
-  "description": "HPOS local runtime daemon (M1) — 127.0.0.1-only authenticated RPC + a task registry whose every task runs in a supervised child process. Infrastructure only; no DeepSeek logic yet.",
+  "description": "HPOS localhost runtime with supervised tasks and a fixed user-authenticated DeepSeek browser executor.",
   "type": "module",
   "main": "daemon.js",
   "bin": {
@@ -10,9 +10,12 @@
   },
   "scripts": {
     "start": "node bin/hpos-runtime.js",
-    "test": "node tests/protocol.test.mjs && node tests/endpoints.test.mjs && node tests/limits.test.mjs && node tests/env.test.mjs && node tests/workspace.test.mjs && node tests/supervisor.test.mjs && node tests/lifecycle.test.mjs && node tests/events.test.mjs && node tests/sse.test.mjs && node tests/daemon.test.mjs"
+    "test": "node tests/protocol.test.mjs && node tests/endpoints.test.mjs && node tests/limits.test.mjs && node tests/env.test.mjs && node tests/workspace.test.mjs && node tests/supervisor.test.mjs && node tests/lifecycle.test.mjs && node tests/events.test.mjs && node tests/sse.test.mjs && node tests/deepseek-provider.test.mjs && node tests/deepseek-task.test.mjs && node tests/daemon.test.mjs"
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "playwright-core": "1.61.1"
   }
 }

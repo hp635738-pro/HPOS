@@ -47,6 +47,9 @@ export const ERROR = {
   TASK_NOT_CANCELABLE: 'RT_TASK_NOT_CANCELABLE',
   /* the executor refused the task before a child existed (no in-daemon fallback) */
   EXECUTOR_UNAVAILABLE: 'RT_EXECUTOR_UNAVAILABLE',
+  DUPLICATE_TASK: 'RT_DUPLICATE_TASK',
+  PROVIDER_BUSY: 'RT_PROVIDER_BUSY',
+  SECRET_FIELD: 'RT_SECRET_FIELD_REJECTED',
 }
 
 const ID_RE = /^[A-Za-z0-9._:-]{8,80}$/

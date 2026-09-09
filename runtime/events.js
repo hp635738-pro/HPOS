@@ -1,8 +1,8 @@
 /**
  * Runtime event bus + envelope contract (M1 — Step 4).
  *
- * Observability only. This module is the one boundary through which the task
- * registry and the daemon announce what the invisible runtime is doing:
+ * This module is the allowlisted boundary through which the task registry and
+ * daemon announce lifecycle plus bounded DeepSeek assistant output:
  *
  *   Task registry / daemon ─▶ Event Bus ─▶ SSE transport (/events)
  *
@@ -17,11 +17,15 @@
  *   - Every payload is built by an allowlisted picker: unknown fields (a
  *     command, a path, an environment object, a token-looking value…) are
  *     dropped before the event exists. Raw task records are never serialized.
- *   - The payloads deliberately never contain: the runtime token, environment
- *     values, command strings, arbitrary paths, credentials or child output.
+ *   - The payloads deliberately never contain the runtime token, environment
+ *     values, commands, arbitrary paths, prompts, credentials or diagnostics.
+ *     `task.streaming`/`task.completed` may contain only bounded visible
+ *     assistant response text needed to return the result to HPOS Chat.
  *
  * No dependencies, Node 18+.
  */
+
+import { BROWSER_FAILURE_SET, BROWSER_TASK_LIMITS, STREAM_OP } from './browser/contracts.js'
 
 /* Stable channel separating runtime activity from bridge traffic. */
 export const EVENT_CHANNEL = 'hpos-runtime-events'
@@ -33,6 +37,8 @@ export const EVENT_TYPE = Object.freeze({
   STATUS: 'runtime.status',
   TASK_QUEUED: 'task.queued',
   TASK_STARTED: 'task.started',
+  TASK_GENERATING: 'task.generating',
+  TASK_STREAMING: 'task.streaming',
   TASK_COMPLETED: 'task.completed',
   TASK_FAILED: 'task.failed',
   TASK_CANCELLED: 'task.cancelled',
@@ -67,9 +73,10 @@ const TASK_ID_RE = /^task-[A-Za-z0-9._:-]{8,72}$/
 const FAILURE_KIND_SET = new Set([
   'SPAWN_FAILED', 'TIMEOUT', 'NONZERO_EXIT', 'TERMINATED',
   'RUNNER_FAILURE', 'WORKSPACE_ERROR', 'CAPACITY', 'INTERNAL', 'FAILED',
+  ...BROWSER_FAILURE_SET,
 ])
 
-const ACTIVE_STATUS_SET = new Set(['QUEUED', 'RUNNING'])
+const ACTIVE_STATUS_SET = new Set(['QUEUED', 'RUNNING', 'GENERATING', 'STREAMING'])
 const STATUS_LABEL_SET = new Set(['up'])
 const COUNTER_KEYS = ['total', 'active', 'completed', 'cancelled', 'failed', 'queued', 'running']
 const MAX_ACTIVE_ROWS = 64
@@ -98,6 +105,20 @@ function cleanShort(value, max) {
 
 function cleanTaskId(value) {
   return typeof value === 'string' && TASK_ID_RE.test(value) ? value : null
+}
+
+function cleanCorrelation(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{8,80}$/.test(value) ? value : null
+}
+
+function cleanSequence(value) {
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+
+function withCorrelation(out, value) {
+  const correlationId = cleanCorrelation(value)
+  if (correlationId) out.correlationId = correlationId
+  return out
 }
 
 function cleanService(value) {
@@ -180,42 +201,74 @@ const PAYLOAD_BUILDERS = {
   },
   [EVENT_TYPE.TASK_QUEUED]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
-    return { taskId: cleanTaskId(d.taskId), service: cleanService(d.service) }
+    return withCorrelation({ taskId: cleanTaskId(d.taskId), service: cleanService(d.service) }, d.correlationId)
   },
   [EVENT_TYPE.TASK_STARTED]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
-    return { taskId: cleanTaskId(d.taskId), service: cleanService(d.service) }
+    return withCorrelation({ taskId: cleanTaskId(d.taskId), service: cleanService(d.service) }, d.correlationId)
+  },
+  [EVENT_TYPE.TASK_GENERATING]: (data) => {
+    const d = data && typeof data === 'object' ? data : {}
+    return withCorrelation({
+      taskId: cleanTaskId(d.taskId),
+      service: cleanService(d.service),
+      sequence: cleanSequence(d.sequence),
+    }, d.correlationId)
+  },
+  [EVENT_TYPE.TASK_STREAMING]: (data) => {
+    const d = data && typeof data === 'object' ? data : {}
+    const op = d.op === STREAM_OP.APPEND || d.op === STREAM_OP.REPLACE ? d.op : null
+    const text = typeof d.text === 'string'
+      ? d.text.slice(0, BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS)
+      : ''
+    return withCorrelation({
+      taskId: cleanTaskId(d.taskId),
+      service: cleanService(d.service),
+      sequence: cleanSequence(d.sequence),
+      op,
+      text,
+    }, d.correlationId)
   },
   [EVENT_TYPE.TASK_COMPLETED]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
-    return {
+    const out = withCorrelation({
       taskId: cleanTaskId(d.taskId),
       service: cleanService(d.service),
       durationMs: cleanInt(d.durationMs),
+    }, d.correlationId)
+    if (typeof d.response === 'string') {
+      out.response = d.response.slice(0, BROWSER_TASK_LIMITS.MAX_RESPONSE_CHARS)
     }
+    return out
   },
   [EVENT_TYPE.TASK_FAILED]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
     const kind = d.kind && FAILURE_KIND_SET.has(d.kind) ? d.kind : null
-    return {
+    const out = withCorrelation({
       taskId: cleanTaskId(d.taskId),
       service: cleanService(d.service),
       kind,
       exitCode: cleanInt(d.exitCode),
-    }
+    }, d.correlationId)
+    if (d.code && FAILURE_KIND_SET.has(d.code)) out.code = d.code
+    return out
   },
   [EVENT_TYPE.TASK_CANCELLED]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
     const reason = d.reason && CANCEL_REASON_SET.has(d.reason) ? d.reason : null
-    return { taskId: cleanTaskId(d.taskId), service: cleanService(d.service), reason }
+    return withCorrelation({
+      taskId: cleanTaskId(d.taskId),
+      service: cleanService(d.service),
+      reason,
+    }, d.correlationId)
   },
   [EVENT_TYPE.TASK_TIMEOUT]: (data) => {
     const d = data && typeof data === 'object' ? data : {}
-    return {
+    return withCorrelation({
       taskId: cleanTaskId(d.taskId),
       service: cleanService(d.service),
       timeoutMs: cleanInt(d.timeoutMs),
-    }
+    }, d.correlationId)
   },
 }
 

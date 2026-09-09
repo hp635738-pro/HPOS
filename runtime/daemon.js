@@ -15,8 +15,9 @@
  * event loop that answers RPC. The daemon owns only the bounds — timeout, kill
  * chain, environment, workspace, concurrency.
  *
- * Still M1 infrastructure only: NO DeepSeek logic, NO shell, NO outbound
- * network calls, NO generic exec endpoint.
+ * Step 6 adds a fixed browser.deepseek route in an isolated provider child.
+ * The daemon still has NO shell, NO generic exec/browser endpoint and performs
+ * no provider work in its own event loop.
  *
  * Exports:
  *   createRuntime(opts) → { start(), stop(), tasks, supervisor, capabilities,
@@ -36,6 +37,7 @@ import { ERROR, ENGINE, VERSION, isWellFormedRequest, flatError } from './protoc
 import { createLogger } from './log.js'
 import { EVENT_TYPE, STOP_REASON, createEventBus } from './events.js'
 import { measureRuntimeMetrics, uptimeMs } from './metrics.js'
+import { resolveBrowserSessionConfig } from './browser/contracts.js'
 
 export const DEFAULT_PORT = 5190
 
@@ -58,6 +60,7 @@ export function createRuntime({
 
   const limits = resolveLimits({ env, overrides: maxActive == null ? {} : { maxActive } })
   const capabilities = detectCapabilities({ limits })
+  const browserSession = resolveBrowserSessionConfig(env)
   const workspaceRoot = resolveWorkspaceRoot({ stateDir: dir, env })
   const prepared = prepareWorkspaceRoot({ root: workspaceRoot })
 
@@ -73,7 +76,14 @@ export function createRuntime({
   /* Step 4: the in-memory event bus. Registry publishes lifecycle events here;
      the SSE transport subscribes here. Nothing is written to disk. */
   const events = createEventBus({ log, historyLimit: eventHistoryLimit })
-  const tasks = createTaskRegistry({ maxActive: limits.maxActive, log, supervisor, limits, bus: events })
+  const tasks = createTaskRegistry({
+    maxActive: limits.maxActive,
+    log,
+    supervisor,
+    limits,
+    bus: events,
+    browserConfig: browserSession,
+  })
   const rpcHandler = createRpcHandler({ tasks, startedAt, log, limits, capabilities })
 
   const claimed = claimEndpoint({ stateDir: dir, port, protocol: VERSION })
@@ -85,7 +95,7 @@ export function createRuntime({
     const metrics = measureRuntimeMetrics()
     const active = tasks
       .list()
-      .filter((t) => t.status === 'QUEUED' || t.status === 'RUNNING')
+      .filter((t) => ['QUEUED', 'RUNNING', 'GENERATING', 'STREAMING'].includes(t.status))
       .map((t) => ({ taskId: t.taskId, service: t.service, status: t.status }))
     return {
       status: 'up',
@@ -133,6 +143,7 @@ export function createRuntime({
     supervisor,
     capabilities,
     limits,
+    browserSession,
     log,
     workspaceRoot: prepared.root,
     endpoint: { file, token, host: '127.0.0.1', port },

@@ -206,7 +206,12 @@ export default function RuntimeStatus() {
                 <div key={row.taskId} style={S.taskRow}>
                   <span style={S.taskName} title={row.taskId}>{shortId(row.taskId)}</span>
                   <span style={S.taskService}>{row.service}</span>
-                  <span style={S.statusChip(row.status === 'RUNNING' ? '#22c55e' : '#f59e0b')}>{row.status}</span>
+                  <span
+                    className={row.status === 'GENERATING' || row.status === 'STREAMING' ? 'bridge-dot-pulse' : undefined}
+                    style={S.statusChip(row.status === 'QUEUED' ? '#f59e0b' : '#22c55e')}
+                  >
+                    {row.status}
+                  </span>
                   <button
                     type="button"
                     style={S.stopBtn}

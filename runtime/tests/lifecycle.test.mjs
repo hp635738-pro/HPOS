@@ -209,7 +209,8 @@ try {
       badSvc = e
     }
     assert(badSvc && badSvc.code === ERROR.UNKNOWN_SERVICE, 'an unregistered service is refused at the registry too')
-    assert(EXEC_MODES.length === 7 && EXEC_MODES.includes('noop'), 'the mode table is closed and known')
+    assert(EXEC_MODES.length === 8 && EXEC_MODES.includes('noop') && EXEC_MODES.includes('browser-provider'),
+      'the mode table is closed and includes only the fixed browser-provider route')
   }
 
   /* ---------------- maxActive admits, then refuses --------------------- */

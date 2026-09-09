@@ -1,0 +1,55 @@
+export const DEEPSEEK_WEB = Object.freeze({
+  origin: 'https://chat.deepseek.com',
+  hostname: 'chat.deepseek.com',
+  loginPaths: Object.freeze(['/sign_in', '/login']),
+  pollMs: 140,
+  sendConfirmMs: 4000,
+  firstAnswerMs: 30000,
+  missingAnswerMs: 3000,
+  stableMs: 1600,
+  maxTurns: 300,
+  input: Object.freeze([
+    'textarea[name="search"]',
+    'textarea#chat-input',
+    'textarea[placeholder*="Message DeepSeek"]',
+    'textarea[placeholder*="DeepSeek"]',
+    'textarea[placeholder*="Ask"]',
+    'textarea[placeholder*="发送"]',
+    'textarea[spellcheck="false"]',
+  ]),
+  send: Object.freeze([
+    'button[aria-label="Send"]',
+    'button[aria-label="发送"]',
+    'button[aria-label*="Send message"]',
+    'button[data-testid="send-button"]',
+  ]),
+  stop: Object.freeze([
+    'button[aria-label="Stop"]',
+    'button[aria-label="停止"]',
+    'button[aria-label*="Stop"]',
+  ]),
+  authRequired: Object.freeze([
+    'a[href^="/sign_in"]',
+    'a[href^="/login"]',
+    'form[action*="sign_in"]',
+    'input[type="password"]',
+  ]),
+  captcha: Object.freeze([
+    'iframe[src*="captcha"]',
+    '[class*="captcha"]',
+    '[id*="captcha"]',
+  ]),
+  message: Object.freeze(['.ds-message']),
+  thinking: Object.freeze([
+    '.ds-think-content',
+    '[class*="ds-think-content"]',
+  ]),
+  answer: Object.freeze([
+    '.ds-assistant-message-main-content',
+    '[class*="ds-assistant-message-main-content"]',
+  ]),
+  assistant: Object.freeze([
+    '.ds-markdown',
+    '[class*="ds-markdown"]',
+  ]),
+})

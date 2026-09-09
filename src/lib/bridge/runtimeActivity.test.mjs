@@ -47,7 +47,7 @@ function statusPayload(over = {}) {
 
 class FakeConnection {
   constructor() {
-    this.snapshot = { state: RUNTIME_CONNECTION_STATE.UNKNOWN, detail: 'x', errorCode: null, checkedAt: null }
+    this.snapshot = { status: RUNTIME_CONNECTION_STATE.UNKNOWN, detail: 'x', errorCode: null, checkedAt: null }
     this.listeners = new Set()
     this.started = false
     this.stopped = false
@@ -153,12 +153,24 @@ const zero = { total: 0, active: 0, queued: 0, running: 0, completed: 0, cancell
   assert(snap.stream.state === RUNTIME_STREAM_STATE.OPEN, 'stream state is exposed on the snapshot')
 
   stream.emit(env('task.queued', { taskId: 'task-bbbbbbbb', service: 'stub' }))
-  stream.emit(env('task.started', { taskId: 'task-bbbbbbbb', service: 'stub' }))
+  stream.emit(env('task.started', { taskId: 'task-bbbbbbbb', service: 'browser.deepseek' }))
   snap = controller.getSnapshot()
   assert(snap.active.length === 2 && snap.active.some((r) => r.taskId === 'task-bbbbbbbb' && r.status === 'RUNNING'),
     'queued → started moves the task into the running set')
+  stream.emit(env('task.generating', {
+    taskId: 'task-bbbbbbbb', service: 'browser.deepseek', correlationId: 'message-activity1', sequence: 1,
+  }))
+  stream.emit(env('task.streaming', {
+    taskId: 'task-bbbbbbbb', service: 'browser.deepseek', correlationId: 'message-activity1',
+    sequence: 2, op: 'append', text: 'answer text is not copied into activity rows',
+  }))
+  snap = controller.getSnapshot()
+  assert(snap.active.some((r) => r.taskId === 'task-bbbbbbbb' && r.status === 'STREAMING' && r.service === 'browser.deepseek'),
+    'Linux Activity shows the DeepSeek GENERATING/STREAMING lifecycle')
+  assert(!JSON.stringify(snap).includes('answer text is not copied'),
+    'Linux Activity remains observability-only and does not expose assistant output')
 
-  stream.emit(env('task.completed', { taskId: 'task-bbbbbbbb', service: 'stub', durationMs: 5 }))
+  stream.emit(env('task.completed', { taskId: 'task-bbbbbbbb', service: 'browser.deepseek', durationMs: 5 }))
   snap = controller.getSnapshot()
   assert(!snap.active.some((r) => r.taskId === 'task-bbbbbbbb'), 'a completed task leaves the active set')
   assert(snap.recent[0] && snap.recent[0].taskId === 'task-bbbbbbbb' && snap.recent[0].status === 'COMPLETE',
@@ -257,14 +269,14 @@ const zero = { total: 0, active: 0, queued: 0, running: 0, completed: 0, cancell
   assert(controller.getSnapshot().active.length === 1, 'activity is visible while connected')
 
   stream.drop()
-  connection.emit({ state: RUNTIME_CONNECTION_STATE.DISCONNECTED, detail: 'offline', errorCode: 'RT_RUNTIME_UNAVAILABLE' })
+  connection.emit({ status: RUNTIME_CONNECTION_STATE.DISCONNECTED, detail: 'offline', errorCode: 'RT_RUNTIME_UNAVAILABLE' })
   let snap = controller.getSnapshot()
   assert(snap.connection.state === RUNTIME_CONNECTION_STATE.DISCONNECTED, 'disconnect is reflected')
   assert(snap.stream.state === RUNTIME_STREAM_STATE.RECONNECTING, 'the stream reports its backoff state')
   assert(snap.active.length === 1, 'last-known activity is retained while disconnected (no crash, no wipe)')
 
   const callsBefore = bridge.getStatusCalls
-  connection.emit({ state: RUNTIME_CONNECTION_STATE.CONNECTED, detail: 'ok', errorCode: null })
+  connection.emit({ status: RUNTIME_CONNECTION_STATE.CONNECTED, detail: 'ok', errorCode: null })
   stream.open()
   stream.emit(env('runtime.status', statusPayload({ active: [] })))
   snap = controller.getSnapshot()

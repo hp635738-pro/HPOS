@@ -1,34 +1,61 @@
-# HPOS Runtime (M1 — infrastructure only)
+# HPOS Runtime — Step 6 browser-based AI execution
 
-A local, invisible execution layer for HPOS: a small **daemon process** that
-listens **only on `127.0.0.1`**, speaks the same HPOS envelope protocol as the
-browser bridge (different transport, different action namespace), and runs
-**tasks** as **supervised child processes** — one per task — through a task
-registry with an explicit lifecycle.
+A local execution layer for HPOS. The daemon listens **only on `127.0.0.1`**,
+uses authenticated HPOS envelopes, and runs every task in a supervised child
+process with the existing timeout, cancellation, environment, workspace and
+output bounds.
 
-**This is M1 infrastructure only.** It contains **no DeepSeek integration**, no
-shell execution, no network calls out of the daemon, and no dependencies (Node
-built-ins only, Node 18+). Real DeepSeek behaviour lands in a later milestone
-behind the same registry boundary — the existing BrowserBridge /
-DeepSeekConnector / extension are untouched and remain the browser path.
+Step 6 adds one real, fixed-purpose service: `browser.deepseek`. The runtime
+owns admission and lifecycle while the DeepSeek-specific browser provider stays
+isolated under `runtime/browser/providers/deepseek/`. There is still no shell,
+generic browser endpoint, DeepSeek API, cookie import, credential extraction or
+automatic retry.
 
 ```
-HPOS UI ── LocalRuntimeBridge ──▶ Vite dev proxy        (RPC: POST /hpos-runtime/rpc)
-   │   same hpos-bridge envelopes; credential stays on the dev host
-   ▼
-hpos-runtime daemon  ── 127.0.0.1 only, origin-allowlisted CORS
-   ├── GET  /health   liveness + version, no secrets
-   ├── POST /rpc      authenticated RPC (envelope in/out)
-   ├── GET  /events   authenticated SSE event stream (Step 4)
-   ├── event bus       bounded in-memory history; registry publishes here
-   ├── task registry   QUEUED → RUNNING → COMPLETE | FAILED | CANCELLED
-   └── process supervisor
-         └── child_process: node runner.js   (one per task, own workspace)
-
-HPOS UI ── RuntimeEventStream (EventSource) ──▶ Vite dev proxy   (GET /hpos-runtime/events)
-                the proxy injects the credential on the dev host; the browser
-                never holds it and it is never in the URL
+HPOS Chat ── LocalRuntimeBridge ──▶ Vite dev proxy ──▶ runtime /rpc
+                                                          │
+                                            RT_TASK_RUN browser.deepseek
+                                                          ▼
+ task registry: QUEUED → RUNNING → GENERATING → STREAMING → COMPLETE
+                                                          │
+                                               process supervisor
+                                                          ▼
+ runner child ── fixed provider router ── DeepSeek page in the user's
+                                         visible Chromium CDP session
+                                                          │
+                              allowlisted progress/final task events over SSE
+                                                          ▼
+                                                     HPOS Chat
 ```
+
+The existing extension BrowserBridge/DeepSeekConnector remains in the
+repository for compatibility, but HPOS AI Chat now uses the runtime service as
+its primary execution path.
+
+## Supported browser/session mechanism
+
+HPOS attaches to a **user-started, visible Chromium browser** on loopback CDP
+(default `127.0.0.1:9222`). Use a dedicated profile, open exactly one DeepSeek
+chat, and authenticate normally in the visible browser. For example on Linux:
+
+```bash
+chromium --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.hpos/deepseek-browser"
+# or use google-chrome with the same two flags
+```
+
+Then open `https://chat.deepseek.com/` and sign in normally. HPOS does not fill
+login forms, read password values, inspect CAPTCHA contents, read browser
+storage, call cookie APIs, copy session material, launch a browser, or close the
+user's browser. If the browser is absent, login is required, verification is
+present, no supported page is open, or more
+than one candidate page is open, the task fails with an explicit safe state and
+is never resent.
+
+`playwright-core` is protocol transport only; it does **not** download or
+install Chromium. Run `npm install` in `runtime/` once. The operator may change
+only the fixed loopback CDP port with `HPOS_DEEPSEEK_CDP_PORT`; callers cannot
+supply a host, URL, selector, browser method or executable.
 
 ## Architecture: the daemon supervises, the child executes
 
@@ -49,8 +76,8 @@ RT_TASK_RUN ─▶ registry (QUEUED)
                       │   detached on POSIX (own process group)
                       │   spec arrives on stdin, never in argv
                       ▼
-                   RUNNING ──▶ exit 0        ─▶ COMPLETE
-                          ──▶ exit ≠ 0      ─▶ FAILED  (NONZERO_EXIT)
+                   RUNNING ──▶ GENERATING ─▶ STREAMING ─▶ COMPLETE
+                          ──▶ exit ≠ 0      ─▶ FAILED  (named safe cause)
                           ──▶ spawn error   ─▶ FAILED  (SPAWN_FAILED)
                           ──▶ timeout hit   ─▶ FAILED  (TIMEOUT)
                           ──▶ RT_TASK_STOP  ─▶ CANCELLED
@@ -60,19 +87,20 @@ RT_TASK_RUN ─▶ registry (QUEUED)
 
 Hard rules this layer is built around:
 
-- **Fixed argv.** The child is launched as `<process.execPath> --max-old-space-size=N
-  runtime/runner.js`. No task text, no path, no id, no payload ever reaches the
+- **Fixed argv.** The child is launched as
+  `<process.execPath> --max-old-space-size=N runtime/runner.js`. No task text,
+  no path, no id, no payload ever reaches the
   command line, so `ps` shows nothing interesting. There is no `shell: true`
   anywhere in this codebase.
 - **No general-purpose endpoint.** There is no action that accepts a command,
-  an executable path, a URL or a file path. `RT_TASK_RUN` picks a *registered
-  service*, and M1 has one: `stub`.
-- **Closed behaviour set.** `runner.js` implements a fixed table of modes
-  (`noop`, `sleep`, `hang`, `fail`, `inspect-env`, `inspect-workspace`, `flood`)
-  and refuses anything else with an error exit. No `eval`, no dynamic import, no
-  require of task-supplied text, no child processes inside the child. M1's task
-  is a harmless no-op by design — this step exists to prove supervised process
-  execution, isolation and lifecycle handling, not to do work.
+  executable path, URL, selector or browser method. `RT_TASK_RUN` selects only
+  `stub` or `browser.deepseek`; the latter accepts prompt + bounded correlation
+  ids and nothing else.
+- **Closed behaviour set.** `runner.js` implements fixed internal modes
+  (`noop`, `sleep`, `hang`, `fail`, test probes, and `browser-provider`) and
+  refuses anything else. `browser-provider` independently seals its stdin spec
+  and routes only the source-registered `deepseek` module. No task-supplied
+  import, eval, shell or provider name is interpreted.
 - **One process per task, ever.** A task that fails stays failed: nothing is
   re-sent, re-queued or restarted. Its record keeps `attempts: 1`.
 - **Never reject, always settle.** `supervisor.done` resolves for every path,
@@ -82,6 +110,7 @@ Hard rules this layer is built around:
 
 ```bash
 cd runtime
+npm install               # playwright-core transport; installs no browser
 npm start                 # or: node bin/hpos-runtime.js
 ```
 
@@ -105,6 +134,7 @@ Environment:
 | `HPOS_RUNTIME_MAX_OLD_SPACE_MB` | `512` | V8 heap ceiling for each task child (64–8192) |
 | `HPOS_RUNTIME_TASK_WORKSPACE_ROOT` | `<stateDir>/workspaces` | Where task dirs live; **must be outside the repository** |
 | `HPOS_RUNTIME_TASK_WORKSPACE_KEEP` | off | `1` retains workspaces after a run, for debugging |
+| `HPOS_DEEPSEEK_CDP_PORT` | `9222` | Dedicated user Chromium CDP port; host is always `127.0.0.1` |
 
 Every value is clamped: the environment can move a number inside its window, it
 can never remove a bound.
@@ -138,7 +168,8 @@ Body must be `application/json`, capped at ~264 KB.
 
 ### `GET /events`
 
-Authenticated Server-Sent Events stream (Step 4) — observability only.
+Authenticated Server-Sent Events stream for allowlisted lifecycle events and
+bounded DeepSeek assistant response delivery.
 
 - Requires the **same** `X-HPOS-Token` header as `/rpc` (timing-safe
   comparison). The token is **never** accepted in the URL/query string, and
@@ -166,9 +197,11 @@ data: {"channel":"hpos-runtime-events","id":17,"type":"task.completed","ts":…,
 
 ## Runtime events (M1 Step 4)
 
-A small **explicit event allowlist** with a stable envelope. Events are how the
-UI knows *what the invisible runtime is doing*; they deliberately contain no
-commands, no paths, no output, no environment and no credentials.
+A small **explicit event allowlist** with a stable envelope. Events contain no
+commands, prompts, paths, environment, browser/session data or credentials.
+Step 6 adds only bounded, visible **assistant response text** to the dedicated
+`task.streaming`/`task.completed` payloads so HPOS Chat can render the answer;
+the Linux Activity model deliberately discards that text.
 
 Envelope (JSON, one per SSE `data:` line):
 
@@ -186,12 +219,14 @@ type — every other input field is dropped before the event exists.
 | `runtime.started` | `{ pid, version }` | the daemon finished starting |
 | `runtime.stopped` | `{ reason: "shutdown" \| … }` | the daemon is stopping |
 | `runtime.status` | `{ status, pid, uptimeMs, tasks{…}, active[…], metrics{…} }` | snapshot/counters/metrcis |
-| `task.queued` | `{ taskId, service }` | task admitted to the queue |
-| `task.started` | `{ taskId, service }` | a supervised child was spawned |
-| `task.completed` | `{ taskId, service, durationMs }` | child exited 0 |
-| `task.failed` | `{ taskId, service, kind, exitCode }` | non-timeout failure |
-| `task.cancelled` | `{ taskId, service, reason: "stop" \| "shutdown" }` | cancelled (user or shutdown) |
-| `task.timeout` | `{ taskId, service, timeoutMs }` | the terminal event for a TIMEOUT failure |
+| `task.queued` | `{ taskId, service, correlationId? }` | task admitted to the queue |
+| `task.started` | `{ taskId, service, correlationId? }` | a supervised child was spawned |
+| `task.generating` | `{ taskId, service, correlationId, sequence }` | DeepSeek confirmed one send and began generating |
+| `task.streaming` | `{ taskId, service, correlationId, sequence, op, text }` | bounded visible assistant-text patch |
+| `task.completed` | `{ taskId, service, durationMs, correlationId?, response? }` | child exited 0; browser task includes final answer |
+| `task.failed` | `{ taskId, service, kind, code?, exitCode, correlationId? }` | named non-timeout failure |
+| `task.cancelled` | `{ taskId, service, reason, correlationId? }` | cancelled (user or shutdown) |
+| `task.timeout` | `{ taskId, service, timeoutMs, correlationId? }` | terminal TIMEOUT failure |
 
 Failure `kind` is drawn from the same closed set the supervisor records
 (`NONZERO_EXIT`, `SPAWN_FAILED`, `TERMINATED`, `RUNNER_FAILURE`,
@@ -242,33 +277,41 @@ reported because they are not reliable cross-platform without extra tooling.
 | --- | --- | --- |
 | `PING` | liveness + protocol version | `{ version, engine: "hpos-runtime", uptimeMs, now }` |
 | `RT_STATUS` | runtime, task **and executor** status; optional `{ taskId }` for one task record | `{ status, version, services, tasks, executor, capabilities, capabilityNotes, recent, task? }` |
-| `RT_TASK_RUN` | enqueue a task on the supervised executor | `{ taskId, status: "QUEUED", service }` · payload: `{ service?: "stub", durationMs?: 0–60000, timeoutMs?: 1000–max, note?: ≤200 chars }` |
+| `RT_TASK_RUN` | enqueue a registered supervised task | `{ taskId, status: "QUEUED", service, correlationId? }` · `stub`: `{ service, durationMs?, timeoutMs?, note? }`; DeepSeek: `{ service: "browser.deepseek", prompt, correlationId, conversationId, messageId, timeoutMs? }` |
 | `RT_TASK_STOP` | cancel an active task (kills its child) | `{ taskId, status: "CANCELLED" }` · payload: `{ taskId }` |
 
-`RT_TASK_RUN` ignores every field it does not whitelist. A payload that carries
-`mode`, `command`, `cwd`, `env`, `execPath` or `shell` gets all of it dropped
-before the executor ever sees the request — the service table decides what the
-child does.
+`RT_TASK_RUN` copies only service-specific fields. `mode`, `command`, `cwd`,
+`env`, `execPath`, `shell`, URL and selector hints are dropped before execution;
+credential/session/CAPTCHA-shaped keys are rejected outright with
+`RT_SECRET_FIELD_REJECTED`. The service table alone decides what the child does.
 
 Unknown actions (including bridge `DS_*` actions, `EVAL`, `SCRAPE`,
 `GET_COOKIES`, and every invented `RT_TASK_EXEC`/`RT_SPAWN`/`RT_FETCH` style
 name) are rejected with `UNKNOWN_ACTION`. Error codes: `RT_UNAUTHORIZED`,
 `RT_INVALID_REQUEST`, `RT_BODY_TOO_LARGE`, `RT_INVALID_CONTENT_TYPE`,
 `UNKNOWN_ACTION`, `RT_INVALID_PAYLOAD`, `RT_UNKNOWN_SERVICE`, `RT_QUEUE_FULL`,
+`RT_DUPLICATE_TASK`, `RT_PROVIDER_BUSY`, `RT_SECRET_FIELD_REJECTED`,
 `RT_TASK_NOT_FOUND`, `RT_TASK_NOT_CANCELABLE`, `RT_EXECUTOR_UNAVAILABLE`.
+Browser task failures include `BROWSER_UNAVAILABLE`, `AUTH_REQUIRED`,
+`CAPTCHA_REQUIRED`, `UNSUPPORTED_PAGE`, `AMBIGUOUS_SESSION`, `PROVIDER_BUSY`,
+`SEND_FAILED`, `RESPONSE_NOT_DETECTED`, `BROWSER_TIMEOUT`, and
+`BROWSER_INTERRUPTED`.
 
 ## Task state machine
 
-`QUEUED → RUNNING → COMPLETE`, with `FAILED` for anything the child did not
-survive cleanly and `CANCELLED` reachable from either non-terminal state:
+Stub tasks retain `QUEUED → RUNNING → COMPLETE`. Browser tasks add the visible
+AI phases `QUEUED → RUNNING → GENERATING → STREAMING → COMPLETE`; `FAILED` and
+`CANCELLED` are terminal from any active state:
 
 | Transition | Cause |
 | --- | --- |
-| `QUEUED → RUNNING` | the admission slot fired and a child was spawned |
-| `RUNNING → COMPLETE` | child exited 0 (and its result line, if any, was not a failure) |
-| `RUNNING → FAILED` | non-zero exit, spawn failure, timeout, or the workspace could not be created |
-| `QUEUED → CANCELLED` | `RT_TASK_STOP` before a child existed — no process is ever made |
-| `RUNNING → CANCELLED` | `RT_TASK_STOP`; the child is terminated |
+| `QUEUED → RUNNING` | admission fired and a supervised child was spawned |
+| `RUNNING → GENERATING` | DeepSeek confirmed the one submit gesture |
+| `GENERATING → STREAMING` | first visible final-answer text arrived |
+| active → `COMPLETE` | child exited 0 with a bounded result |
+| active → `FAILED` | named provider/process/timeout/workspace failure |
+| `QUEUED → CANCELLED` | stopped before spawn; no process is made |
+| running phase → `CANCELLED` | supervisor terminates the child; provider best-effort clicks visible Stop |
 
 `FAILED` carries a machine-readable `failure.kind`: `NONZERO_EXIT`,
 `SPAWN_FAILED`, `TIMEOUT`, `TERMINATED`, `RUNNER_FAILURE`, `WORKSPACE_ERROR`,
@@ -344,9 +387,10 @@ the tests can assert from *inside a real child* that `PATH` arrived and
   still ended; the record distinguishes `graceful: true` from `forceKilled: true`.
 - On POSIX the signal goes to the child's **process group**, so helpers a task
   spawned go with it.
-- `RT_TASK_STOP` is **idempotent**: the transition to `CANCELLED` happens once,
-  and `supervisor.cancel()` on an already-cancelling or already-settled task
-  returns a no-op instead of a second kill or an error.
+- Cancellation is **idempotent inside the supervisor**: the transition to
+  `CANCELLED` happens once, and a repeated internal `supervisor.cancel()` is a
+  no-op. A repeated public `RT_TASK_STOP` receives
+  `RT_TASK_NOT_CANCELABLE`, making the already-terminal state explicit.
 - Daemon shutdown (`SIGINT`/`SIGTERM`) cancels every live task, waits for the
   children to exit, force-kills whatever does not, and only then closes the
   listener. `process.on('exit')` fires one last synchronous SIGKILL sweep.
@@ -357,7 +401,9 @@ the tests can assert from *inside a real child* that `PATH` arrived and
 ## Concurrency
 
 Admission is checked at enqueue time against `maxActive`: while that many tasks
-are `QUEUED`/`RUNNING`, `RT_TASK_RUN` returns `RT_QUEUE_FULL`. The queue is
+are in any active phase, `RT_TASK_RUN` returns `RT_QUEUE_FULL`. The
+`browser.deepseek` route has an additional per-provider limit of one active task
+and returns `RT_PROVIDER_BUSY` rather than creating ambiguous browser work. The queue is
 bounded — there is no backlog to grow, so a caller that wants more concurrency
 gets an error, not a hidden queue. The supervisor independently refuses to hold
 more than `maxConcurrent` live children (a task so refused `FAILED`s with
@@ -430,8 +476,9 @@ RPC connectivity. The header chip uses conservative polling and distinguishes
 
 The small **Runtime Activity** popover (open the header chip) shows what the
 invisible runtime is doing: connection state, live event-stream state, the
-current `Running` tasks (`taskId`, fixed `stub` service, `QUEUED`/`RUNNING`,
-with a **Stop** action for those known active task ids), a bounded `Recent`
+current `Running` tasks (`taskId`, `stub`/`browser.deepseek` service, and
+`QUEUED`/`RUNNING`/`GENERATING`/`STREAMING`, with a **Stop** action for known
+active task ids), a bounded `Recent`
 list of terminal tasks, basic counters, and safe process metrics
 (`pid`, `uptime`, active/queued counts, CPU and memory — `unavailable` when a
 platform cannot provide them reliably). Stop calls `RT_TASK_STOP` through the
@@ -441,9 +488,10 @@ stop succeeded.
 
 **This Activity UI is deliberately NOT a terminal.** It shows no shell, no
 command strings, no raw process output, no environment variables, no
-credentials and no filesystem internals — by design, and because the runtime
-event payloads above cannot carry them. Its only job is answering *“what is
-the invisible HPOS runtime doing?”*, not *“give me a Linux terminal.”*
+credentials and no filesystem internals. Dedicated chat response fields are
+consumed only by the chat adapter and discarded by the Activity controller. Its
+only job is answering *“what is the invisible HPOS runtime doing?”*, not
+*“give me a Linux terminal.”*
 
 Client-side, `RuntimeEventStream` (EventSource over `/hpos-runtime/events`)
 reconnects with conservative capped backoff, ignores malformed/unknown
@@ -452,8 +500,9 @@ messages, deduplicates by event id, and cleans up listeners/timers on close.
 runtime activity is written to `localStorage` (it is live state, not
 conversation data).
 
-This is a development integration only. No production proxy or remote runtime
-deployment is defined in M1.
+The checked-in web transport integration uses the Vite development proxy. A
+future packaged desktop host can provide the same fixed same-origin routes; no
+remote runtime deployment is defined here.
 
 ## Tests
 
@@ -495,40 +544,41 @@ npm test
   refusal + disconnect cleanup, lifecycle event order, exactly-once terminal
   events (cancel + timeout, incl. late child outcomes), `Last-Event-ID` replay,
   stale-history resync, shutdown event
+- `tests/deepseek-provider.test.mjs` — fixed provider routing, successful visible
+  response streaming, unavailable/auth/CAPTCHA/unsupported/busy/timeout/
+  interrupted states, one-submit guarantee, cancellation and provider isolation
+- `tests/deepseek-task.test.mjs` — supervised DeepSeek lifecycle, duplicate and
+  provider-busy guards, final event/result handling, secret-field rejection and
+  restart/no-auto-resend behaviour
 - `tests/daemon.test.mjs` — full integration over real HTTP (ephemeral port):
   health, auth, PING/PONG, RT_STATUS incl. executor + capabilities, task
   run/stop/timeout over RPC, payload that tries to steer the executor, queue
   full, malformed/oversized bodies, CORS origin allowlist, shutdown
 
-## What is deliberately NOT in the runtime (yet)
+## What is deliberately NOT in the runtime
 
-**The runtime daemon does not provide:**
-
-- **DeepSeek, in any form.** There is no DeepSeek service, no connector, no
-  session, no auth, no model call, no chat storage in the runtime. The one
-  registered service is `stub`, whose child process does nothing. The UI bridge
-  and Vite development proxy add no DeepSeek behavior.
-- **Arbitrary execution.** No command, script, executable path, URL or file
-  path is accepted from RPC. No `eval`, no generic subprocess or fetch endpoint,
-  no shell, no cookie access, no token scraping, no login bypass, no SSRF.
-- **Real work in tasks.** The task body is a no-op stub on purpose; what is
-  being proven is supervision, isolation and lifecycle, not output.
-- **Hard resource guarantees.** No CPU-time cap, no address-space cap, no disk
-  quota, no memory ceiling beyond the V8 heap flag. See *Platform capabilities*
-  for what is enforced and what is only reported.
-- **Process-tree guarantees on Windows.** The task child is always terminated;
-  grandchildren it spawned may survive there, because Job Objects need a native
-  helper. The capability report says so instead of hiding it.
-- **Retries, persistence or priority.** A failed task stays failed, the queue is
-  in-memory and bounded, and nothing survives a restart.
-- **Multi-user or remote access.** A single-user local daemon on loopback; the
-  token is a same-machine secret, not an identity system.
-- **A terminal or shell surface.** The Runtime Activity UI answers “what is the
-  runtime doing?” — there is no UI, endpoint, action or event that accepts or
-  renders commands, output, env vars, cookies or filesystem internals.
-- **An event database.** The event history is a bounded in-memory ring; nothing
-  about runtime activity is persisted, and there is no replay of history older
-  than the buffer (a reconnect gets the safe status resync instead).
+- **No DeepSeek API.** The provider interacts only with the visible web page in
+  the user-authenticated browser session.
+- **No authentication automation.** HPOS does not fill login forms, read
+  passwords, inspect CAPTCHA contents, copy profile state, read cookies/storage,
+  extract tokens or bypass access controls. Those states stop with explicit
+  errors and require normal user action in the browser.
+- **No arbitrary execution.** No command, script, executable path, URL, selector
+  or browser method is accepted from RPC. There is no generic subprocess,
+  navigation, evaluate, scrape, fetch, filesystem or shell endpoint.
+- **No retries or restart recovery.** One correlation creates one task and one
+  submit gesture. Timeout, disconnect, browser failure and daemon restart are
+  terminal/interrupted; nothing automatically resends or reconstructs work.
+- **No hard CPU/address-space/disk quota guarantee.** See *Platform
+  capabilities* for the existing enforced timeout, V8 heap, output and process
+  supervision bounds.
+- **No remote/multi-user runtime.** The daemon and CDP target are fixed to
+  loopback. The runtime token stays in the local host/proxy boundary.
+- **No terminal UI.** Linux Activity shows safe lifecycle/metrics only. It does
+  not display prompts, assistant output, browser data, commands, process output,
+  environment or filesystem details.
+- **No persisted runtime/event queue.** Records and the bounded event ring are
+  memory-only; HPOS conversation persistence remains the existing chat store.
 
 ## File map
 
@@ -545,7 +595,13 @@ runtime/
 ├── tasks.js              task registry: state machine, admission, counters,
 │                         publishes lifecycle events to the bus
 ├── supervisor.js         the process supervisor: spawn, watch, kill, tidy
-├── runner.js             the child entrypoint (fixed mode table, no shell)
+├── runner.js             supervised child entrypoint + fixed provider route
+├── executors/services.js closed service/mode routing table
+├── browser/
+│   ├── contracts.js      sealed browser task/session/failure contract
+│   ├── executor.js       fixed provider router
+│   ├── session/playwrightCdp.js  loopback user-browser attachment
+│   └── providers/deepseek/       isolated selectors + one-send executor
 ├── env.js                environment allowlist + scrubbing
 ├── workspace.js          per-task directory creation + guarded cleanup
 ├── limits.js             bound resolution + platform capability detection

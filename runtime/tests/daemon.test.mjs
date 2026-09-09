@@ -94,6 +94,11 @@ try {
     'RT_STATUS: zero tasks before any run')
   assert(Array.isArray(s0.json.payload.services) && s0.json.payload.services.includes('stub'),
     'RT_STATUS: lists the registered stub service')
+  assert(s0.json.payload.services.includes('browser.deepseek'),
+    'RT_STATUS: lists the fixed browser.deepseek service')
+  assert(s0.json.payload.browserProviders?.[0]?.credentialsAccepted === false
+    && s0.json.payload.browserProviders?.[0]?.autoRetry === false,
+  'RT_STATUS: browser provider disclaims credentials and automatic retry')
 
   /* unsupported actions (envelope-level rejection) */
   for (const action of ['DS_SEND', 'DS_STATUS', 'EVAL', 'GET_COOKIES', 'SCRAPE', 'RT_TASK_PAUSE']) {
@@ -163,7 +168,7 @@ try {
   const unknownSvc = await httpJson('POST', { port, path: '/rpc', headers: auth,
     body: makeRequest(ACTION.RT_TASK_RUN, makeRequestId(), { service: 'deepseek' }) })
   assert(unknownSvc.json.success === false && unknownSvc.json.error.code === 'RT_UNKNOWN_SERVICE',
-    'unknown service → RT_UNKNOWN_SERVICE (no real integration yet)')
+    'unregistered alias → RT_UNKNOWN_SERVICE (browser.deepseek is the only DeepSeek route)')
   const badDur = await httpJson('POST', { port, path: '/rpc', headers: auth,
     body: makeRequest(ACTION.RT_TASK_RUN, makeRequestId(), { durationMs: -5 }) })
   assert(badDur.json.success === false && badDur.json.error.code === 'RT_INVALID_PAYLOAD',
