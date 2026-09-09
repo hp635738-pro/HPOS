@@ -1,0 +1,18 @@
+{
+  "name": "hpos-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HPOS local runtime daemon (M1 skeleton) — 127.0.0.1-only authenticated RPC + task registry. Infrastructure only; no DeepSeek logic yet.",
+  "type": "module",
+  "main": "daemon.js",
+  "bin": {
+    "hpos-runtime": "bin/hpos-runtime.js"
+  },
+  "scripts": {
+    "start": "node bin/hpos-runtime.js",
+    "test": "node tests/protocol.test.mjs && node tests/endpoints.test.mjs && node tests/daemon.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
