@@ -10,7 +10,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "bridge:check": "node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs",
-    "test": "node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs"
+    "test": "node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node vite-runtime-proxy.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

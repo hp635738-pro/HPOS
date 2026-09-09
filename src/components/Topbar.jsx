@@ -1,6 +1,7 @@
 import { useTheme } from '../theme/ThemeContext'
 import { Sun, Moon, Plus } from './Icons'
 import Notch, { TOOLS } from './Notch'
+import RuntimeStatus from './RuntimeStatus.jsx'
 
 export { TOOLS }
 
@@ -33,6 +34,8 @@ export default function Topbar({ title, active, onNavigate, onNewChat }) {
 
       <div style={{ ...S.right, gap: prefs.barGap }}>
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
+
+        <RuntimeStatus />
 
         {onNewChat && (
           <button

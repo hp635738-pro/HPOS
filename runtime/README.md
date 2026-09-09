@@ -13,8 +13,8 @@ behind the same registry boundary — the existing BrowserBridge /
 DeepSeekConnector / extension are untouched and remain the browser path.
 
 ```
-HPOS UI (later: LocalRuntimeBridge)
-   │  HTTP, same hpos-bridge envelopes, X-HPOS-Token header
+HPOS UI → LocalRuntimeBridge → Vite dev proxy
+   │  same hpos-bridge envelopes; credential stays on the dev host
    ▼
 hpos-runtime daemon  ── 127.0.0.1 only, origin-allowlisted CORS
    ├── GET  /health   liveness + version, no secrets
@@ -301,6 +301,26 @@ required anywhere.
 - On clean shutdown the daemon deletes the file — but only if it still holds
   its own token.
 
+## Web UI integration (M1 Step 3)
+
+During `npm run dev` from the repository root, Vite exposes only these
+same-origin development routes:
+
+- `GET /hpos-runtime/health` — proxied to runtime `/health`; liveness only.
+- `POST /hpos-runtime/rpc` — proxied to runtime `/rpc`; the proxy reads the
+  local endpoint file and injects `X-HPOS-Token` on the server side.
+
+The proxy target is fixed to `127.0.0.1` and accepts only `/health` and `/rpc`;
+it is not a generic forwarding endpoint. `src/lib/bridge/LocalRuntimeBridge.js`
+knows only those fixed browser routes, uses the existing HPOS envelope shape,
+and never receives the credential. Runtime status is `connected` only after an
+authenticated `PING` and `RT_STATUS`; a successful `/health` check cannot claim
+RPC connectivity. The header chip uses conservative polling and distinguishes
+`unknown`, `checking`, `connected`, `disconnected`, `unauthorized`, and `error`.
+
+This is a development integration only. No production proxy or remote runtime
+deployment is defined in M1.
+
 ## Tests
 
 Plain Node assert scripts, same style as the rest of the repo — no framework,
@@ -337,14 +357,14 @@ npm test
   run/stop/timeout over RPC, payload that tries to steer the executor, queue
   full, malformed/oversized bodies, CORS origin allowlist, shutdown
 
-## What is deliberately NOT here (yet)
+## What is deliberately NOT in the runtime (yet)
 
-**Step 2 does not provide:**
+**The runtime daemon does not provide:**
 
 - **DeepSeek, in any form.** There is no DeepSeek service, no connector, no
   session, no auth, no model call, no chat storage in the runtime. The one
-  registered service is `stub`, whose child process does nothing. LocalRuntimeBridge,
-  the Vite proxy and SSE events are likewise not part of this step.
+  registered service is `stub`, whose child process does nothing. The UI bridge
+  and Vite development proxy add no DeepSeek behavior.
 - **Arbitrary execution.** No command, script, executable path, URL or file
   path is accepted from RPC. No `eval`, no generic subprocess or fetch endpoint,
   no shell, no cookie access, no token scraping, no login bypass, no SSRF.
