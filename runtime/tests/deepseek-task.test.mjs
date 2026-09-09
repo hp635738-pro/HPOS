@@ -97,6 +97,7 @@ const spec = {
   const { tasks, bus } = registry(supervisor)
   const queued = tasks.run(spec)
   assert(queued.status === 'QUEUED' && queued.service === 'browser.deepseek', 'DeepSeek task is admitted as QUEUED')
+  assert(queued.executor === 'native', 'browser.deepseek stays on the Step 5 supervised native executor')
   assert(queued.mode === 'browser-provider' && queued.provider === 'deepseek', 'service routes to the fixed browser provider mode')
   assert(!JSON.stringify(queued).includes(spec.prompt), 'prompt is not stored in the public task record')
 
@@ -111,6 +112,7 @@ const spec = {
   assert(supervisor.calls.length === 1, 'one task creates exactly one supervised execution')
   const routed = supervisor.calls[0]
   assert(routed.mode === 'browser-provider' && routed.execution.provider === 'deepseek', 'supervisor receives the provider route')
+  assert(routed.backend === undefined, 'native provider execution does not masquerade as a Linux backend plan')
   assert(routed.execution.session.host === '127.0.0.1' && routed.execution.session.port === 9223,
     'browser endpoint is runtime-owned loopback configuration')
   assert(!('command' in routed) && !('url' in routed.execution), 'no generic command or URL enters the supervisor contract')

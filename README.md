@@ -62,19 +62,36 @@ server-side. `LocalRuntimeBridge` never receives, stores, or sends that
 credential. `Runtime connected` means authenticated `PING` and `RT_STATUS` both
 succeeded; `/health` is liveness only.
 
+Step 5 adds the **Linux execution backend foundation**: an internal,
+capability-driven executor layer, not a desktop environment. A task runs on
+Linux only when its *service* is registered on the Linux executor
+(`runtime/executors.js`), and that executor exists only when
+`runtime/linux/capabilities.js` finds an implemented backend adapter — on a
+Linux host that is `host-linux` (reported as `support: "partial"`, because M1
+enforces no namespaces or privilege drop); on Windows or macOS the runtime
+simply reports `available: false` with a reason, keeps working, and installs
+nothing (no WSL, Docker or VM workflow exists or is offered). The one registered
+Linux service is `linux-stub`, whose child does nothing. `RT_STATUS` includes a
+safe `linux` section and Runtime Activity includes a `Linux` capability row.
+Planned Linux services for Python, FFmpeg, Git and a future Linux DeepSeek route
+remain non-runnable placeholders; the Step 6 `browser.deepseek` service is a
+separate fixed, native supervised provider path. Details: `runtime/linux/README.md`.
+
 The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`) over
 SSE, including `GENERATING`/`STREAMING` and the bounded final assistant response
 for Chat. The header **Runtime Activity** popover shows connection/stream state,
-running DeepSeek tasks with Stop, bounded recent tasks, counters, and safe
-process metrics; it deliberately discards chat output and remains **not a
-terminal**. There is no arbitrary task, browser, command or shell UI.
+running tasks with Stop, Linux executor labels, bounded recent tasks, counters,
+and safe process metrics; it deliberately discards chat output and remains
+**not a terminal**. Event history is a bounded in-memory ring (never written to
+disk), and there is no arbitrary task, browser, command or shell UI.
 
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
 
 ```bash
 npm test        # bridge, runtime-connection, runtime-event-stream, runtime-activity,
-                # proxy, and storage checks (root) + `cd runtime && npm test`
+                # linux-capability state, proxy and storage checks (root)
+                # + `cd runtime && npm test` (includes the Step 5 linux suites)
 ```
 
 ---

@@ -12,20 +12,27 @@ generic browser endpoint, DeepSeek API, cookie import, credential extraction or
 automatic retry.
 
 ```
-HPOS Chat ── LocalRuntimeBridge ──▶ Vite dev proxy ──▶ runtime /rpc
-                                                          │
-                                            RT_TASK_RUN browser.deepseek
-                                                          ▼
- task registry: QUEUED → RUNNING → GENERATING → STREAMING → COMPLETE
-                                                          │
-                                               process supervisor
-                                                          ▼
- runner child ── fixed provider router ── DeepSeek page in the user's
-                                         visible Chromium CDP session
-                                                          │
-                              allowlisted progress/final task events over SSE
-                                                          ▼
-                                                     HPOS Chat
+HPOS Chat ── LocalRuntimeBridge ──▶ Vite dev proxy ──▶ hpos-runtime daemon
+        same HPOS envelopes; credential stays on the dev host       │
+                                                                    ├─ GET /health
+                                                                    ├─ POST /rpc
+                                                                    └─ GET /events (SSE)
+                                                                        │
+ task registry: QUEUED → RUNNING → GENERATING → STREAMING → terminal
+        │
+        └─ service → executor → backend                       (Step 5)
+                        │          ├─ native: stub, browser.deepseek
+                        │          └─ linux: linux-stub (capability-gated)
+                        ▼
+              one shared process supervisor
+              validated plan, workspace, scrubbed env, timeout/kill chain
+                        ▼
+                  fixed runner child
+                        ├─ closed lifecycle/Linux probe modes
+                        └─ fixed provider router → DeepSeek page in the user's
+                                                   visible Chromium CDP session
+                        │
+              allowlisted progress/final task events over SSE ──▶ HPOS Chat
 ```
 
 The existing extension BrowserBridge/DeepSeekConnector remains in the
@@ -94,8 +101,8 @@ Hard rules this layer is built around:
   anywhere in this codebase.
 - **No general-purpose endpoint.** There is no action that accepts a command,
   executable path, URL, selector or browser method. `RT_TASK_RUN` selects only
-  `stub` or `browser.deepseek`; the latter accepts prompt + bounded correlation
-  ids and nothing else.
+  `stub`, capability-gated `linux-stub`, or `browser.deepseek`; the browser route
+  accepts prompt + bounded correlation ids and nothing else.
 - **Closed behaviour set.** `runner.js` implements fixed internal modes
   (`noop`, `sleep`, `hang`, `fail`, test probes, and `browser-provider`) and
   refuses anything else. `browser-provider` independently seals its stdin spec
@@ -276,14 +283,18 @@ reported because they are not reliable cross-platform without extra tooling.
 | Action | Purpose | Response payload |
 | --- | --- | --- |
 | `PING` | liveness + protocol version | `{ version, engine: "hpos-runtime", uptimeMs, now }` |
-| `RT_STATUS` | runtime, task **and executor** status; optional `{ taskId }` for one task record | `{ status, version, services, tasks, executor, capabilities, capabilityNotes, recent, task? }` |
-| `RT_TASK_RUN` | enqueue a registered supervised task | `{ taskId, status: "QUEUED", service, correlationId? }` · `stub`: `{ service, durationMs?, timeoutMs?, note? }`; DeepSeek: `{ service: "browser.deepseek", prompt, correlationId, conversationId, messageId, timeoutMs? }` |
+| `RT_STATUS` | runtime, task **and executor** status; optional `{ taskId }` for one task record | `{ status, version, services, browserProviders, tasks, executor, capabilities, capabilityNotes, linux, recent, task? }` |
+| `RT_TASK_RUN` | enqueue a registered supervised task | `{ taskId, status: "QUEUED", service, correlationId? }` · `stub` / `linux-stub`: `{ service, durationMs?, timeoutMs?, note? }`; DeepSeek: `{ service: "browser.deepseek", prompt, correlationId, conversationId, messageId, timeoutMs? }` |
 | `RT_TASK_STOP` | cancel an active task (kills its child) | `{ taskId, status: "CANCELLED" }` · payload: `{ taskId }` |
 
 `RT_TASK_RUN` copies only service-specific fields. `mode`, `command`, `cwd`,
-`env`, `execPath`, `shell`, URL and selector hints are dropped before execution;
-credential/session/CAPTCHA-shaped keys are rejected outright with
-`RT_SECRET_FIELD_REJECTED`. The service table alone decides what the child does.
+`env`, `execPath`, `shell`, `executor`, URL and selector hints are dropped before
+the executor sees them; credential/session/CAPTCHA-shaped keys are rejected
+outright with `RT_SECRET_FIELD_REJECTED`. The closed service table alone decides
+what the child does **and which backend runs it** (Step 5). A service registered
+on the Linux executor is refused with `RT_EXECUTOR_UNAVAILABLE` (carrying the
+detection reason) when no Linux backend adapter exists here; it is never quietly
+re-run on the native backend.
 
 Unknown actions (including bridge `DS_*` actions, `EVAL`, `SCRAPE`,
 `GET_COOKIES`, and every invented `RT_TASK_EXEC`/`RT_SPAWN`/`RT_FETCH` style
@@ -291,11 +302,12 @@ name) are rejected with `UNKNOWN_ACTION`. Error codes: `RT_UNAUTHORIZED`,
 `RT_INVALID_REQUEST`, `RT_BODY_TOO_LARGE`, `RT_INVALID_CONTENT_TYPE`,
 `UNKNOWN_ACTION`, `RT_INVALID_PAYLOAD`, `RT_UNKNOWN_SERVICE`, `RT_QUEUE_FULL`,
 `RT_DUPLICATE_TASK`, `RT_PROVIDER_BUSY`, `RT_SECRET_FIELD_REJECTED`,
-`RT_TASK_NOT_FOUND`, `RT_TASK_NOT_CANCELABLE`, `RT_EXECUTOR_UNAVAILABLE`.
-Browser task failures include `BROWSER_UNAVAILABLE`, `AUTH_REQUIRED`,
-`CAPTCHA_REQUIRED`, `UNSUPPORTED_PAGE`, `AMBIGUOUS_SESSION`, `PROVIDER_BUSY`,
-`SEND_FAILED`, `RESPONSE_NOT_DETECTED`, `BROWSER_TIMEOUT`, and
-`BROWSER_INTERRUPTED`.
+`RT_TASK_NOT_FOUND`, `RT_TASK_NOT_CANCELABLE`, `RT_EXECUTOR_UNAVAILABLE`, and
+(Step 5) `RT_UNKNOWN_EXECUTOR` / `RT_WORKSPACE_REFUSED`. The executor/workspace
+codes are refusals, never capabilities. Browser task failures include
+`BROWSER_UNAVAILABLE`, `AUTH_REQUIRED`, `CAPTCHA_REQUIRED`, `UNSUPPORTED_PAGE`,
+`AMBIGUOUS_SESSION`, `PROVIDER_BUSY`, `SEND_FAILED`, `RESPONSE_NOT_DETECTED`,
+`BROWSER_TIMEOUT`, and `BROWSER_INTERRUPTED`.
 
 ## Task state machine
 
@@ -436,6 +448,61 @@ says so explicitly (no group-kill claim), and the code never calls
 `process.platform`, and no desktop environment, container or VM is assumed or
 required anywhere.
 
+## Linux execution backend (M1 Step 5)
+
+An **invisible, background execution capability** — not a desktop environment,
+not a terminal, not a shell. Step 5 installs the architecture that lets a future
+feature ask for Linux tooling through one registered service row.
+
+```
+RT_TASK_RUN { service } ─▶ service → executor ─▶ backend router ─┬─ native ─┐
+        (capability-gated)                                       └─ linux ─┴─▶ ONE supervisor
+```
+
+- **Detection, not assumption.** `runtime/linux/capabilities.js` separates *"this
+  is a Linux host"* from *"a usable Linux backend exists"*. Only
+  `platform === 'linux'` plus a passing probe from an **implemented** adapter
+  (`host-linux`) yields `available: true`, and it yields `support: "partial"` —
+  no namespaces, no privilege drop, no network isolation, so `full` would be a
+  lie. win32/darwin report `available: false` with
+  `reason: "no-backend-adapter-for-platform"`. That is a normal answer: the
+  daemon starts, native tasks keep working, nothing is installed, enabled or
+  suggested. `wsl`, `docker` and `vm` adapters are declared
+  `implemented: false` and can never be selected — not by env
+  (`HPOS_LINUX_EXECUTOR=on` included), not by RPC, not by configuration.
+- **Safe reporting.** `RT_STATUS.linux` is the output of
+  `publicLinuxCapabilities()`: a fixed key set (`available, support, platform,
+  isLinuxHost, executor, adapter, reason, services, isolation, notes`),
+  closed-set values, capped strings, and `isolation.shell: false` forced. No
+  path, command line, environment value or credential can be published through
+  it, and a capability record cannot talk its way into a wider shape.
+- **One service proves the boundary.** `linux-stub` is a registered Linux
+  service whose child does nothing (same fixed mode table as `stub`, plus the
+  booleans-only `inspect-linux` probe). `future-python`, `future-ffmpeg`,
+  `future-git` and `future-deepseek` are placeholders in `PLANNED_SERVICES`,
+  explicitly **not** registered and not runnable.
+- **Supervision is reused, not duplicated.** The Linux backend has
+  `detectCapabilities / isAvailable / plan / run / stop / getStatus`, but
+  `run()` delegates to the shared `supervisor.start()` and `stop()` to
+  `supervisor.cancel()`. Timeout, cancellation, shutdown drain, exit
+  classification, the `task.*` events and Runtime Activity rows therefore all
+  work for a Linux task with no Linux-specific code. The supervisor **validates
+  every plan** before a child exists: the daemon's own interpreter only, a short
+  plain-string argv, no shell, three pipes, cwd exactly the task workspace, no
+  sensitive env name, and caps that may shrink but never grow.
+- **Workspace + environment are the same guarantees, tightened.** Linux tasks
+  pass `runtime/linux/workspace.js` on the way in (per-task directory under the
+  runtime state root, marker + realpath verified, never the repository, never
+  the daemon cwd, never a caller-supplied path) and get `sanitizeEnv` output
+  minus `SHELL`/`TERM`/`COMSPEC`/`PATHEXT`, plus a **value-level** scan that
+  removes the runtime token even under a harmless variable name. Reports are
+  names and counts; values are never logged.
+- **UI:** one Linux row in Runtime Activity (`Linux  Available (partial)` /
+  `Unavailable`), fed only by `RT_STATUS`, with client-owned wording. No Linux
+  terminal, page, panel or install flow.
+
+Full details, the state table and the security list: `runtime/linux/README.md`.
+
 ## Authentication
 
 - On start the daemon writes `endpoints.json` **outside the repository**, at
@@ -476,10 +543,11 @@ RPC connectivity. The header chip uses conservative polling and distinguishes
 
 The small **Runtime Activity** popover (open the header chip) shows what the
 invisible runtime is doing: connection state, live event-stream state, the
-current `Running` tasks (`taskId`, `stub`/`browser.deepseek` service, and
+current active tasks (`taskId`, `stub`/`linux-stub`/`browser.deepseek` service,
+the closed executor label when known, and
 `QUEUED`/`RUNNING`/`GENERATING`/`STREAMING`, with a **Stop** action for known
-active task ids), a bounded `Recent`
-list of terminal tasks, basic counters, and safe process metrics
+active task ids), the safe Linux capability row, a bounded `Recent` list of
+terminal tasks, basic counters, and safe process metrics
 (`pid`, `uptime`, active/queued counts, CPU and memory — `unavailable` when a
 platform cannot provide them reliably). Stop calls `RT_TASK_STOP` through the
 existing bridge for a task id already in the active set — never from raw user
@@ -526,6 +594,16 @@ npm test
   case-insensitivity, and that no value ever reaches the report
 - `tests/workspace.test.mjs` — root safety guards, per-task isolation, the three
   cleanup proofs, symlink and marker-mismatch refusals, `keep`, prune-only-empty
+- `tests/linux.test.mjs` — Step 5 units: capability detection for linux/win32/
+  darwin/unknown/disabled/probe-failed (all by injection, so no Linux required),
+  the safe RT_STATUS projection, the service → executor rules, the workspace
+  gate, the launch plan (fixed argv, env drops, credential-by-value scan), the
+  backend interface, the router's refusals, and the supervisor's plan validation
+- `tests/linux-task.test.mjs` — Step 5 integration: linux tasks through the real
+  supervisor (complete, timeout, cancel, shutdown drain), native tasks proven
+  unchanged, an unavailable Linux executor refused at enqueue with no task
+  record and no fallback, RT_STATUS `linux` over RPC, planned services
+  unreachable, and a win32-shaped daemon that still runs the whole M1 path
 - `tests/supervisor.test.mjs` — real child execution: success, non-zero exit,
   spawn failure, timeout, SIGTERM→SIGKILL escalation, idempotent cancel, one
   process per task, capacity cap, workspace create/isolation/cleanup, output
@@ -557,28 +635,41 @@ npm test
 
 ## What is deliberately NOT in the runtime
 
-- **No DeepSeek API.** The provider interacts only with the visible web page in
-  the user-authenticated browser session.
-- **No authentication automation.** HPOS does not fill login forms, read
-  passwords, inspect CAPTCHA contents, copy profile state, read cookies/storage,
-  extract tokens or bypass access controls. Those states stop with explicit
-  errors and require normal user action in the browser.
-- **No arbitrary execution.** No command, script, executable path, URL, selector
-  or browser method is accepted from RPC. There is no generic subprocess,
+**The runtime daemon does not provide:**
+
+- **A DeepSeek API client.** The fixed provider interacts only with the visible
+  web page in the user-authenticated browser session.
+- **Authentication automation.** HPOS does not fill login forms, read passwords,
+  inspect CAPTCHA contents, copy profile state, read cookies/storage, extract
+  tokens or bypass access controls. Those states stop with explicit errors and
+  require normal user action in the browser.
+- **Arbitrary execution.** No command, script, executable path, URL, selector or
+  browser method is accepted from RPC. There is no generic subprocess,
   navigation, evaluate, scrape, fetch, filesystem or shell endpoint.
-- **No retries or restart recovery.** One correlation creates one task and one
-  submit gesture. Timeout, disconnect, browser failure and daemon restart are
-  terminal/interrupted; nothing automatically resends or reconstructs work.
-- **No hard CPU/address-space/disk quota guarantee.** See *Platform
-  capabilities* for the existing enforced timeout, V8 heap, output and process
-  supervision bounds.
-- **No remote/multi-user runtime.** The daemon and CDP target are fixed to
-  loopback. The runtime token stays in the local host/proxy boundary.
-- **No terminal UI.** Linux Activity shows safe lifecycle/metrics only. It does
-  not display prompts, assistant output, browser data, commands, process output,
-  environment or filesystem details.
-- **No persisted runtime/event queue.** Records and the bounded event ring are
-  memory-only; HPOS conversation persistence remains the existing chat store.
+- **A managed Linux environment.** No WSL, distro, Docker image or VM is
+  installed, enabled, pulled or offered; no adapter exists for Windows or
+  macOS; there is no Linux terminal, desktop, file browser, settings panel or
+  install flow. `linux-stub` only proves the boundary. Planned Linux Python,
+  FFmpeg, Git and DeepSeek services remain unreachable placeholders.
+- **Retries, restart recovery or priority.** One DeepSeek correlation creates
+  one task and at most one submit gesture. Timeout, disconnect, provider failure
+  and daemon restart are terminal/interrupted; nothing automatically resends or
+  reconstructs work. The in-memory queue has no priority mechanism.
+- **Hard CPU/address-space/disk guarantees.** There is no CPU-time cap,
+  address-space cap or disk quota, and no memory ceiling beyond the V8 heap
+  flag. See *Platform capabilities* for what is enforced and what is reported.
+- **Process-tree guarantees on Windows.** The task child is always terminated;
+  grandchildren it spawned may survive there because Job Objects need a native
+  helper. The capability report says so instead of hiding it.
+- **Remote or multi-user access.** The daemon and CDP target are fixed to
+  loopback. The runtime token stays in the local host/proxy boundary and is not
+  an identity system.
+- **A terminal UI.** Runtime Activity shows safe lifecycle/capability/metrics
+  only. It does not display prompts, assistant output, browser data, commands,
+  process output, environment or filesystem details.
+- **A persisted runtime/event queue.** Task records and the bounded event ring
+  are memory-only; HPOS conversation persistence remains the existing chat
+  store, and stale SSE history is replaced by a safe status resync.
 
 ## File map
 
@@ -590,7 +681,11 @@ runtime/
 ├── transport.js          HTTP surface (127.0.0.1, token, CORS, size caps, SSE)
 ├── events.js             Step 4 event bus: allowlist + envelope + bounded history
 ├── metrics.js            Step 4 safe process metrics (cpu/memory/pid or null)
-├── actions.js            RPC allowlist + payload pickers
+├── actions.js            RPC allowlist + payload pickers (+ Step 5 linux status)
+├── executors.js          Step 5: closed executor vocabulary + service → executor
+│                         rules + planned (unimplemented) services
+├── backend.js            Step 5: backend router — native adapter + linux
+│                         selection; a refusal, never a fallback
 ├── protocol.js           envelope contract, error codes
 ├── tasks.js              task registry: state machine, admission, counters,
 │                         publishes lifecycle events to the bus
@@ -606,5 +701,11 @@ runtime/
 ├── workspace.js          per-task directory creation + guarded cleanup
 ├── limits.js             bound resolution + platform capability detection
 ├── endpoints.js          endpoint file + token
-└── log.js                structured stdout log, secret-scrubbing
+├── log.js                structured stdout log, secret-scrubbing
+└── linux/                Step 5: the Linux execution backend
+    ├── capabilities.js   detection + the safe RT_STATUS projection
+    ├── launcher.js       the fixed launch plan: argv, cwd, scrubbed env, caps
+    ├── workspace.js      the workspace gate (reuses ../workspace.js)
+    ├── backend.js        the backend interface the router/registry speak
+    └── README.md         the milestone's boundary, in prose
 ```

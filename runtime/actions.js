@@ -25,6 +25,7 @@ import { isValidTaskId, MAX_DURATION_MS, DEFAULT_DURATION_MS } from './tasks.js'
 import { LIMIT_DEFAULTS, isPublicTimeoutAllowed, summarizeCapabilities } from './limits.js'
 import { BROWSER_TASK_LIMITS, cleanPrompt, isCorrelationId } from './browser/contracts.js'
 import { SERVICE } from './executors/services.js'
+import { publicLinuxCapabilities } from './linux/capabilities.js'
 
 export const ACTION = {
   PING: 'PING',
@@ -104,8 +105,10 @@ export function pickTaskRunPayload(payload, limits = LIMIT_DEFAULTS) {
   }
   const note = typeof raw.note === 'string' ? raw.note.slice(0, NOTE_MAX) : null
 
-  /* The returned object is the whole stub surface: there is no mode, command,
-     argv, cwd, env or path a caller can reach. */
+  /* The returned object is the whole non-provider surface: there is no `mode`,
+     `command`, `argv`, `cwd`, `env`, `path` or `executor` a caller can reach,
+     whatever they send. Which backend runs a task is a property of the
+     registered service, never a field in a request. */
   return { service, durationMs, timeoutMs, note }
 }
 
@@ -134,10 +137,21 @@ function pickStatusPayload(payload) {
  * Build the RPC dispatcher. `tasks` is the task registry; `startedAt` and
  * `log` are for status/diagnostics; `limits`/`capabilities` describe what the
  * executor will and will not enforce, so a client can see the real bounds
- * before it asks for a task. Returns handleRpc(envelope) → response envelope
- * (never throws).
+ * before it asks for a task. `linux` (Step 5) is the host's Linux execution
+ * capability record — it is re-projected through publicLinuxCapabilities(), so
+ * this response can only ever carry the safe field set even if the caller hands
+ * over something else. Returns handleRpc(envelope) → response envelope (never
+ * throws).
  */
-export function createRpcHandler({ tasks, startedAt = Date.now(), log, limits, capabilities = null } = {}) {
+export function createRpcHandler({
+  tasks,
+  startedAt = Date.now(),
+  log,
+  limits,
+  capabilities = null,
+  linux = null,
+} = {}) {
+  const linuxStatus = linux ? publicLinuxCapabilities(linux) : null
   const warn = log && log.warn ? (event, meta) => log.warn(event, meta) : () => {}
   const bounds = limits || (tasks && tasks.limits) || LIMIT_DEFAULTS
 
@@ -193,6 +207,20 @@ export function createRpcHandler({ tasks, startedAt = Date.now(), log, limits, c
         capabilities,
       }
       if (capabilities) out.capabilityNotes = summarizeCapabilities(capabilities)
+      /* Step 8 of M1: the Linux section is a capability report, not a control
+         surface. `available: false` with a reason is a complete, healthy answer. */
+      if (linuxStatus) {
+        out.linux = linuxStatus
+        out.executor.backends = {
+          native: { available: true, executor: 'native' },
+          linux: {
+            available: linuxStatus.available,
+            executor: linuxStatus.executor,
+            support: linuxStatus.support,
+            reason: linuxStatus.reason,
+          },
+        }
+      }
       if (taskId) {
         const task = tasks.get(taskId)
         if (!task) throw rtError(ERROR.TASK_NOT_FOUND, `Unknown taskId: ${taskId}`)

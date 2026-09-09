@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRuntimeActivity } from '../lib/bridge/useRuntimeActivity.js'
 import { RUNTIME_CONNECTION_STATE } from '../lib/bridge/runtimeConnection.js'
 import { RUNTIME_STREAM_STATE } from '../lib/bridge/runtimeEvents.js'
+import { linuxStateLabel, linuxStateTone } from '../lib/bridge/linuxStatus.js'
 import { Chevron } from './Icons'
 
 /**
@@ -12,12 +13,17 @@ import { Chevron } from './Icons'
  *
  *   [ Runtime ● ] ──click──▶ Runtime Activity
  *                              ● Runtime connected
+ *                              Linux          (Step 5: Available / Unavailable)
  *                              Running        (active stub tasks + Stop)
  *                              Recent         (completed / cancelled / …)
  *                              pid · uptime · cpu · memory (or "unavailable")
  *
  * Observability ONLY — deliberately NOT a terminal. No shell, no command
  * strings, no output, no environment, no filesystem internals are shown.
+ *
+ * The Linux row is a capability verdict and nothing else: there is no Linux
+ * page, no Linux settings panel and no install flow, because the runtime is an
+ * invisible execution layer, not a desktop environment.
  */
 
 const CONN_COPY = {
@@ -124,6 +130,7 @@ export default function RuntimeStatus() {
   const runtime = activity.runtime || {}
   const metrics = activity.metrics || {}
   const pendingStops = activity.pendingStops || []
+  const linux = activity.linux || {}
   const connected = connState === RUNTIME_CONNECTION_STATE.CONNECTED
 
   const cpu = cpuSeconds(metrics.cpu)
@@ -189,6 +196,16 @@ export default function RuntimeStatus() {
             {conn.detail || ''}
             {stream.state ? <span style={S.streamTag}>{STREAM_COPY[stream.state] || stream.state}</span> : null}
           </div>
+
+          {/* Linux execution capability (Step 5) — a verdict, never a console. */}
+          <div style={S.capRow}>
+            <span style={{ ...S.dot, background: linuxStateTone(linux) }} aria-hidden="true" />
+            <span style={S.connText}>Linux</span>
+            <span style={S.capValue}>{linuxStateLabel(linux)}</span>
+            {linux.reason && (
+              <span style={S.streamTag} title={linux.reasonLabel || ''}>{linux.reason}</span>
+            )}
+          </div>
           {activity.lastError && (
             <div style={S.errorRow} title={activity.lastError.message || ''}>
               {activity.lastError.code}
@@ -206,6 +223,7 @@ export default function RuntimeStatus() {
                 <div key={row.taskId} style={S.taskRow}>
                   <span style={S.taskName} title={row.taskId}>{shortId(row.taskId)}</span>
                   <span style={S.taskService}>{row.service}</span>
+                  {row.executor === 'linux' && <span style={S.execTag} title="ran on the Linux executor">linux</span>}
                   <span
                     className={row.status === 'GENERATING' || row.status === 'STREAMING' ? 'bridge-dot-pulse' : undefined}
                     style={S.statusChip(row.status === 'QUEUED' ? '#f59e0b' : '#22c55e')}
@@ -235,6 +253,7 @@ export default function RuntimeStatus() {
               <div key={`${row.taskId}-${row.status}`} style={S.taskRow}>
                 <span style={S.taskName} title={row.taskId}>{shortId(row.taskId)}</span>
                 <span style={S.taskService}>{row.service}</span>
+                {row.executor === 'linux' && <span style={S.execTag} title="ran on the Linux executor">linux</span>}
                 <span style={S.statusChip(RECENT_TONE[row.status] || 'var(--muted)')}>{row.status}</span>
               </div>
             ))
@@ -345,6 +364,18 @@ const S = {
     maxWidth: 128, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
   taskService: { fontSize: 10.5, color: 'var(--muted)', flexShrink: 0, textTransform: 'uppercase' },
+  capRow: { display: 'flex', alignItems: 'center', gap: 7, margin: '2px 0 0 2px' },
+  capValue: { fontSize: 11, fontWeight: 650, color: 'var(--text-2)' },
+  execTag: {
+    fontSize: 9.5,
+    fontWeight: 700,
+    letterSpacing: '.2px',
+    color: '#f59e0b',
+    border: '1px solid currentColor',
+    borderRadius: 999,
+    padding: '0 5px',
+    flexShrink: 0,
+  },
   statusChip: (color) => ({
     fontSize: 9.5, fontWeight: 800, letterSpacing: '.3px',
     color, background: 'transparent', border: '1px solid currentColor',

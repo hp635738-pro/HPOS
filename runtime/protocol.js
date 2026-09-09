@@ -50,6 +50,10 @@ export const ERROR = {
   DUPLICATE_TASK: 'RT_DUPLICATE_TASK',
   PROVIDER_BUSY: 'RT_PROVIDER_BUSY',
   SECRET_FIELD: 'RT_SECRET_FIELD_REJECTED',
+  /* Step 5: the service asked for an execution backend that does not exist here.
+     Both codes are refusals — neither is a capability, and neither has a way in. */
+  UNKNOWN_EXECUTOR: 'RT_UNKNOWN_EXECUTOR',
+  WORKSPACE_REFUSED: 'RT_WORKSPACE_REFUSED',
 }
 
 const ID_RE = /^[A-Za-z0-9._:-]{8,80}$/
