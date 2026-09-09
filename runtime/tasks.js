@@ -31,12 +31,22 @@
  * allowlisted before an event exists. Without a bus everything behaves exactly
  * as before; publishing failures are logged, never thrown.
  *
+ * Executors (M1 — Step 5): a service declares which execution backend it runs on
+ * (`executor`, from the closed set in executors.js). When the registry is handed
+ * a `backends` router it resolves service → executor → backend and launches
+ * through that backend; otherwise it calls the supervisor exactly as it did in
+ * Steps 1–4. The registry never learns what a Linux plan contains — only that a
+ * backend was selected, is available, and returned the same `started` shape.
+ * An unavailable executor is a refusal at enqueue time; a task is never silently
+ * downgraded onto the native backend.
+ *
  * No dependencies, Node 18+.
  */
 
 import { ERROR, rtError } from './protocol.js'
 import { LIMIT_DEFAULTS } from './limits.js'
 import { CANCEL_REASON, EVENT_TYPE } from './events.js'
+import { EXECUTOR, assertExecutorMatch, executorOf } from './executors.js'
 
 export const TASK_STATE = {
   QUEUED: 'QUEUED',
@@ -51,13 +61,28 @@ const TERMINAL_STATES = new Set([TASK_STATE.COMPLETE, TASK_STATE.CANCELLED, TASK
 const TASK_ID_RE = /^task-[A-Za-z0-9._:-]{8,72}$/
 
 /**
- * The only service registered in M1. `execMode` is what the child is told to
- * do — a fixed keyword from EXEC_MODES, never caller-chosen text.
+ * The services registered in M1. `executor` is which backend may launch the
+ * task (see executors.js — a closed vocabulary, never a caller choice) and
+ * `execMode` is what the child is told to do: a fixed keyword from EXEC_MODES,
+ * never caller-chosen text.
+ *
+ * `linux-stub` exists for one reason: to prove the Linux backend boundary
+ * end-to-end (capability gate → plan → shared supervisor → lifecycle events)
+ * with a task that has no side effects. It is a stub, not a Linux feature, and
+ * it stays unavailable on any host without a Linux backend adapter.
  */
 export const SERVICES = {
   stub: {
     name: 'stub',
     description: 'M1 lifecycle stub — runs a supervised child for durationMs, no side effects',
+    executor: 'native',
+    execMode: 'sleep',
+    idleMode: 'noop',
+  },
+  'linux-stub': {
+    name: 'linux-stub',
+    description: 'M1 Step 5 boundary stub — a supervised child on the Linux executor, no side effects',
+    executor: 'linux',
     execMode: 'sleep',
     idleMode: 'noop',
   },
@@ -70,8 +95,10 @@ export const SERVICES = {
  * pickers have dropped unknown fields, so a caller cannot reach past `stub`.
  * Kept in sync with MODES in runner.js, which re-validates independently — the
  * child is where enforcement actually lives.
+ * `inspect-linux` (Step 5) reports Linux-environment facts as booleans; it is
+ * still a no-op task, and it never reveals a path, a version string or a value.
  */
-export const EXEC_MODES = Object.freeze(['noop', 'sleep', 'hang', 'fail', 'inspect-env', 'inspect-workspace', 'flood'])
+export const EXEC_MODES = Object.freeze(['noop', 'sleep', 'hang', 'fail', 'inspect-env', 'inspect-workspace', 'inspect-linux', 'flood'])
 
 const MAX_TASKS_HELD = 512
 const DEFAULT_DURATION_MS = 50
@@ -96,6 +123,8 @@ export function isTerminalStatus(status) {
 /**
  * @param supervisor process supervisor (see supervisor.js). Required to run:
  *        without one, `run()` refuses rather than quietly executing in-process.
+ * @param backends   optional router (see backend.js). Absent → every task runs
+ *        on the supervisor directly, i.e. the Step 1–4 behaviour.
  */
 export function createTaskRegistry({
   maxActive = LIMIT_DEFAULTS.maxActive,
@@ -107,6 +136,8 @@ export function createTaskRegistry({
   startDelayMs = START_DELAY_MS,
   /* Step 4: optional event bus (see events.js). Absent → no events, no change. */
   bus = null,
+  /* Step 5: optional executor router. Absent → native only. */
+  backends = null,
 } = {}) {
   /** taskId → { start, supervisorOwned } — timers stay out of the records. */
   const slots = new Map()
@@ -221,7 +252,7 @@ export function createTaskRegistry({
 
   /* ------------------------------------------------------------- enqueue */
 
-  function run({ service, durationMs, note, timeoutMs, mode } = {}) {
+  function run({ service, durationMs, note, timeoutMs, mode, executor } = {}) {
     if (!supervisor) {
       /* Loud refusal — this is what guarantees task code never runs in the
          daemon. A registry without a supervisor cannot execute anything. */
@@ -236,6 +267,26 @@ export function createTaskRegistry({
     const def = SERVICES[service]
     if (!def) throw rtError(ERROR.UNKNOWN_SERVICE, `Unknown service "${String(service).slice(0, 32)}"`)
 
+    /* Step 5: the executor comes from the service registration. A caller that
+       supplies one gets it *checked*, never honoured: a mismatch is a refusal
+       rather than a re-route onto whichever backend they preferred. */
+    const declaredExecutor = assertExecutorMatch(executorOf(def), executor)
+    if (declaredExecutor !== EXECUTOR.NATIVE) {
+      if (!backends || typeof backends.availability !== 'function') {
+        throw rtError(
+          ERROR.EXECUTOR_UNAVAILABLE,
+          `No "${declaredExecutor}" executor is wired into this runtime`,
+        )
+      }
+      const verdict = backends.availability(declaredExecutor)
+      if (!verdict || verdict.ok !== true) {
+        throw rtError(
+          ERROR.EXECUTOR_UNAVAILABLE,
+          `The "${declaredExecutor}" executor is unavailable on this host (${(verdict && verdict.reason) || 'unknown'})`,
+        )
+      }
+    }
+
     /* `mode` is an internal override. Unknown values are refused, not run. */
     let execMode = def.execMode
     if (mode != null) {
@@ -249,6 +300,7 @@ export function createTaskRegistry({
     const task = {
       taskId: makeTaskId(),
       service,
+      executor: declaredExecutor,
       note: note || null,
       durationMs,
       timeoutMs: timeoutMs == null ? limits.defaultTimeoutMs : timeoutMs,
@@ -295,16 +347,30 @@ export function createTaskRegistry({
     const slot = slots.get(task.taskId)
     recordState(task, TASK_STATE.RUNNING)
     task.startedAt = now()
-    debug('task_started', { taskId: task.taskId, service: task.service, mode: task.mode, pid: null })
+    debug('task_started', { taskId: task.taskId, service: task.service, mode: task.mode, executor: task.executor, pid: null })
+
+    /* Step 5: pick the launch path. A non-native executor goes through its
+       backend (which hands the spec to the same shared supervisor); native keeps
+       calling the supervisor directly, exactly as in Steps 1–4. Either way the
+       supervisor is the only owner of timers, the kill chain and the outcome. */
+    let backend = null
+    if (task.executor !== EXECUTOR.NATIVE && backends && typeof backends.get === 'function') {
+      backend = backends.get(task.executor)
+    }
+    const launchSpec = {
+      taskId: task.taskId,
+      mode: task.mode,
+      durationMs: task.durationMs,
+      timeoutMs: task.timeoutMs,
+    }
 
     let started
     try {
-      started = supervisor.start({
-        taskId: task.taskId,
-        mode: task.mode,
-        durationMs: task.durationMs,
-        timeoutMs: task.timeoutMs,
-      })
+      if (!backend) {
+        started = supervisor.start(launchSpec)
+      } else {
+        started = backend.run(launchSpec)
+      }
     } catch (err) {
       finish(task, TASK_STATE.FAILED, {
         failure: {
@@ -318,10 +384,12 @@ export function createTaskRegistry({
 
     task.pid = started.pid
     task.workspaceDir = started.workspaceDir
+    /* Echo of the router's choice — recorded, never inferred from the service. */
+    if (started.executor) task.executor = started.executor
     /* What the supervisor actually enforced wins over what was asked for, so
        the record can never advertise a timeout that does not exist. */
     if (Number.isInteger(started.timeoutMs)) task.timeoutMs = started.timeoutMs
-    debug('task_process_assigned', { taskId: task.taskId, pid: started.pid })
+    debug('task_process_assigned', { taskId: task.taskId, pid: started.pid, executor: task.executor })
     publish(EVENT_TYPE.TASK_STARTED, { taskId: task.taskId, service: task.service })
 
     started.done
@@ -335,6 +403,7 @@ export function createTaskRegistry({
 
   /** Fold the supervisor's outcome into the record, without reviving a dead task. */
   function applyOutcome(task, outcome) {
+    if (outcome.executor) task.executor = outcome.executor
     const resources = outcome.resources || null
     task.resources = resources
     if (resources) {
@@ -375,7 +444,14 @@ export function createTaskRegistry({
   function list() {
     const out = []
     for (const t of tasks.values()) {
-      out.push({ taskId: t.taskId, status: t.status, service: t.service, pid: t.pid })
+      out.push({
+        taskId: t.taskId,
+        status: t.status,
+        service: t.service,
+        /* Which backend ran it — a closed-set label, safe for the UI. */
+        executor: t.executor || EXECUTOR.NATIVE,
+        pid: t.pid,
+      })
     }
     return out
   }
@@ -392,6 +468,12 @@ export function createTaskRegistry({
    * supervisor kills the child. The registry-side transition is immediate so
    * the RPC answer is synchronous, and the outcome handler will not overwrite
    * CANCELLED when the child finally settles.
+   *
+   * A non-native task is cancelled *through its backend* so the backend's own
+   * accounting stays honest; `backend.stop()` is a delegation to the same
+   * supervisor.cancel, so there is still exactly one place that signals a
+   * process. Shutdown (below) deliberately bypasses backends: killing children
+   * must never depend on a backend that could be mid-teardown.
    */
   function stop(taskId) {
     const task = tasks.get(taskId)
@@ -401,10 +483,16 @@ export function createTaskRegistry({
     }
     const wasRunning = task.status === TASK_STATE.RUNNING
     finish(task, TASK_STATE.CANCELLED, null, { cancelReason: CANCEL_REASON.STOP })
-    if (wasRunning && supervisor) {
+    const backend = task.executor && task.executor !== EXECUTOR.NATIVE
+      && backends && typeof backends.stop === 'function'
+      ? backends.stop(task.executor, taskId)
+      : null
+    if (!backend && wasRunning && supervisor) {
       const res = supervisor.cancel(taskId)
       task.cancelNote = res && res.cancelled ? 'terminating' : res && res.reason ? res.reason : 'unknown'
-    } else if (supervisor) {
+    } else if (backend) {
+      task.cancelNote = backend.cancelled ? 'terminating' : backend.reason || 'unknown'
+    } else if (!backend && supervisor) {
       /* Never spawned, but make the supervisor's idempotency explicit. */
       supervisor.cancel(taskId)
     }
@@ -473,6 +561,20 @@ export function createTaskRegistry({
     /** Supervisor-side view of the same tasks (pid, timers), for RT_STATUS. */
     processes: () => (supervisor ? supervisor.list() : []),
     processStats: () => (supervisor ? supervisor.stats() : null),
+    /* ---- Step 5: the service → executor view, derived from the table above ---- */
+    /** Registered services grouped by the executor that may run them. */
+    servicesByExecutor: () => {
+      const out = {}
+      for (const name of Object.keys(SERVICES)) {
+        const key = executorOf(SERVICES[name])
+        if (!out[key]) out[key] = []
+        out[key].push(name)
+      }
+      return out
+    },
+    executorFor: (service) => (SERVICES[service] ? executorOf(SERVICES[service]) : null),
+    /** The router, for a status handler that wants per-backend availability. */
+    backends: () => backends,
   }
 }
 

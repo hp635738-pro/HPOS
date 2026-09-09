@@ -23,6 +23,7 @@
 import { RUNTIME_ERROR, getLocalRuntimeBridge } from './LocalRuntimeBridge.js'
 import { RUNTIME_CONNECTION_STATE, getRuntimeConnectionController } from './runtimeConnection.js'
 import { RUNTIME_STREAM_STATE } from './runtimeEvents.js'
+import { initialLinuxState, readLinuxCapability } from './linuxStatus.js'
 
 export const ACTIVITY_LIMITS = Object.freeze({
   MAX_RECENT_TASKS: 20,
@@ -31,6 +32,9 @@ export const ACTIVITY_LIMITS = Object.freeze({
 })
 
 const ACTIVE_STATUSES = new Set(['QUEUED', 'RUNNING'])
+/* Step 5: which execution backend ran a task. The runtime publishes only these
+   two names; anything else is dropped rather than displayed. */
+const TASK_EVENT_EXECUTORS = new Set(['native', 'linux'])
 const TERMINAL_EVENT_TO_STATUS = {
   'task.completed': 'COMPLETE',
   'task.failed': 'FAILED',
@@ -57,6 +61,9 @@ function initialSnapshot() {
       lastEventAt: null,
     },
     runtime: { status: null, pid: null, uptimeMs: null, engine: null, version: null },
+    /* Step 5: the Linux capability verdict (see linuxStatus.js). A projection
+       of RT_STATUS — no paths, no commands, no environment, no storage. */
+    linux: initialLinuxState(),
     metrics: { cpu: null, memory: null },
     counters: {
       total: 0, active: 0, queued: 0, running: 0,
@@ -134,6 +141,7 @@ export class RuntimeActivityController {
       connection: { ...this._snapshot.connection },
       stream: { ...this._snapshot.stream },
       runtime: { ...this._snapshot.runtime },
+      linux: { ...this._snapshot.linux },
       metrics: clone(this._snapshot.metrics),
       counters: { ...this._snapshot.counters },
       active: this._snapshot.active,
@@ -273,6 +281,11 @@ export class RuntimeActivityController {
       checkedAt: snapshot.checkedAt || null,
     }
     if (snapshot.state === RUNTIME_CONNECTION_STATE.CONNECTED) this._lastError = null
+    else if (snapshot.state !== RUNTIME_CONNECTION_STATE.CHECKING) {
+      /* We cannot reach the runtime, so we do not claim to know what it can
+         execute. The row goes back to "Unknown" instead of going stale. */
+      this._snapshot.linux = initialLinuxState(this._now)
+    }
     this._emit()
   }
 
@@ -301,6 +314,7 @@ export class RuntimeActivityController {
         break
       case 'runtime.stopped':
         this._snapshot.runtime.status = 'stopped'
+        this._snapshot.linux = initialLinuxState(this._now)
         this._active.clear()
         this._syncActive()
         break
@@ -323,10 +337,14 @@ export class RuntimeActivityController {
            a reconnect can replay the bounded history — dedupe by event id. */
         if (this._terminalIds.has(id)) return
         this._terminalIds.add(id)
+        /* Task events do not carry an executor (the payload is allowlisted and
+           fixed-shape), so the row inherits it from the active set it leaves. */
+        const previous = this._active.get(payload.taskId)
         this._active.delete(payload.taskId)
         this._pushRecent({
           taskId: payload.taskId,
           service: payload.service,
+          executor: previous ? previous.executor : null,
           status: TERMINAL_EVENT_TO_STATUS[type] || type,
           ts: envelope.ts,
           kind: payload.kind || null,
@@ -368,7 +386,7 @@ export class RuntimeActivityController {
       }
       for (const row of payload.active) {
         if (ACTIVE_STATUSES.has(row.status)) {
-          this._upsertActive(row.taskId, row.service, row.status)
+          this._upsertActive(row.taskId, row.service, row.status, row.executor)
         }
       }
       this._syncActive()
@@ -377,6 +395,9 @@ export class RuntimeActivityController {
 
   /** Seed from an RT_STATUS RPC payload (same allowlisted shape). */
   _seedFromStatusPayload(payload) {
+    /* The Linux verdict only ever arrives on the RPC status response, never on
+       an event — so this is the one place that reads it. */
+    if (payload.linux) this._snapshot.linux = readLinuxCapability(payload, { now: this._now })
     if (payload.tasks && typeof payload.tasks === 'object') {
       const c = this._snapshot.counters
       for (const key of ['total', 'active', 'queued', 'running', 'completed', 'cancelled', 'failed']) {
@@ -388,7 +409,7 @@ export class RuntimeActivityController {
       for (const item of payload.recent) {
         if (!ACTIVE_STATUSES.has(item.status)) continue
         serverIds.add(item.taskId)
-        this._upsertActive(item.taskId, item.service, item.status)
+        this._upsertActive(item.taskId, item.service, item.status, item.executor)
       }
       for (const id of [...this._active.keys()]) {
         if (!serverIds.has(id)) this._active.delete(id)
@@ -397,14 +418,22 @@ export class RuntimeActivityController {
     this._syncActive()
   }
 
-  _upsertActive(taskId, service, status) {
+  _upsertActive(taskId, service, status, executor = null) {
     if (typeof taskId !== 'string' || !TASK_ID_RE.test(taskId)) return
+    /* Closed set, mirrored from the runtime: anything else is null, not text. */
+    const cleanExecutor = TASK_EVENT_EXECUTORS.has(executor) ? executor : null
     const existing = this._active.get(taskId)
     if (existing) {
       existing.service = typeof service === 'string' ? service : existing.service
       existing.status = status
+      if (cleanExecutor) existing.executor = cleanExecutor
     } else {
-      this._active.set(taskId, { taskId, service: typeof service === 'string' ? service : 'stub', status })
+      this._active.set(taskId, {
+        taskId,
+        service: typeof service === 'string' ? service : 'stub',
+        executor: cleanExecutor,
+        status,
+      })
     }
   }
 

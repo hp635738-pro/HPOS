@@ -22,8 +22,10 @@ hpos-runtime daemon  ── 127.0.0.1 only, origin-allowlisted CORS
    ├── GET  /events   authenticated SSE event stream (Step 4)
    ├── event bus       bounded in-memory history; registry publishes here
    ├── task registry   QUEUED → RUNNING → COMPLETE | FAILED | CANCELLED
-   └── process supervisor
-         └── child_process: node runner.js   (one per task, own workspace)
+   │     └── service → executor → backend          (Step 5 selection)
+   ├── backend router  ── native ──┐    ┌── linux (runtime/linux/, capability-gated)
+   └── process supervisor ─────────┴────┴─▶ one child per task, validated plan
+         └── child_process: node runner.js   (own workspace, scrubbed env)
 
 HPOS UI ── RuntimeEventStream (EventSource) ──▶ Vite dev proxy   (GET /hpos-runtime/events)
                 the proxy injects the credential on the dev host; the browser
@@ -241,21 +243,26 @@ reported because they are not reliable cross-platform without extra tooling.
 | Action | Purpose | Response payload |
 | --- | --- | --- |
 | `PING` | liveness + protocol version | `{ version, engine: "hpos-runtime", uptimeMs, now }` |
-| `RT_STATUS` | runtime, task **and executor** status; optional `{ taskId }` for one task record | `{ status, version, services, tasks, executor, capabilities, capabilityNotes, recent, task? }` |
+| `RT_STATUS` | runtime, task **and executor** status; optional `{ taskId }` for one task record | `{ status, version, services, tasks, executor, capabilities, capabilityNotes, linux, recent, task? }` |
 | `RT_TASK_RUN` | enqueue a task on the supervised executor | `{ taskId, status: "QUEUED", service }` · payload: `{ service?: "stub", durationMs?: 0–60000, timeoutMs?: 1000–max, note?: ≤200 chars }` |
 | `RT_TASK_STOP` | cancel an active task (kills its child) | `{ taskId, status: "CANCELLED" }` · payload: `{ taskId }` |
 
 `RT_TASK_RUN` ignores every field it does not whitelist. A payload that carries
-`mode`, `command`, `cwd`, `env`, `execPath` or `shell` gets all of it dropped
-before the executor ever sees the request — the service table decides what the
-child does.
+`mode`, `command`, `cwd`, `env`, `execPath`, `shell` or `executor` gets all of it
+dropped before the executor ever sees the request — the service table decides
+what the child does **and which backend runs it** (Step 5). A service registered
+on the Linux executor is refused with `RT_EXECUTOR_UNAVAILABLE` (carrying the
+detection reason) when no Linux backend adapter exists here; it is never quietly
+re-run on the native backend.
 
 Unknown actions (including bridge `DS_*` actions, `EVAL`, `SCRAPE`,
 `GET_COOKIES`, and every invented `RT_TASK_EXEC`/`RT_SPAWN`/`RT_FETCH` style
 name) are rejected with `UNKNOWN_ACTION`. Error codes: `RT_UNAUTHORIZED`,
 `RT_INVALID_REQUEST`, `RT_BODY_TOO_LARGE`, `RT_INVALID_CONTENT_TYPE`,
 `UNKNOWN_ACTION`, `RT_INVALID_PAYLOAD`, `RT_UNKNOWN_SERVICE`, `RT_QUEUE_FULL`,
-`RT_TASK_NOT_FOUND`, `RT_TASK_NOT_CANCELABLE`, `RT_EXECUTOR_UNAVAILABLE`.
+`RT_TASK_NOT_FOUND`, `RT_TASK_NOT_CANCELABLE`, `RT_EXECUTOR_UNAVAILABLE`, and
+(Step 5) `RT_UNKNOWN_EXECUTOR` / `RT_WORKSPACE_REFUSED`. Neither of the last two
+is a capability: both are refusals.
 
 ## Task state machine
 
@@ -390,6 +397,61 @@ says so explicitly (no group-kill claim), and the code never calls
 `process.platform`, and no desktop environment, container or VM is assumed or
 required anywhere.
 
+## Linux execution backend (M1 Step 5)
+
+An **invisible, background execution capability** — not a desktop environment,
+not a terminal, not a shell. Step 5 installs the architecture that lets a future
+feature ask for Linux tooling through one registered service row.
+
+```
+RT_TASK_RUN { service } ─▶ service → executor ─▶ backend router ─┬─ native ─┐
+        (capability-gated)                                       └─ linux ─┴─▶ ONE supervisor
+```
+
+- **Detection, not assumption.** `runtime/linux/capabilities.js` separates *"this
+  is a Linux host"* from *"a usable Linux backend exists"*. Only
+  `platform === 'linux'` plus a passing probe from an **implemented** adapter
+  (`host-linux`) yields `available: true`, and it yields `support: "partial"` —
+  no namespaces, no privilege drop, no network isolation, so `full` would be a
+  lie. win32/darwin report `available: false` with
+  `reason: "no-backend-adapter-for-platform"`. That is a normal answer: the
+  daemon starts, native tasks keep working, nothing is installed, enabled or
+  suggested. `wsl`, `docker` and `vm` adapters are declared
+  `implemented: false` and can never be selected — not by env
+  (`HPOS_LINUX_EXECUTOR=on` included), not by RPC, not by configuration.
+- **Safe reporting.** `RT_STATUS.linux` is the output of
+  `publicLinuxCapabilities()`: a fixed key set (`available, support, platform,
+  isLinuxHost, executor, adapter, reason, services, isolation, notes`),
+  closed-set values, capped strings, and `isolation.shell: false` forced. No
+  path, command line, environment value or credential can be published through
+  it, and a capability record cannot talk its way into a wider shape.
+- **One service proves the boundary.** `linux-stub` is a registered Linux
+  service whose child does nothing (same fixed mode table as `stub`, plus the
+  booleans-only `inspect-linux` probe). `future-python`, `future-ffmpeg`,
+  `future-git` and `future-deepseek` are placeholders in `PLANNED_SERVICES`,
+  explicitly **not** registered and not runnable.
+- **Supervision is reused, not duplicated.** The Linux backend has
+  `detectCapabilities / isAvailable / plan / run / stop / getStatus`, but
+  `run()` delegates to the shared `supervisor.start()` and `stop()` to
+  `supervisor.cancel()`. Timeout, cancellation, shutdown drain, exit
+  classification, the `task.*` events and Runtime Activity rows therefore all
+  work for a Linux task with no Linux-specific code. The supervisor **validates
+  every plan** before a child exists: the daemon's own interpreter only, a short
+  plain-string argv, no shell, three pipes, cwd exactly the task workspace, no
+  sensitive env name, and caps that may shrink but never grow.
+- **Workspace + environment are the same guarantees, tightened.** Linux tasks
+  pass `runtime/linux/workspace.js` on the way in (per-task directory under the
+  runtime state root, marker + realpath verified, never the repository, never
+  the daemon cwd, never a caller-supplied path) and get `sanitizeEnv` output
+  minus `SHELL`/`TERM`/`COMSPEC`/`PATHEXT`, plus a **value-level** scan that
+  removes the runtime token even under a harmless variable name. Reports are
+  names and counts; values are never logged.
+- **UI:** one Linux row in Runtime Activity (`Linux  Available (partial)` /
+  `Unavailable`), fed only by `RT_STATUS`, with client-owned wording. No Linux
+  terminal, page, panel or install flow.
+
+Full details, the state table and the security list: `runtime/linux/README.md`.
+
 ## Authentication
 
 - On start the daemon writes `endpoints.json` **outside the repository**, at
@@ -477,6 +539,16 @@ npm test
   case-insensitivity, and that no value ever reaches the report
 - `tests/workspace.test.mjs` — root safety guards, per-task isolation, the three
   cleanup proofs, symlink and marker-mismatch refusals, `keep`, prune-only-empty
+- `tests/linux.test.mjs` — Step 5 units: capability detection for linux/win32/
+  darwin/unknown/disabled/probe-failed (all by injection, so no Linux required),
+  the safe RT_STATUS projection, the service → executor rules, the workspace
+  gate, the launch plan (fixed argv, env drops, credential-by-value scan), the
+  backend interface, the router's refusals, and the supervisor's plan validation
+- `tests/linux-task.test.mjs` — Step 5 integration: linux tasks through the real
+  supervisor (complete, timeout, cancel, shutdown drain), native tasks proven
+  unchanged, an unavailable Linux executor refused at enqueue with no task
+  record and no fallback, RT_STATUS `linux` over RPC, planned services
+  unreachable, and a win32-shaped daemon that still runs the whole M1 path
 - `tests/supervisor.test.mjs` — real child execution: success, non-zero exit,
   spawn failure, timeout, SIGTERM→SIGKILL escalation, idempotent cancel, one
   process per task, capacity cap, workspace create/isolation/cleanup, output
@@ -512,7 +584,14 @@ npm test
   path is accepted from RPC. No `eval`, no generic subprocess or fetch endpoint,
   no shell, no cookie access, no token scraping, no login bypass, no SSRF.
 - **Real work in tasks.** The task body is a no-op stub on purpose; what is
-  being proven is supervision, isolation and lifecycle, not output.
+  being proven is supervision, isolation and lifecycle, not output. The Linux
+  executor (Step 5) is the same deal: a boundary, a verdict and a stub service.
+- **A Linux environment.** No WSL, distro, Docker image or VM is installed,
+  enabled, pulled or offered; no adapter exists for Windows or macOS; there is
+  no Linux terminal, desktop, file browser, settings panel or install flow
+  anywhere in HPOS. Nothing in the runtime is DeepSeek-shaped either: no
+  Python, FFmpeg, Git, Docker or DeepSeek service exists yet — they are
+  `PLANNED_SERVICES` placeholders that cannot be run.
 - **Hard resource guarantees.** No CPU-time cap, no address-space cap, no disk
   quota, no memory ceiling beyond the V8 heap flag. See *Platform capabilities*
   for what is enforced and what is only reported.
@@ -540,7 +619,11 @@ runtime/
 ├── transport.js          HTTP surface (127.0.0.1, token, CORS, size caps, SSE)
 ├── events.js             Step 4 event bus: allowlist + envelope + bounded history
 ├── metrics.js            Step 4 safe process metrics (cpu/memory/pid or null)
-├── actions.js            RPC allowlist + payload pickers
+├── actions.js            RPC allowlist + payload pickers (+ Step 5 linux status)
+├── executors.js          Step 5: closed executor vocabulary + service → executor
+│                         rules + planned (unimplemented) services
+├── backend.js            Step 5: backend router — native adapter + linux
+│                         selection; a refusal, never a fallback
 ├── protocol.js           envelope contract, error codes
 ├── tasks.js              task registry: state machine, admission, counters,
 │                         publishes lifecycle events to the bus
@@ -550,5 +633,11 @@ runtime/
 ├── workspace.js          per-task directory creation + guarded cleanup
 ├── limits.js             bound resolution + platform capability detection
 ├── endpoints.js          endpoint file + token
-└── log.js                structured stdout log, secret-scrubbing
+├── log.js                structured stdout log, secret-scrubbing
+└── linux/                Step 5: the Linux execution backend
+    ├── capabilities.js   detection + the safe RT_STATUS projection
+    ├── launcher.js       the fixed launch plan: argv, cwd, scrubbed env, caps
+    ├── workspace.js      the workspace gate (reuses ../workspace.js)
+    ├── backend.js        the backend interface the router/registry speak
+    └── README.md         the milestone's boundary, in prose
 ```
