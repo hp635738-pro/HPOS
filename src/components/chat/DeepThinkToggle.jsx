@@ -17,7 +17,7 @@ export default function DeepThinkToggle({ checked, onChange }) {
       aria-label="DeepThink"
       title={on ? 'DeepThink is on' : 'DeepThink is off'}
       onClick={() => onChange?.(!on)}
-      className="chat-focus"
+      className="chat-focus composer-pill"
       style={S.switch}
     >
       <span style={S.label}>DeepThink</span>

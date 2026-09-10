@@ -168,6 +168,74 @@ button:hover > .rail-grip { opacity: .45; }
 /* Pinned rows keep a persistent, subtle pin indicator. */
 .conv-pin[data-on='true'] { opacity: .85; color: var(--accent); }
 
+/* ---- Composer upgrade: floating card, action states, files, voice ---- */
+.composer-card:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--cmp-ring), 0 8px 28px -12px rgba(0,0,0,.35);
+}
+.composer-pill:hover { border-color: var(--accent); color: var(--text); }
+
+.composer-action-icon {
+  display: grid; placeItems: center;
+  animation: composer-icon-in .18s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes composer-icon-in {
+  from { opacity: 0; transform: scale(.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.composer-files-in { animation: composer-files-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes composer-files-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.composer-menu-in {
+  animation: composer-menu-in .15s ease-out;
+  transform-origin: bottom left;
+}
+@keyframes composer-menu-in {
+  from { opacity: 0; transform: translateY(5px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.composer-label-in {
+  display: inline-block;
+  animation: composer-label-in .18s ease-out;
+}
+@keyframes composer-label-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Voice visualizer bars. Live heights arrive inline; the fallback
+   animation runs while the mic is starting or unavailable. */
+.mic-bar {
+  width: 3px; height: 8px; border-radius: 999px; flex-shrink: 0;
+  background: var(--accent);
+  animation: mic-bar 1s ease-in-out infinite;
+  transition: height .07s linear;
+}
+.mic-bar[data-live='true'] { animation: none; }
+@keyframes mic-bar {
+  0%, 100% { height: 6px; opacity: .55; }
+  50%      { height: 22px; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-action-icon,
+  .composer-files-in,
+  .composer-menu-in,
+  .composer-label-in,
+  .mic-bar { animation: none; }
+  /* Inline transitions need !important to yield. */
+  .composer-card,
+  .composer-area,
+  .composer-action,
+  .composer-pill,
+  .composer-pill * { transition: none !important; }
+}
+
 @keyframes bridge-dot-pulse {
   0%, 100% { opacity: .35; }
   50% { opacity: 1; }

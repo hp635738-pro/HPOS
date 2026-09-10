@@ -164,10 +164,15 @@ assert(!chatPage.includes('ConversationList'), 'ChatPage main column shows no hi
 {
   const modelAt = composer.indexOf('<ModelSelector')
   const thinkAt = composer.indexOf('<DeepThinkToggle')
-  const sendAt = composer.indexOf('aria-label="Send message"')
+  const sendAt = composer.indexOf('aria-label={current.label}')
   assert(modelAt !== -1 && thinkAt !== -1, 'composer hosts model + DeepThink controls')
-  assert(modelAt < thinkAt && thinkAt < sendAt, 'controls read [model] [DeepThink] … [Send]')
+  assert(modelAt < thinkAt && thinkAt < sendAt, 'controls read [model] [DeepThink] … [action]')
 }
+assert(
+  composer.includes("label: 'Send message'") && composer.includes("label: 'Start voice input'") &&
+    composer.includes("label: 'Stop recording'"),
+  'action button labels every state (send/mic/stop)',
+)
 assert(
   composer.includes("e.key === 'Enter'") && composer.includes('!e.shiftKey'),
   'Enter-to-send / Shift+Enter behavior preserved',

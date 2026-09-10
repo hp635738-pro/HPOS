@@ -140,6 +140,18 @@ export const Plane = (p) => (
   <Svg {...p}><path d="M20 4 3.5 11.2l6 2.3 2.3 6L20 4Z" /></Svg>
 )
 
+export const ArrowUp = (p) => (
+  <Svg {...p}><path d="M12 20V5M5.5 11.5 12 5l6.5 6.5" /></Svg>
+)
+
+export const Mic = (p) => (
+  <Svg {...p}><rect x="9" y="2.8" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5" /></Svg>
+)
+
+export const Stop = (p) => (
+  <Svg filled {...p}><rect x="7" y="7" width="10" height="10" rx="2.6" /></Svg>
+)
+
 export const Eye = (p) => (
   <Svg {...p}><path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.6" /></Svg>
 )

@@ -68,8 +68,11 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
     })
   }
 
-  const send = (content) => {
+  const send = (content, extras = null) => {
     const convId = ensureConversation()
+    // Composer attachments ride on the local user message only — the
+    // runtime send payload further below is unchanged (text-only contract).
+    const attachments = extras?.attachments?.length ? extras.attachments : null
 
     // UI-only demo: `/image <prompt>` renders the representative
     // image-generation result state locally. It never touches the runtime,
@@ -77,7 +80,11 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
     const imageMatch = content.match(/^\/image(?:\s+(.*))?$/s)
     if (imageMatch) {
       const promptText = (imageMatch[1] || '').trim()
-      saveMessage(convId, createMessage({ role: 'user', content }), { persist: 'flush' })
+      saveMessage(convId, createMessage({
+        role: 'user',
+        content,
+        ...(attachments ? { meta: { attachments } } : null),
+      }), { persist: 'flush' })
       saveMessage(convId, createMessage({
         role: 'assistant',
         content: '',
@@ -90,7 +97,11 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
       return
     }
 
-    const userMsg = createMessage({ role: 'user', content })
+    const userMsg = createMessage({
+      role: 'user',
+      content,
+      ...(attachments ? { meta: { attachments } } : null),
+    })
     const pending = createMessage({ role: 'assistant', content: '', status: 'thinking' })
 
     if (inflight.current) {

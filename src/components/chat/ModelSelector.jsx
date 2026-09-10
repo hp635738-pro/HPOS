@@ -90,17 +90,17 @@ export default function ModelSelector({ value, onChange }) {
         aria-expanded={open}
         aria-label={`Model: ${current.label}`}
         title="Choose model"
-        className="chat-focus"
+        className="chat-focus composer-pill"
         style={S.trigger}
       >
-        <span style={S.triggerLabel}>{current.label}</span>
+        <span key={current.id} className="composer-label-in" style={S.triggerLabel}>{current.label}</span>
         <span style={{ ...S.chev, transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>
           <Chevron size={13} />
         </span>
       </button>
 
       {open && (
-        <span role="listbox" aria-label="Model" style={S.menu}>
+        <span role="listbox" aria-label="Model" className="composer-menu-in" style={S.menu}>
           {CHAT_MODELS.map((m, at) => {
             const selected = m.id === current.id
             const focused = at === focusAt
