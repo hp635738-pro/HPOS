@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import MessageList from '../components/chat/MessageList'
 import MessageComposer from '../components/chat/MessageComposer'
-import RuntimeDeepSeekStatus from '../components/chat/RuntimeDeepSeekStatus'
 import ChatHistorySidebar from '../components/chat/ChatHistorySidebar'
+import RuntimeDetailsPanel from '../components/chat/RuntimeDetailsPanel'
 import { createMessage } from '../lib/chat/mock'
 import {
   DEEPSEEK_RUNTIME_ERROR,
@@ -30,8 +30,10 @@ import { startNewChat } from '../lib/chat/history.js'
  * Layout: current conversation + composer on the left, dedicated chat history
  * sidebar docked on the right (opposite the main navigation rail). Model and
  * DeepThink are session-level UI state only — they are never sent anywhere.
+ * Runtime status lives in the header container; holding it opens the
+ * full-panel runtime details overlay (chat underneath stays mounted).
  */
-export default function ChatPage({ historyOpen = true, onCloseHistory }) {
+export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOpen = false, onBackFromDetails }) {
   const { ready, active } = useConversations()
   const inflight = useRef(null)
   const [uiPrefs, setUiPrefs] = useState(() => loadChatUiPrefs())
@@ -190,14 +192,13 @@ export default function ChatPage({ historyOpen = true, onCloseHistory }) {
 
   return (
     <section style={S.page} aria-label="AI chats">
-      <div style={S.main}>
+      <div style={S.main} inert={detailsOpen ? true : undefined}>
         <MessageList
           messages={messages}
           empty={empty}
           onSuggestion={send}
           onStop={stop}
         />
-        <RuntimeDeepSeekStatus />
         <MessageComposer
           key={active?.id || 'none'}
           onSend={send}
@@ -211,6 +212,7 @@ export default function ChatPage({ historyOpen = true, onCloseHistory }) {
         open={historyOpen}
         onClose={onCloseHistory}
         onNewChat={() => startNewChat()}
+        inert={detailsOpen}
       />
       <button
         type="button"
@@ -220,6 +222,7 @@ export default function ChatPage({ historyOpen = true, onCloseHistory }) {
         aria-label="Close chat history"
         tabIndex={-1}
       />
+      {detailsOpen && <RuntimeDetailsPanel onBack={onBackFromDetails} />}
     </section>
   )
 }

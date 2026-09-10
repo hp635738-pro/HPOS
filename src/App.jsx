@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
@@ -18,10 +18,26 @@ export default function App() {
   // Chat history sidebar (right rail) visibility. Lives here so the header
   // toggle and ChatPage stay in sync.
   const [historyOpen, setHistoryOpen] = useState(true)
+  // Full-panel runtime details overlay, opened by holding the header status
+  // container. Lives here so the header trigger and ChatPage stay in sync.
+  const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false)
+  const runtimeStatusRef = useRef(null)
 
   const navigate = (nextView) => {
     if (nextView === 'files') setPreviousView(view)
     setView(nextView)
+  }
+
+  // Details live in the chat area: opening from any page lands in chat.
+  const openRuntimeDetails = () => {
+    if (view !== 'aiagents') navigate('aiagents')
+    setRuntimeDetailsOpen(true)
+  }
+
+  // Closing returns focus to the header status container.
+  const closeRuntimeDetails = () => {
+    setRuntimeDetailsOpen(false)
+    requestAnimationFrame(() => runtimeStatusRef.current?.focus())
   }
 
   // Browser bridge handshake, then DeepSeek tab detect. Safe no-op if extension absent.
@@ -74,6 +90,8 @@ export default function App() {
           onNewChat={view === 'aiagents' ? () => { startNewChat() } : undefined}
           historyOpen={historyOpen}
           onToggleHistory={view === 'aiagents' ? () => setHistoryOpen((v) => !v) : undefined}
+          onOpenRuntimeDetails={openRuntimeDetails}
+          runtimeStatusRef={runtimeStatusRef}
         />
 
         {view === 'settings'
@@ -82,7 +100,12 @@ export default function App() {
               onJumped={() => setAdvancedPage(null)}
             />
           : view === 'aiagents'
-            ? <ChatPage historyOpen={historyOpen} onCloseHistory={() => setHistoryOpen(false)} />
+            ? <ChatPage
+              historyOpen={historyOpen}
+              onCloseHistory={() => setHistoryOpen(false)}
+              detailsOpen={runtimeDetailsOpen}
+              onBackFromDetails={closeRuntimeDetails}
+            />
             : <Blank />}
       </main>
 

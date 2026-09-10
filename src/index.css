@@ -344,6 +344,8 @@ button:hover > .rail-grip { opacity: .45; }
 @media (prefers-reduced-motion: reduce) {
   .ig-blob, .ig-glow, .ig-dot { animation: none; }
   .chat-history { transition: none; }
+  .rt-cat-bob, .rt-cat-legs-a, .rt-cat-legs-b, .rt-cat-tail { animation: none; }
+  .rt-details { animation: none; }
 }
 
 /* -------------------------------------- chat history sidebar (right rail)
@@ -413,4 +415,63 @@ button:hover > .rail-grip { opacity: .45; }
     background: rgba(10,11,14,.42);
     cursor: default;
   }
+}
+
+/* --------------------------------- runtime status: container + running cat
+   Header container. The cat idles while disconnected, runs while connected,
+   and sprints while runtime tasks are active (shorter --cat-dur). Dot + text
+   always carry state too — the cat is never the only signal. */
+.rt-status { position: relative; overflow: hidden; }
+.rt-status[data-holding="true"] { border-color: var(--accent); }
+/* Hold progress: fills over the 3s press (see LONG_PRESS_MS). */
+.rt-hold {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent);
+  transform: scaleX(0); transform-origin: left center;
+}
+.rt-hold[data-holding="true"] { transform: scaleX(1); transition: transform 3s linear; }
+
+.rt-cat { height: 20px; width: auto; display: block; --cat-dur: .72s; }
+.rt-cat[data-motion="fast"] { --cat-dur: .36s; }
+.rt-cat[data-motion="idle"] { opacity: .55; }
+.rt-cat-bob { animation: rt-cat-bob var(--cat-dur) ease-in-out infinite; }
+.rt-cat-legs-a, .rt-cat-legs-b {
+  animation: rt-cat-leg var(--cat-dur) ease-in-out infinite;
+  transform-box: fill-box; transform-origin: 50% 0;
+}
+/* Back legs run half a stride behind the front pair. */
+.rt-cat-legs-b { animation-delay: calc(var(--cat-dur) / -2); }
+.rt-cat-tail {
+  animation: rt-cat-tail var(--cat-dur) ease-in-out infinite;
+  transform-box: fill-box; transform-origin: 100% 100%;
+}
+.rt-cat[data-motion="idle"] .rt-cat-bob,
+.rt-cat[data-motion="idle"] .rt-cat-legs-a,
+.rt-cat[data-motion="idle"] .rt-cat-legs-b,
+.rt-cat[data-motion="idle"] .rt-cat-tail { animation-play-state: paused; }
+
+@keyframes rt-cat-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.4px); }
+}
+@keyframes rt-cat-leg {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2.4px); }
+}
+@keyframes rt-cat-tail {
+  0%, 100% { transform: rotate(-9deg); }
+  50%      { transform: rotate(9deg); }
+}
+
+/* --------------------------------------- runtime details: full-panel view
+   Overlay covering the chat area (above history + scrim), entered by
+   holding the header status container. */
+.rt-details {
+  position: absolute; inset: 0; z-index: 50;
+  overflow-y: auto; background: var(--bg);
+  animation: rt-details-in .22s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes rt-details-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
 }

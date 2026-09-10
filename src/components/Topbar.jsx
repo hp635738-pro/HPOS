@@ -11,7 +11,7 @@ export { TOOLS }
  * Page-specific actions (e.g. New chat) sit in the same right cluster as
  * independent controls — never inside the notch pill.
  */
-export default function Topbar({ title, active, onNavigate, onNewChat, historyOpen, onToggleHistory }) {
+export default function Topbar({ title, active, onNavigate, onNewChat, historyOpen, onToggleHistory, onOpenRuntimeDetails, runtimeStatusRef }) {
   const { prefs, resolved, set } = useTheme()
 
   return (
@@ -35,7 +35,7 @@ export default function Topbar({ title, active, onNavigate, onNewChat, historyOp
       <div style={{ ...S.right, gap: prefs.barGap }}>
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
 
-        <RuntimeStatus />
+        <RuntimeStatus onOpenDetails={onOpenRuntimeDetails} triggerRef={runtimeStatusRef} />
 
         {onNewChat && (
           <button

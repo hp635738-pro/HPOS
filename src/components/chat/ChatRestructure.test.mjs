@@ -132,7 +132,7 @@ assert(
 
 /* 4. opposite-side placement */
 {
-  const mainAt = chatPage.indexOf('<div style={S.main}>')
+  const mainAt = chatPage.indexOf('<div style={S.main}')
   const panelAt = chatPage.indexOf('<ChatHistorySidebar')
   assert(mainAt !== -1 && panelAt !== -1 && mainAt < panelAt, 'history docks after the chat column (right side)')
   const railAt = app.indexOf('<Sidebar')
@@ -186,7 +186,7 @@ assert(topbar.includes('aria-pressed') && topbar.includes('<History'), 'toggle s
 assert(app.includes('const [historyOpen, setHistoryOpen] = useState(true)'), 'history starts open')
 assert(
   app.includes('onToggleHistory={view === \'aiagents\'') &&
-    app.includes('<ChatPage historyOpen={historyOpen}'),
+    app.includes('<ChatPage') && app.includes('historyOpen={historyOpen}'),
   'App wires the toggle and panel on the chat view only',
 )
 assert(

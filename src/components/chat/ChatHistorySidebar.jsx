@@ -30,7 +30,7 @@ const isNarrow = () =>
  * Yesterday / Earlier — empty groups omitted). Selecting a row opens that
  * conversation in the main chat panel.
  */
-export default function ChatHistorySidebar({ open, onClose, onNewChat }) {
+export default function ChatHistorySidebar({ open, onClose, onNewChat, inert }) {
   const { ready, conversations, activeId, select, remove } = useConversations()
   const groups = useMemo(() => groupConversations(conversations), [conversations])
   const root = useRef(null)
@@ -69,6 +69,7 @@ export default function ChatHistorySidebar({ open, onClose, onNewChat }) {
     <aside
       ref={root}
       className="chat-history"
+      inert={inert ? true : undefined}
       data-open={open ? 'true' : 'false'}
       aria-label="Chat history"
       aria-hidden={open ? undefined : 'true'}

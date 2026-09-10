@@ -79,11 +79,12 @@ separate fixed, native supervised provider path. Details: `runtime/linux/README.
 
 The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`) over
 SSE, including `GENERATING`/`STREAMING` and the bounded final assistant response
-for Chat. The header **Runtime Activity** popover shows connection/stream state,
-running tasks with Stop, Linux executor labels, bounded recent tasks, counters,
-and safe process metrics; it deliberately discards chat output and remains
-**not a terminal**. Event history is a bounded in-memory ring (never written to
-disk), and there is no arbitrary task, browser, command or shell UI.
+for Chat. Holding the header runtime status container opens the full-panel
+**Runtime details** view: connection/stream state, running tasks with Stop,
+Linux executor labels, bounded recent tasks, counters, and safe process
+metrics; it deliberately discards chat output and remains **not a terminal**.
+Event history is a bounded in-memory ring (never written to disk), and there
+is no arbitrary task, browser, command or shell UI.
 
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
