@@ -55,6 +55,26 @@ export default function ChatPage() {
 
   const send = (content) => {
     const convId = ensureConversation()
+
+    // UI-only demo: `/image <prompt>` renders the representative
+    // image-generation result state locally. It never touches the runtime,
+    // DeepSeek, Browser Bridge, or auth — and never uses the inflight slot.
+    const imageMatch = content.match(/^\/image(?:\s+(.*))?$/s)
+    if (imageMatch) {
+      const promptText = (imageMatch[1] || '').trim()
+      saveMessage(convId, createMessage({ role: 'user', content }), { persist: 'flush' })
+      saveMessage(convId, createMessage({
+        role: 'assistant',
+        content: '',
+        status: 'sent',
+        meta: {
+          kind: 'image-generation',
+          ...(promptText ? { prompt: promptText } : {}),
+        },
+      }), { persist: 'flush' })
+      return
+    }
+
     const userMsg = createMessage({ role: 'user', content })
     const pending = createMessage({ role: 'assistant', content: '', status: 'thinking' })
 

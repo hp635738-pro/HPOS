@@ -1,4 +1,5 @@
 import { Bot } from '../Icons'
+import ImageGeneration from './ImageGeneration'
 
 const fmtTime = (ts) =>
   new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -6,11 +7,15 @@ const fmtTime = (ts) =>
 /**
  * One message in the conversation. User messages sit right on the accent,
  * assistant messages sit left on a quiet surface with a small bot avatar.
+ *
+ * Assistant messages with `meta.kind === 'image-generation'` render the
+ * representative ImageGeneration result state (UI only — no backend).
  */
 export default function MessageBubble({ m, onStop }) {
   const user = m.role === 'user'
   const thinking = m.status === 'thinking'
   const streaming = thinking && Boolean(m.content)
+  const imageGen = !user && m.meta?.kind === 'image-generation'
 
   return (
     <div
@@ -23,8 +28,13 @@ export default function MessageBubble({ m, onStop }) {
       )}
 
       <div style={{ ...S.group, alignItems: user ? 'flex-end' : 'flex-start' }}>
-        <div style={user ? S.bubbleUser : S.bubbleBot}>
-          {thinking && !streaming ? (
+        <div style={user ? S.bubbleUser : imageGen ? S.bubbleImage : S.bubbleBot}>
+          {imageGen ? (
+            <ImageGeneration
+              prompt={m.meta?.prompt || undefined}
+              resolution={m.meta?.resolution || undefined}
+            />
+          ) : thinking && !streaming ? (
             <span style={S.dots} aria-label="Assistant is typing">
               <i style={{ ...S.dot, animationDelay: '0ms' }} />
               <i style={{ ...S.dot, animationDelay: '160ms' }} />
@@ -69,6 +79,13 @@ const S = {
   },
   bubbleBot: {
     padding: '9px 13px', fontSize: 'var(--font)', lineHeight: 1.5,
+    color: 'var(--text)', background: 'var(--surface)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg)',
+  },
+  // Wider, roomier bubble so the image canvas (max 420px) fits comfortably.
+  bubbleImage: {
+    width: '100%', maxWidth: 452, padding: 12,
     color: 'var(--text)', background: 'var(--surface)',
     border: '1px solid var(--line)',
     borderRadius: 'var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg)',
