@@ -1,0 +1,14 @@
+{
+  "name": "hpos-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "HPOS desktop shell (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "cross-env HPOS_DEV_URL=http://localhost:5173 electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

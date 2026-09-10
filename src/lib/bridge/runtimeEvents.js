@@ -108,8 +108,11 @@ export class RuntimeEventStream {
     this._dedupeWindow = Number.isInteger(dedupeWindow) && dedupeWindow > 0
       ? dedupeWindow
       : DEFAULT_DEDUPE_WINDOW
-    this._setTimeout = setTimeoutFn
-    this._clearTimeout = clearTimeoutFn
+    // Wrap so the injected/global timer is always invoked as a plain function —
+    // a bare captured native can throw "Illegal invocation" on some engines
+    // when later called as a method of another object.
+    this._setTimeout = (...args) => setTimeoutFn(...args)
+    this._clearTimeout = (...args) => clearTimeoutFn(...args)
     this._now = now
 
     this._es = null

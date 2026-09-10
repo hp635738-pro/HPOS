@@ -4,11 +4,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import prefsPlugin from './vite-prefs-plugin.js'
 import runtimeProxyPlugin from './vite-runtime-plugin.js'
+import diagPlugin from './vite-diag-plugin.js'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  plugins: [react(), prefsPlugin(), runtimeProxyPlugin()],
+  plugins: [react(), prefsPlugin(), runtimeProxyPlugin(), diagPlugin()],
   // `@/*` mirrors tsconfig paths so shadcn-style `@/components/...` imports resolve.
   resolve: {
     alias: {

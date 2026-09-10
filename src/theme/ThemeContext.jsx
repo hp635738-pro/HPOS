@@ -196,9 +196,31 @@ export function isLight(hex) {
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) > 0.45
 }
 
+/**
+ * Storage access can THROW (not just return undefined) when the page runs in
+ * a blocked context — third-party iframe with storage partitioning denied,
+ * strict tracking prevention, some private modes. Every touch must be inside
+ * a try/catch, otherwise a mount effect throws and React blanks the app.
+ */
+function storedPrefs() {
+  try {
+    return localStorage.getItem(KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeStoredPrefs(value) {
+  try {
+    localStorage.setItem(KEY, value)
+  } catch {
+    /* blocked storage — prefs stay in memory for this session */
+  }
+}
+
 function load() {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }
+    return { ...DEFAULTS, ...JSON.parse(storedPrefs() || '{}') }
   } catch {
     return { ...DEFAULTS }
   }
@@ -428,7 +450,7 @@ export function ThemeProvider({ children }) {
   // On first mount, fall back to the on-disk copy if this origin has none.
   const hydrated = useRef(false)
   useEffect(() => {
-    const stored = localStorage.getItem(KEY)
+    const stored = storedPrefs()
     if (stored && stored !== '{}') { hydrated.current = true; return }
     let cancelled = false
     loadFromDisk().then((disk) => {
@@ -443,7 +465,7 @@ export function ThemeProvider({ children }) {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(KEY, JSON.stringify(prefs))
+    writeStoredPrefs(JSON.stringify(prefs))
     // Mirror to disk so a sandbox restart (new origin) keeps the setup.
     if (hydrated.current) saveToDisk(prefs)
   }, [prefs])
