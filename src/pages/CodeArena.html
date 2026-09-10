@@ -1,0 +1,4602 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>HPOS Code Arena</title>
+    <!--
+      HPOS Code Arena — desktop IDE shell + functional in-memory code editor.
+
+      Plain HTML + CSS + a single inline <script>. No external stylesheets,
+      fonts, images or CDNs, and no packages. The editor is a real <textarea>
+      layered under a syntax-highlight overlay, so typing, selecting, copying
+      and pasting are native browser behaviour.
+
+      Deliberately NOT implemented yet (next steps):
+        · filesystem reads/writes          — Ctrl+S only flips UI state
+        · Electron IPC / preload bridge    — main.js and package.json untouched
+        · GitHub integration               — panel is a UI placeholder
+        · Live preview rendering           — panel is a UI placeholder
+
+      Palette mirrors HPOS DARK_TOKENS (src/theme/tokens.js) so the desktop
+      shell and the web app stay visually consistent.
+    -->
+    <style>
+      :root {
+        /* surfaces + text (HPOS dark tokens) */
+        --bg: #191919;
+        --surface: #202020;
+        --surface-2: #262626;
+        --elevated: #2c2c2c;
+        --text: #e6e6e4;
+        --text-2: #b3b3ae;
+        --muted: #8e8e89;
+        --line: #2e2e2c;
+        --hover: rgba(255, 255, 255, 0.05);
+        --selected: rgba(255, 255, 255, 0.09);
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+
+        /* accent + status */
+        --accent: #2383e2;
+        --accent-fg: #ffffff;
+        --accent-soft: rgba(35, 131, 226, 0.14);
+        --accent-text: #6aa8f0;
+        --success: #3fb68b;
+        --warning: #e39a3b;
+        --danger: #ff6b6b;
+
+        /* syntax (muted, HPOS-compatible) */
+        --syn-tag: #5b9fe0;
+        --syn-attr: #d3ab6a;
+        --syn-str: #63bd92;
+        --syn-kw: #b18ae6;
+        --syn-num: #dd9a55;
+        --syn-fn: #62bcd8;
+        --syn-com: #6f6f6b;
+
+        /* geometry + type */
+        --r: 12px;
+        --r-sm: 8px;
+        --r-xs: 6px;
+        --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+        --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+        --toolbar-h: 52px;
+        --status-h: 30px;
+        /* One shared code metric: the gutter, the highlight overlay and the
+           textarea all read this, so the overlay stays glued to the caret. */
+        --code-size: 12.5px;
+        --code-lh: 20.625px;
+        --code-pad-y: 12px;
+        --gutter-w: 54px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-ui);
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        /* Desktop-app feel: chrome is not selectable; the editor, terminal and
+           console opt back in with user-select: text. */
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      button {
+        font-family: inherit;
+        font-size: inherit;
+        border: none;
+        background: none;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      /* ------------------------------------------------------------ shell
+         Three rows: toolbar / workbench / status bar. The workbench row is
+         minmax(0, 1fr) so panels scroll internally instead of stretching the
+         window, which keeps the layout pinned to the Electron viewport. */
+      .ide {
+        display: grid;
+        grid-template-rows: var(--toolbar-h) minmax(0, 1fr) var(--status-h);
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+      }
+
+      /* ---------------------------------------------------------- toolbar */
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 14px;
+        background: linear-gradient(180deg, var(--surface-2), var(--surface));
+        border-bottom: 1px solid var(--line);
+        min-width: 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 28px;
+        height: 28px;
+        border-radius: var(--r-sm);
+        color: var(--accent-fg);
+        background: linear-gradient(150deg, #2f8fe8, #1b63b4);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+      }
+
+      .brand-mark svg {
+        width: 17px;
+        height: 17px;
+      }
+
+      .brand-text {
+        min-width: 0;
+      }
+
+      .brand-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+        white-space: nowrap;
+      }
+
+      .brand-sub {
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .toolbar-center {
+        display: flex;
+        flex: 1 1 auto;
+        justify-content: center;
+        min-width: 0;
+      }
+
+      .cmd {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        max-width: 520px;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.22);
+        color: var(--muted);
+      }
+
+      .cmd:focus-within {
+        border-color: rgba(35, 131, 226, 0.5);
+      }
+
+      .cmd svg {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+      }
+
+      .cmd-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: 0;
+        outline: none;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: 12.5px;
+      }
+
+      .cmd-input::placeholder {
+        color: var(--muted);
+      }
+
+      kbd {
+        font-family: var(--font-ui);
+        font-size: 10.5px;
+        line-height: 1;
+        color: var(--text-2);
+        background: var(--elevated);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 3px 5px;
+      }
+
+      .toolbar-right {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font-size: 11.5px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .chip .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .chip--warn .dot {
+        background: var(--warning);
+        box-shadow: 0 0 0 3px rgba(227, 154, 59, 0.16);
+      }
+
+      .chip--live .dot {
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.16);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: var(--surface-2);
+        color: var(--text);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn:hover {
+        background: var(--elevated);
+      }
+
+      .btn-primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--accent-fg);
+      }
+
+      .btn-primary:hover {
+        background: #2f8fe8;
+      }
+
+      .btn svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      /* -------------------------------------------------------- workbench
+         Floating panels: explorer | (editor + console) | live preview. */
+      .workbench {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr) minmax(300px, 26%);
+        gap: 10px;
+        padding: 10px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .center {
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) minmax(140px, 34%);
+        gap: 10px;
+        min-height: 0;
+        min-width: 0;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        box-shadow: var(--shadow);
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+        height: 36px;
+        padding: 0 10px 0 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+
+      .panel-title {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.7px;
+        text-transform: uppercase;
+        color: var(--text-2);
+        white-space: nowrap;
+      }
+
+      .panel-head .spacer {
+        flex: 1 1 auto;
+      }
+
+      .panel-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+      }
+
+      /* ------------------------------------------------------- git panel */
+      .git-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 0 0 auto;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        overflow: hidden;
+      }
+
+      .git-branch {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        max-width: 340px;
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .git-branch svg {
+        width: 13px;
+        height: 13px;
+        color: var(--accent-text);
+      }
+
+      #gitBranchText {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .git-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px 12px 14px;
+        overflow: auto;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .git-grid {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        gap: 4px 10px;
+        align-items: baseline;
+        font-size: 11.5px;
+      }
+
+      .git-grid dt {
+        color: var(--muted);
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        font-size: 10.5px;
+      }
+
+      .git-grid dd {
+        margin: 0;
+        min-width: 0;
+        color: var(--text-2);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        overflow-wrap: anywhere;
+      }
+
+      .git-section {
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.16);
+        overflow: hidden;
+      }
+
+      .git-section-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 9px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: var(--text-2);
+      }
+
+      .git-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 99px;
+        background: var(--selected);
+        color: var(--text);
+        font-size: 10px;
+      }
+
+      .git-list {
+        margin: 0;
+        padding: 4px;
+        list-style: none;
+        max-height: 148px;
+        overflow: auto;
+      }
+
+      .git-file {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 6px;
+        border-radius: var(--r-xs);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--text-2);
+        white-space: nowrap;
+      }
+
+      .git-file:hover {
+        background: var(--hover);
+      }
+
+      .git-badge {
+        flex: 0 0 auto;
+        width: 15px;
+        text-align: center;
+        font-weight: 700;
+        font-size: 10.5px;
+      }
+
+      .git-badge--mod {
+        color: var(--warning);
+      }
+
+      .git-badge--add {
+        color: var(--success);
+      }
+
+      .git-badge--del {
+        color: var(--danger);
+      }
+
+      .git-badge--new {
+        color: var(--accent-text);
+      }
+
+      .git-path {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .git-commit {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 7px 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.16);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+      }
+
+      .git-commit .hash {
+        flex: 0 0 auto;
+        color: var(--accent-text);
+        font-weight: 700;
+      }
+
+      .git-commit .subject {
+        min-width: 0;
+        color: var(--text-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .git-commit .who {
+        flex: 0 0 auto;
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+
+      .git-empty {
+        padding: 10px 12px;
+        color: var(--muted);
+        font-size: 11.5px;
+      }
+
+      .git-file--pick {
+        cursor: pointer;
+      }
+
+      .git-pick {
+        flex: 0 0 auto;
+        width: 12px;
+        height: 12px;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      /* ------------------------------------------------------- git push row */
+      .git-push-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.16);
+        font-size: 11px;
+        min-width: 0;
+      }
+
+      .git-push-label {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        font-size: 10px;
+      }
+
+      .git-target {
+        flex: 0 1 auto;
+        min-width: 0;
+        color: var(--text-2);
+        font-family: var(--font-mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .git-target--none {
+        color: var(--warning);
+      }
+
+      .git-push-state {
+        flex: 0 0 auto;
+        padding: 1px 6px;
+        border-radius: 99px;
+        background: var(--selected);
+        color: var(--text-2);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .git-push-state--ahead {
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+
+      .git-push-state--warn {
+        background: rgba(255, 107, 107, 0.14);
+        color: var(--danger);
+      }
+
+      .git-push-note {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+
+      .git-push-note--busy {
+        color: var(--accent-text);
+      }
+
+      .git-push-note--ok {
+        color: var(--success);
+      }
+
+      .git-push-note--err {
+        color: var(--danger);
+      }
+
+      /* ---------------------------------------------------- git commit box */
+      .git-commit-box {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 12px 10px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.14);
+      }
+
+      .git-commit-row {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+      }
+
+      .git-message {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 30px;
+        max-height: 104px;
+        resize: vertical;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-xs);
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+
+      .git-message::placeholder {
+        color: var(--muted);
+      }
+
+      .git-message:focus {
+        outline: none;
+        border-color: var(--accent-text);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+
+      .git-commit-row .git-commit-btn {
+        flex: 0 0 auto;
+        height: 30px;
+        padding: 0 12px;
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+
+      .git-commit-row .git-commit-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .git-commit-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 15px;
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+
+      .git-commit-meta .spacer {
+        flex: 1 1 auto;
+      }
+
+      .git-selection {
+        color: var(--text-2);
+        font-family: var(--font-mono);
+      }
+
+      .git-commit-note {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .git-commit-note--ok {
+        color: var(--success);
+      }
+
+      .git-commit-note--err {
+        color: var(--danger);
+      }
+
+      .git-commit--new {
+        border-color: rgba(63, 182, 139, 0.4);
+        background: rgba(63, 182, 139, 0.08);
+      }
+
+      .git-commit--new .hash {
+        color: var(--success);
+      }
+
+      .git-just {
+        flex: 0 0 auto;
+        margin-left: auto;
+        padding: 1px 6px;
+        border-radius: 99px;
+        background: rgba(63, 182, 139, 0.16);
+        color: var(--success);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+      }
+
+      /* ---------------------------------------------------------- explorer */
+      .project {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 10px;
+        margin: 8px 8px 4px;
+        border-radius: var(--r-xs);
+        background: var(--hover);
+        font-size: 11.5px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: var(--text);
+      }
+
+      .project svg {
+        width: 12px;
+        height: 12px;
+        color: var(--muted);
+      }
+
+      .tree {
+        margin: 0;
+        padding: 0 8px 10px;
+        list-style: none;
+      }
+
+      .tree .tree {
+        padding: 0 0 0 14px;
+        border-left: 1px solid var(--line);
+        margin-left: 9px;
+      }
+
+      .node {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 8px;
+        border-radius: var(--r-xs);
+        color: var(--text-2);
+        font-size: 12.5px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .node .ico {
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+        color: var(--muted);
+      }
+
+      .node .label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .node--folder {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .node--folder .ico {
+        color: var(--warning);
+      }
+
+      .node--active {
+        background: var(--selected);
+        color: var(--text);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+
+      .node:hover {
+        background: var(--hover);
+      }
+
+      .node--active .ico {
+        color: var(--accent-text);
+      }
+
+      .node--hide {
+        display: none;
+      }
+
+      .tag {
+        margin-left: auto;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: var(--muted);
+      }
+
+      .tag--dirty {
+        color: var(--accent-text);
+      }
+
+      .icon-btn {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 24px;
+        height: 24px;
+        border-radius: var(--r-xs);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .icon-btn:hover {
+        color: var(--text);
+        background: var(--hover);
+      }
+
+      .icon-btn svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .icon-btn--busy svg {
+        animation: spin 0.9s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .node {
+        cursor: pointer;
+      }
+
+      .node--open .ico-chev {
+        transform: rotate(90deg);
+      }
+
+      .node .ico-chev {
+        transition: transform 0.12s ease;
+      }
+
+      /* loading / error / empty rows inside the tree */
+      .tree-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 8px;
+        font-size: 11.5px;
+        color: var(--muted);
+        white-space: normal;
+      }
+
+      .tree-note--error {
+        color: var(--danger);
+      }
+
+      .tree-note--loading {
+        color: var(--text-2);
+      }
+
+      .tree-note--muted {
+        color: var(--muted);
+      }
+
+      .tree-note .spinner {
+        flex: 0 0 auto;
+        width: 11px;
+        height: 11px;
+        border: 2px solid var(--line);
+        border-top-color: var(--accent-text);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      .tree-note svg {
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+      }
+
+      .btn-xs {
+        height: 22px;
+        padding: 0 8px;
+        font-size: 11px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 14px 6px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.7px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .outline {
+        margin: 0;
+        padding: 0 8px 12px;
+        list-style: none;
+      }
+
+      .outline-item {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 5px 8px;
+        border-radius: var(--r-xs);
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .outline-item:hover {
+        background: var(--hover);
+      }
+
+      .outline-item .depth {
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+      }
+
+      .outline-item .value {
+        margin-left: auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+        text-align: right;
+      }
+
+      .outline-item .value--warn {
+        color: var(--warning);
+      }
+
+      .outline-item .value--ok {
+        color: var(--success);
+      }
+
+      /* inline status strip for load/save failures and loading states */
+      .notice {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font-size: 11.5px;
+      }
+
+      .notice[hidden] {
+        display: none;
+      }
+
+      .notice-dot {
+        flex: 0 0 auto;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .notice-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .notice--loading .notice-dot {
+        border: 2px solid var(--line);
+        border-top-color: var(--accent-text);
+        border-radius: 50%;
+        background: none;
+        animation: spin 0.7s linear infinite;
+      }
+
+      .notice--error {
+        color: var(--danger);
+        background: rgba(255, 107, 107, 0.1);
+      }
+
+      .notice--error .notice-dot {
+        background: var(--danger);
+      }
+
+      .notice--ok .notice-dot {
+        background: var(--success);
+      }
+
+      .editor-empty {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        background: var(--surface);
+      }
+
+      .editor-empty[hidden] {
+        display: none;
+      }
+
+      /* ------------------------------------------------------------ editor */
+      .tabs {
+        display: flex;
+        align-items: stretch;
+        flex: 0 0 auto;
+        height: 36px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex: 0 0 auto;
+        padding: 0 14px;
+        border-right: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      .tab-ico {
+        display: block;
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+      }
+
+      .tab-ico svg {
+        display: block;
+        width: 13px;
+        height: 13px;
+      }
+
+      .tab--active {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: inset 0 -2px 0 var(--accent);
+      }
+
+      .tab--add {
+        color: var(--muted);
+        padding: 0 12px;
+      }
+
+      .tab--add:hover {
+        color: var(--text);
+        background: var(--hover);
+      }
+
+      /* scratch buffers are not backed by a file on disk */
+      .tab--scratch .label {
+        font-style: italic;
+        color: var(--text-2);
+      }
+
+      .tab .dirty {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        height: 26px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 11.5px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .crumbs .sep {
+        color: var(--line);
+      }
+
+      .crumbs .here {
+        color: var(--text-2);
+      }
+
+      .editor-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 74px;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .editor-stack {
+        display: grid;
+        grid-template-columns: var(--gutter-w) minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      /* Gutter, overlay and textarea all share .code-face so a line of code
+         lands on exactly the same pixel row in each of them. */
+      .code-face {
+        font-family: var(--font-mono);
+        font-size: var(--code-size);
+        line-height: var(--code-lh);
+        tab-size: 2;
+      }
+
+      .gutter {
+        overflow: hidden;
+        padding-top: var(--code-pad-y);
+        border-right: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.12);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .gutter-lines {
+        display: flex;
+        flex-direction: column;
+        will-change: transform;
+      }
+
+      .ln {
+        display: block;
+        padding-right: 12px;
+        text-align: right;
+        color: #5a5a57;
+      }
+
+      .ln--on {
+        color: var(--text);
+      }
+
+      .code-view {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .active-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: var(--code-lh);
+        background: rgba(35, 131, 226, 0.08);
+        box-shadow: inset 2px 0 0 var(--accent);
+        pointer-events: none;
+        opacity: 0;
+        z-index: 0;
+      }
+
+      .hl {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .hl-code {
+        display: block;
+        padding: var(--code-pad-y) 0 18px;
+        white-space: pre;
+        color: var(--text-2);
+        /* <code> would otherwise take the UA stylesheet's monospace/small font
+           and drift away from the textarea's glyph grid. Inherit the metrics
+           from .code-face above it instead. */
+        font: inherit;
+      }
+
+      .editor {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        margin: 0;
+        padding: var(--code-pad-y) 0 18px;
+        border: 0;
+        outline: none;
+        resize: none;
+        background: transparent;
+        /* The glyphs are painted by .hl underneath; the textarea only owns the
+           caret, the selection and the native editing behaviour. */
+        color: transparent;
+        caret-color: var(--text);
+        white-space: pre;
+        word-wrap: normal;
+        overflow-wrap: normal;
+        overflow: auto;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .editor::selection {
+        background: rgba(35, 131, 226, 0.32);
+      }
+
+      .tok-tag {
+        color: var(--syn-tag);
+      }
+
+      .tok-attr {
+        color: var(--syn-attr);
+      }
+
+      .tok-str {
+        color: var(--syn-str);
+      }
+
+      .tok-kw {
+        color: var(--syn-kw);
+      }
+
+      .tok-num {
+        color: var(--syn-num);
+      }
+
+      .tok-fn {
+        color: var(--syn-fn);
+      }
+
+      .tok-punc {
+        color: #7f7f7b;
+      }
+
+      .tok-com {
+        color: var(--syn-com);
+        font-style: italic;
+      }
+
+      /* Line-density preview of the buffer; not interactive yet. */
+      .minimap {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 10px;
+        border-left: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.16);
+        overflow: hidden;
+      }
+
+      .minimap span {
+        height: 2px;
+        border-radius: 2px;
+        background: #3a3a38;
+      }
+
+      .minimap span.a {
+        background: var(--syn-tag);
+        opacity: 0.55;
+      }
+
+      .minimap span.b {
+        background: var(--syn-attr);
+        opacity: 0.5;
+      }
+
+      .minimap span.c {
+        background: var(--syn-str);
+        opacity: 0.5;
+      }
+
+      .editor-meta {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex: 0 0 auto;
+        height: 26px;
+        padding: 0 12px;
+        border-top: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .editor-meta .spacer {
+        flex: 1 1 auto;
+      }
+
+      .editor-meta kbd {
+        padding: 2px 4px;
+        font-size: 10px;
+      }
+
+      .save-state {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 20px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: var(--surface);
+        color: var(--text-2);
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+
+      .save-state i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .save-state--saved {
+        color: var(--success);
+        border-color: rgba(63, 182, 139, 0.35);
+        background: rgba(63, 182, 139, 0.1);
+      }
+
+      .save-state--saved i {
+        background: var(--success);
+      }
+
+      .save-state--dirty {
+        color: var(--warning);
+        border-color: rgba(227, 154, 59, 0.35);
+        background: rgba(227, 154, 59, 0.1);
+      }
+
+      .save-state--dirty i {
+        background: var(--warning);
+      }
+
+      .save-state--busy {
+        color: var(--accent-text);
+        border-color: rgba(35, 131, 226, 0.35);
+        background: var(--accent-soft);
+      }
+
+      .save-state--busy i {
+        background: var(--accent-text);
+      }
+
+      .save-state--error {
+        color: var(--danger);
+        border-color: rgba(255, 107, 107, 0.35);
+        background: rgba(255, 107, 107, 0.1);
+      }
+
+      .save-state--error i {
+        background: var(--danger);
+      }
+
+      .save-state--pulse {
+        animation: save-pulse 0.85s ease;
+      }
+
+      @keyframes save-pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(63, 182, 139, 0.45);
+        }
+        100% {
+          box-shadow: 0 0 0 7px rgba(63, 182, 139, 0);
+        }
+      }
+
+      /* ----------------------------------------------------- bottom panels */
+      .panel-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        position: relative;
+        height: 100%;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.7px;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .panel-tab:hover {
+        color: var(--text-2);
+      }
+
+      .panel-tab--on {
+        color: var(--text);
+      }
+
+      .panel-tab--on::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -1px;
+        height: 2px;
+        border-radius: 2px 2px 0 0;
+        background: var(--accent);
+      }
+
+      .panel-tab svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      .panel-note {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .pane {
+        height: 100%;
+      }
+
+      .pane[hidden] {
+        display: none;
+      }
+
+      .console-body {
+        padding: 10px 14px 14px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.7;
+        color: var(--text-2);
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .term-line {
+        display: flex;
+        gap: 8px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .term-line .prompt {
+        flex: 0 0 auto;
+        color: var(--success);
+      }
+
+      .term-line .path {
+        flex: 0 0 auto;
+        color: var(--accent-text);
+      }
+
+      .term-line .cmd-char {
+        color: var(--text);
+      }
+
+      .term-line--out {
+        color: var(--muted);
+      }
+
+      .term-line--ok {
+        color: var(--success);
+      }
+
+      .term-line--info {
+        color: var(--warning);
+      }
+
+      .term-line--err {
+        color: var(--danger);
+      }
+
+      .caret {
+        display: inline-block;
+        width: 7px;
+        height: 14px;
+        vertical-align: -2px;
+        background: var(--text-2);
+        animation: blink 1.15s steps(1, end) infinite;
+      }
+
+      @keyframes blink {
+        0%,
+        50% {
+          opacity: 1;
+        }
+        50.01%,
+        100% {
+          opacity: 0;
+        }
+      }
+
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 100%;
+        padding: 20px 18px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .empty-state svg {
+        width: 20px;
+        height: 20px;
+        margin-bottom: 2px;
+        color: #43433f;
+      }
+
+      .empty-state strong {
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .empty-state p {
+        margin: 0;
+        max-width: 330px;
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+
+      /* ----------------------------------------------------- live preview */
+      .urlbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 10px;
+        padding: 0 10px;
+        height: 30px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.22);
+        color: var(--muted);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+      }
+
+      .urlbar svg {
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+      }
+
+      .urlbar .url {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .devices {
+        display: flex;
+        gap: 6px;
+        padding: 0 10px 10px;
+      }
+
+      .device {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-xs);
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .device svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .device--on {
+        border-color: rgba(35, 131, 226, 0.45);
+        background: var(--accent-soft);
+        color: var(--accent-text);
+      }
+
+      .preview-stage {
+        flex: 1 1 auto;
+        min-height: 0;
+        margin: 0 10px 10px;
+        padding: 12px;
+        border: 1px dashed var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.16);
+        overflow: auto;
+      }
+
+      /* The real thing: the local preview server's document. */
+      .preview-frame {
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-height: 240px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: #ffffff;
+      }
+
+      .preview-frame[hidden] {
+        display: none;
+      }
+
+      .preview-frame--tablet,
+      .preview-frame--mobile {
+        margin: 0 auto;
+      }
+
+      .preview-connecting {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 100%;
+        min-height: 200px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .preview-connecting .spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--line);
+        border-top-color: var(--accent-text);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      /* Skeleton stands in for the rendered app until the bridge is wired. */
+      .skeleton {
+        border: 1px solid var(--line);
+        border-radius: var(--r-xs);
+        background: var(--surface);
+        overflow: hidden;
+        opacity: 0.7;
+      }
+
+      .skeleton-bar {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 9px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+
+      .skeleton-bar i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #3d3d3b;
+      }
+
+      .skeleton-grid {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr);
+        gap: 8px;
+        padding: 10px;
+      }
+
+      .skeleton-block {
+        border-radius: 4px;
+        background: #2b2b29;
+      }
+
+      .skeleton-block.tall {
+        height: 88px;
+      }
+
+      .skeleton-lines {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+
+      .skeleton-lines b {
+        height: 7px;
+        border-radius: 4px;
+        background: #2b2b29;
+      }
+
+      .skeleton-lines b:nth-child(2) {
+        width: 82%;
+      }
+
+      .skeleton-lines b:nth-child(3) {
+        width: 64%;
+      }
+
+      .skeleton-lines b:nth-child(4) {
+        width: 74%;
+      }
+
+      .stage-note {
+        margin: 12px 4px 2px;
+        color: var(--muted);
+        font-size: 11.5px;
+        text-align: center;
+      }
+
+      .stage-note strong {
+        display: block;
+        margin-bottom: 3px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      /* ------------------------------------------------------- status bar */
+      .statusbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 12px;
+        border-top: 1px solid var(--line);
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 11.5px;
+        white-space: nowrap;
+        overflow: hidden;
+      }
+
+      .statusbar .item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .statusbar svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .statusbar .spacer {
+        flex: 1 1 auto;
+      }
+
+      .statusbar .ok {
+        color: var(--success);
+      }
+
+      /* -------------------------------------------------------- scrollbars */
+      ::-webkit-scrollbar {
+        width: 9px;
+        height: 9px;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #3a3a38;
+        border-radius: 99px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #4a4a47;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .ico {
+        display: block;
+      }
+
+      .sprite {
+        display: none;
+      }
+
+      /* ------------------------------------------------------- responsive
+         Panels shrink, then stack. The shell keeps filling the window at
+         every size; the workbench scrolls internally once stacked. */
+      @media (max-width: 1360px) {
+        .workbench {
+          grid-template-columns: 224px minmax(0, 1fr) 288px;
+        }
+
+        .brand-sub {
+          display: none;
+        }
+      }
+
+      @media (max-width: 1120px) {
+        .workbench {
+          grid-template-columns: 196px minmax(0, 1fr) 248px;
+          gap: 8px;
+          padding: 8px;
+        }
+
+        .cmd {
+          max-width: 360px;
+        }
+
+        .chip--hide-sm {
+          display: none;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .workbench {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(0, 200px) minmax(420px, 1fr) minmax(0, 280px);
+          overflow-y: auto;
+        }
+
+        .editor-body {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .minimap {
+          display: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .toolbar {
+          gap: 10px;
+          padding: 0 10px;
+        }
+
+        .toolbar-center,
+        .cmd {
+          display: none;
+        }
+
+        .tab {
+          padding: 0 10px;
+        }
+
+        .editor-meta .optional,
+        .panel-note {
+          display: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .caret,
+        .save-state--pulse {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Inline icon sprite: keeps the shell dependency-free. -->
+    <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <symbol id="i-file" viewBox="0 0 16 16">
+        <path d="M4 1.5h4.5L11 4.2v10.3H4z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+        <path d="M8.4 1.6V4.3H11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 16 16">
+        <path d="M1.6 3.6h4l1.2 1.6h7.6v7.2H1.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-chev" viewBox="0 0 16 16">
+        <path d="M6 3.6 10.4 8 6 12.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 16 16">
+        <circle cx="7.1" cy="7.1" r="4.3" fill="none" stroke="currentColor" stroke-width="1.3" />
+        <path d="M10.4 10.4 13.9 13.9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 16 16">
+        <path d="M4.8 3 12.4 8l-7.6 5z" fill="currentColor" />
+      </symbol>
+      <symbol id="i-terminal" viewBox="0 0 16 16">
+        <rect x="1.8" y="3" width="12.4" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <path d="M4.4 6.6 6.4 8.2 4.4 9.8M8 10h3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-globe" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <path d="M2.4 8h11.2M8 2.4c1.7 1.8 1.7 9.4 0 11.2M8 2.4c-1.7 1.8-1.7 9.4 0 11.2" fill="none" stroke="currentColor" stroke-width="1.2" />
+      </symbol>
+      <symbol id="i-upload" viewBox="0 0 16 16">
+        <path d="M8 10.6V2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+        <path d="M4.9 5.6 8 2.5l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M2.9 9.6v2.6a1.4 1.4 0 0 0 1.4 1.4h7.4a1.4 1.4 0 0 0 1.4-1.4V9.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-branch" viewBox="0 0 16 16">
+        <circle cx="4.4" cy="3.6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <circle cx="4.4" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <circle cx="11.6" cy="6.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <path d="M4.4 5.2v5.6M11.6 8c0 2.2-1.6 2.8-3.4 3.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+      </symbol>
+      <symbol id="i-desktop" viewBox="0 0 16 16">
+        <rect x="1.8" y="3.2" width="12.4" height="8.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
+        <path d="M5.6 13.6h4.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-tablet" viewBox="0 0 16 16">
+        <rect x="4.4" y="1.8" width="7.2" height="12.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 16 16">
+        <rect x="5.4" y="1.8" width="5.2" height="12.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 16 16">
+        <path d="M8 3.6v8.8M3.6 8h8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 16 16">
+        <path d="M3.4 8.4 6.2 11.2 12.6 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 16 16">
+        <path d="M13 8a5 5 0 1 1-1.6-3.7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        <path d="M13.2 2.4v2.8h-2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-alert" viewBox="0 0 16 16">
+        <path d="M8 2.6 14.4 13H1.6z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+        <path d="M8 6.4v3.2M8 11.3v.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-folder-open" viewBox="0 0 16 16">
+        <path d="M1.6 3.6h4l1.2 1.6h7.6v1.4H1.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+        <path d="M1.6 6.6h12.8l-1.4 6H3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+      </symbol>
+    </svg>
+
+    <div class="ide">
+      <!-- ============================================================ top -->
+      <header class="toolbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M8.4 8.2 4.8 12l3.6 3.8M15.6 8.2 19.2 12l-3.6 3.8M13.6 5.6l-3.2 12.8"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <h1 class="brand-title">HPOS Code Arena</h1>
+            <div class="brand-sub">desktop shell · editor + fs bridge</div>
+          </div>
+        </div>
+
+        <div class="toolbar-center">
+          <div class="cmd">
+            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-search" /></svg>
+            <input
+              id="cmdInput"
+              class="cmd-input"
+              type="text"
+              placeholder="Filter files in the explorer"
+              aria-label="Filter files in the explorer"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <kbd>Ctrl</kbd><kbd>K</kbd>
+          </div>
+        </div>
+
+        <div class="toolbar-right">
+          <span class="chip chip--warn chip--hide-sm"><span class="dot"></span>Runtime offline</span>
+          <span class="chip chip--live chip--hide-sm"><span class="dot"></span>HPOS-Desktop</span>
+          <button type="button" class="btn btn-primary" id="runBtn">
+            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
+            Run
+          </button>
+        </div>
+      </header>
+
+      <!-- ====================================================== workbench -->
+      <div class="workbench">
+        <!-- ------------------------------------------------- explorer --->
+        <aside class="panel" aria-label="Project explorer">
+          <div class="panel-head">
+            <span class="panel-title">Explorer</span>
+            <span class="spacer"></span>
+            <span class="panel-note" id="treeCount"></span>
+            <button
+              type="button"
+              class="icon-btn"
+              id="refreshTree"
+              title="Reload the file list from disk (open buffers with unsaved changes are kept)"
+              aria-label="Refresh explorer"
+            >
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-refresh" /></svg>
+            </button>
+          </div>
+
+          <div class="panel-body">
+            <div class="project">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-chev" /></svg>
+              HPOS-DESKTOP
+            </div>
+
+            <!-- Filled from the real directory listing via the preload bridge. -->
+            <ul class="tree" id="treeRoot"></ul>
+
+            <div class="section-head">File info</div>
+            <ul class="outline" id="fileInfo"></ul>
+          </div>
+        </aside>
+
+        <!-- -------------------------------------------- editor + console --->
+        <div class="center">
+          <section class="panel" aria-label="Code editor">
+            <div class="tabs" id="tabs" role="tablist" aria-label="Open buffers"></div>
+
+            <div class="crumbs">
+              <span id="crumbRoot">HPOS-Desktop</span><span class="sep">›</span><span class="here" id="crumbFile">no file open</span><span class="sep">›</span><span>editor</span>
+            </div>
+
+            <div class="notice" id="notice" hidden>
+              <span class="notice-dot" aria-hidden="true"></span>
+              <span class="notice-text" id="noticeText"></span>
+              <button type="button" class="btn btn-xs" id="noticeAction" hidden>Retry</button>
+            </div>
+
+            <div class="editor-body">
+              <div class="editor-stack">
+                <div class="gutter code-face" id="gutter" aria-hidden="true">
+                  <div class="gutter-lines" id="gutterLines"></div>
+                </div>
+
+                <div class="code-view" id="codeView">
+                  <div class="active-line" id="activeLine" aria-hidden="true"></div>
+                  <pre class="hl code-face" aria-hidden="true"><code class="hl-code" id="hlCode"></code></pre>
+                  <textarea
+                    id="editor"
+                    class="editor code-face"
+                    aria-label="Code editor"
+                    spellcheck="false"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    wrap="off"
+                  ></textarea>
+                  <div class="editor-empty" id="editorEmpty">
+                    <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-file" /></svg>
+                    <strong id="editorEmptyTitle">No file open</strong>
+                    <p id="editorEmptyText">Pick a file in the Explorer to load it from disk, or press + in the tab strip for an in-memory scratch buffer.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="minimap" id="minimap" aria-hidden="true"></div>
+            </div>
+
+            <div class="editor-meta">
+              <span id="caretPos">Ln 1, Col 1</span>
+              <span class="optional">Spaces: 2</span>
+              <span class="optional" id="langLabel">—</span>
+              <span class="spacer"></span>
+              <span class="optional" id="bufferKind">no buffer</span>
+              <span class="save-state save-state--saved" id="saveState" role="status" aria-live="polite">
+                <i aria-hidden="true"></i><span id="saveStateText">Saved</span>
+              </span>
+              <span class="optional"><kbd>Ctrl</kbd>+<kbd>S</kbd> save</span>
+              <span>UTF-8</span>
+              <span>LF</span>
+            </div>
+          </section>
+
+          <!-- ------------------------------------------ bottom panels --->
+          <section class="panel" aria-label="Terminal, console, problems and GitHub panels">
+            <div class="panel-head">
+              <button type="button" class="panel-tab panel-tab--on" id="tabTerminal" role="tab" aria-selected="true" aria-controls="paneTerminal">
+                <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-terminal" /></svg>
+                Terminal
+              </button>
+              <button type="button" class="panel-tab" id="tabConsole" role="tab" aria-selected="false" aria-controls="paneConsole">Console</button>
+              <button type="button" class="panel-tab" id="tabProblems" role="tab" aria-selected="false" aria-controls="paneProblems">Problems</button>
+              <button type="button" class="panel-tab" id="tabGitHub" role="tab" aria-selected="false" aria-controls="paneGitHub">GitHub</button>
+              <span class="spacer"></span>
+              <span class="panel-note" id="paneNote">local log · no shell attached</span>
+            </div>
+
+            <div class="panel-body">
+              <div class="pane console-body" id="paneTerminal" role="tabpanel" aria-labelledby="tabTerminal">
+                <div class="term-line">
+                  <span class="prompt">hpos@arena</span>
+                  <span class="path">~/HPOS-Desktop</span>
+                  <span class="cmd-char">$ npm start</span>
+                </div>
+                <div class="term-line term-line--out">&gt; hpos-desktop@0.1.0 start</div>
+                <div class="term-line term-line--out">&gt; electron .</div>
+                <div class="term-line term-line--ok">[runtime] shell loaded index.html (file://)</div>
+                <div class="term-line term-line--info" id="bridgeLine">[bridge] waiting for the HPOS runtime to connect…</div>
+                <div class="term-line">
+                  <span class="prompt">hpos@arena</span>
+                  <span class="path">~/HPOS-Desktop</span>
+                  <span class="cmd-char">$ </span>
+                  <span class="caret" aria-hidden="true"></span>
+                </div>
+              </div>
+
+              <div class="pane console-body" id="paneConsole" role="tabpanel" aria-labelledby="tabConsole" hidden></div>
+
+              <div class="pane" id="paneProblems" role="tabpanel" aria-labelledby="tabProblems" hidden>
+                <div class="empty-state">
+                  <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-check" /></svg>
+                  <strong>No problems detected</strong>
+                  <p>Diagnostics will appear here once the runtime bridge is attached. This panel is a UI placeholder.</p>
+                </div>
+              </div>
+
+              <div class="pane" id="paneGitHub" role="tabpanel" aria-labelledby="tabGitHub" hidden>
+                <div class="git-head">
+                  <span class="git-branch" id="gitBranch" title="Current branch">
+                    <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-branch" /></svg>
+                    <span id="gitBranchText">…</span>
+                  </span>
+                  <span class="chip" id="gitStateChip"><span class="dot"></span><span id="gitStateText">Loading</span></span>
+                  <span class="panel-note" id="gitMeta">local commit · push upstream</span>
+                  <span class="spacer"></span>
+                  <button type="button" class="btn btn-xs" id="gitPush" title="Push the current branch to its configured upstream">
+                    <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-upload" /></svg>
+                    <span id="gitPushText">Push</span>
+                  </button>
+                  <button type="button" class="btn btn-xs" id="gitRefresh" title="Re-read the Git status">
+                    <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-refresh" /></svg>
+                    Refresh
+                  </button>
+                </div>
+
+                <!-- Local commit: only the ticked files are staged and only
+                     they are committed — the message and the paths are the
+                     only things the main process accepts. -->
+                <div class="git-commit-box" id="gitCommitBox" hidden>
+                  <div class="git-commit-row">
+                    <textarea
+                      class="git-message"
+                      id="gitMessage"
+                      rows="2"
+                      spellcheck="false"
+                      autocomplete="off"
+                      aria-label="Commit message"
+                      placeholder="Commit message — Ctrl+Enter commits the ticked files"
+                    ></textarea>
+                    <button type="button" class="btn btn-primary git-commit-btn" id="gitCommitBtn" title="Stage and commit the ticked files">
+                      <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-check" /></svg>
+                      <span id="gitCommitBtnText">Commit</span>
+                    </button>
+                  </div>
+                  <div class="git-commit-meta">
+                    <span class="git-selection" id="gitSelection">0 files selected</span>
+                    <button type="button" class="btn btn-xs" id="gitSelectAll" title="Tick or untick every changed file">Select all</button>
+                    <span class="spacer"></span>
+                    <span class="git-commit-note" id="gitCommitNote"></span>
+                  </div>
+                </div>
+
+                <div class="git-body" id="gitBody"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- -------------------------------------------------- preview --->
+        <aside class="panel" aria-label="Live preview">
+          <div class="panel-head">
+            <span class="panel-title">Live Preview</span>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn-xs" id="previewToggle" title="Start or stop the local preview server">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
+              <span id="previewToggleText">Start</span>
+            </button>
+            <button type="button" class="icon-btn" id="previewReload" title="Reload the preview" aria-label="Reload preview">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-refresh" /></svg>
+            </button>
+            <span class="chip" id="previewChip"><span class="dot"></span><span id="previewChipText">Stopped</span></span>
+          </div>
+
+          <div class="urlbar">
+            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-globe" /></svg>
+            <span class="url" id="previewUrl">not running</span>
+          </div>
+
+          <div class="devices">
+            <button type="button" class="device device--on" id="deviceDesktop" data-width="0" title="Fit the panel width">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-desktop" /></svg>
+              Desktop
+            </button>
+            <button type="button" class="device" id="deviceTablet" data-width="768" title="768 px wide">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-tablet" /></svg>
+              Tablet
+            </button>
+            <button type="button" class="device" id="deviceMobile" data-width="390" title="390 px wide">
+              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-phone" /></svg>
+              Mobile
+            </button>
+          </div>
+
+          <div class="preview-stage" id="previewStage">
+            <div class="skeleton" id="previewPlaceholder">
+              <div class="skeleton-bar"><i></i><i></i><i></i></div>
+              <div class="skeleton-grid">
+                <div class="skeleton-block tall"></div>
+                <div class="skeleton-lines">
+                  <b></b><b></b><b></b><b></b>
+                </div>
+              </div>
+            </div>
+            <p class="stage-note" id="previewNote">
+              <strong>Preview stopped</strong>
+              Press Start to serve HPOS-Desktop on a free localhost port and render index.html here.
+            </p>
+            <iframe
+              id="previewFrame"
+              class="preview-frame"
+              title="Live preview of the HPOS-Desktop project"
+              sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
+              referrerpolicy="no-referrer"
+              hidden
+            ></iframe>
+          </div>
+        </aside>
+      </div>
+
+      <!-- ==================================================== status bar -->
+      <footer class="statusbar">
+        <span class="item">
+          <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-branch" /></svg>
+          arena/01a08c54-hpos
+        </span>
+        <span class="item ok">No problems</span>
+        <span class="spacer"></span>
+        <span class="item" id="statusFile">no file open</span>
+        <span class="item" id="statusBridge">fs bridge: checking…</span>
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        'use strict'
+
+        /* ==================================================================
+           HPOS Code Arena — editor core.
+
+           Everything below is in-memory only. There is no filesystem access,
+           no Electron IPC, no network call and no storage API: Ctrl+S just
+           flips the save indicator and emits a DOM event that a future step
+           can pick up. The runtime bridge replaces these buffers later.
+           ================================================================== */
+
+        /* ------------------------------------------------------------ state
+           `buffers` holds the open editors. A buffer with `disk: true` is
+           backed by a real file inside HPOS-Desktop and may be read from /
+           written to through the preload bridge; scratch buffers created in
+           the UI stay in memory only and never touch the filesystem. */
+        var buffers = []
+        var active = -1
+        var untitled = 0
+        var tabEscape = false
+        var cursorLine = 1
+        var prevLineNode = null
+        var pulseTimer = 0
+        var saveInFlight = false
+
+        /* Explorer state: relative dir path ('' = project root) -> listing. */
+        var treeDirs = {}
+        var lastOpenAttempt = null
+
+        /* --------------------------------------------------------- dom refs */
+        function byId(name) {
+          return document.getElementById(name)
+        }
+
+        var tabsEl = byId('tabs')
+        var gutterEl = byId('gutterLines')
+        var editor = byId('editor')
+        var hlCode = byId('hlCode')
+        var minimapEl = byId('minimap')
+        var activeLineEl = byId('activeLine')
+        var saveStateEl = byId('saveState')
+        var saveStateText = byId('saveStateText')
+        var caretEl = byId('caretPos')
+        var langEl = byId('langLabel')
+        var crumbEl = byId('crumbFile')
+        var statusFileEl = byId('statusFile')
+        var treeRootEl = byId('treeRoot')
+        var treeCountEl = byId('treeCount')
+        var refreshBtn = byId('refreshTree')
+        var fileInfoEl = byId('fileInfo')
+        var noticeEl = byId('notice')
+        var noticeTextEl = byId('noticeText')
+        var noticeActionEl = byId('noticeAction')
+        var editorEmpty = byId('editorEmpty')
+        var bufferKindEl = byId('bufferKind')
+        var crumbRootEl = byId('crumbRoot')
+        var previewFrame = byId('previewFrame')
+        var previewStage = byId('previewStage')
+        var previewPlaceholder = byId('previewPlaceholder')
+        var previewNote = byId('previewNote')
+        var previewUrlEl = byId('previewUrl')
+        var previewChip = byId('previewChip')
+        var previewChipText = byId('previewChipText')
+        var previewToggleBtn = byId('previewToggle')
+        var previewToggleText = byId('previewToggleText')
+        var previewReloadBtn = byId('previewReload')
+        var gitBodyEl = byId('gitBody')
+        var gitBranchTextEl = byId('gitBranchText')
+        var gitStateChip = byId('gitStateChip')
+        var gitStateText = byId('gitStateText')
+        var gitMetaEl = byId('gitMeta')
+        var gitRefreshBtn = byId('gitRefresh')
+        var gitPushBtn = byId('gitPush')
+        var gitPushTextEl = byId('gitPushText')
+        var gitCommitBox = byId('gitCommitBox')
+        var gitMessageEl = byId('gitMessage')
+        var gitCommitBtn = byId('gitCommitBtn')
+        var gitCommitBtnText = byId('gitCommitBtnText')
+        var gitSelectionEl = byId('gitSelection')
+        var gitSelectAllBtn = byId('gitSelectAll')
+        var gitCommitNoteEl = byId('gitCommitNote')
+        var paneNoteEl = byId('paneNote')
+        var termEl = byId('paneTerminal')
+        var consoleEl = byId('paneConsole')
+        var cmdInput = byId('cmdInput')
+        var runBtn = byId('runBtn')
+
+        /* The preload bridge. Absent in a plain browser (e.g. when this file is
+           opened from a static server), in which case the editor falls back to
+           in-memory only. listDirectory/readFile/saveFile drive the Explorer and
+           saving; the preview trio drives the Live Preview server. */
+        var bridge =
+          window.hpos &&
+          typeof window.hpos.listDirectory === 'function' &&
+          typeof window.hpos.readFile === 'function' &&
+          typeof window.hpos.saveFile === 'function'
+            ? window.hpos
+            : null
+
+        var previewBridge =
+          bridge &&
+          typeof bridge.startPreview === 'function' &&
+          typeof bridge.stopPreview === 'function' &&
+          typeof bridge.previewStatus === 'function'
+            ? bridge
+            : null
+
+        /* ================================================================
+           Syntax highlighting
+
+           Each language is one alternation regex applied in a single pass, so
+           tokens can never nest or overlap. Everything that is not a token is
+           escaped as text, which means the overlay is safe for any input.
+           ================================================================ */
+        var ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;' }
+
+        function escapeText(s) {
+          return s.replace(/[&<>]/g, function (c) {
+            return ESCAPES[c]
+          })
+        }
+
+        var RE_HTML = /\x3C!--[\s\S]*?--\x3E|\x3C!doctype[^>]*\x3E|\x3C\/?[A-Za-z][\w:.-]*|\/?\x3E|"[^"]*"|'[^']*'|[A-Za-z_:][\w:.-]*(?=\s*=)/g
+        var RE_JS = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\b(const|let|var|function|return|if|else|for|while|new|class|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|of|in|do|switch|case|break|continue|delete|void|yield|extends|super|this|null|undefined|true|false)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g
+        var RE_JSON = /("(?:\\.|[^"\\])*")|(-?\b\d+(?:\.\d+)?\b|\btrue\b|\bfalse\b|\bnull\b)/g
+
+        function classifyHtml(token) {
+          if (token.slice(0, 2) === '<!') {
+            return token.slice(2, 9).toLowerCase() === 'doctype' ? 'kw' : 'com'
+          }
+          if (token.charAt(0) === '<') return 'tag'
+          if (token.charAt(0) === '"' || token.charAt(0) === "'") return 'str'
+          if (token === '>' || token === '/>') return 'punc'
+          return 'attr'
+        }
+
+        function wrapToken(kind, token) {
+          return '<span class="tok-' + kind + '">' + escapeText(token) + '</span>'
+        }
+
+        function tokenize(text, re, kindOf) {
+          var out = ''
+          var last = 0
+          var m
+          re.lastIndex = 0
+          while ((m = re.exec(text)) !== null) {
+            if (m[0].length === 0) {
+              re.lastIndex += 1
+              continue
+            }
+            if (m.index > last) out += escapeText(text.slice(last, m.index))
+            out += wrapToken(kindOf(m, text), m[0])
+            last = m.index + m[0].length
+          }
+          return out + escapeText(text.slice(last))
+        }
+
+        function highlight(text, lang) {
+          if (lang === 'txt') return escapeText(text)
+          if (lang === 'js') {
+            return tokenize(text, RE_JS, function (m) {
+              if (m[1]) return 'com'
+              if (m[2]) return 'str'
+              if (m[3]) return 'kw'
+              if (m[4]) return 'num'
+              return 'fn'
+            })
+          }
+          if (lang === 'json') {
+            return tokenize(text, RE_JSON, function (m, src) {
+              if (!m[1]) return 'kw'
+              var rest = src.slice(m.index + m[0].length)
+              return /^\s*:/.test(rest) ? 'attr' : 'str'
+            })
+          }
+          return tokenize(text, RE_HTML, function (m) {
+            return classifyHtml(m[0])
+          })
+        }
+
+        /* ================================================================
+           Rendering: gutter, overlay, minimap, caret, save pill
+           ================================================================ */
+        /* Read the code metrics straight off the textarea so the overlay, the
+           gutter and the active-line marker can never drift from the CSS. */
+        function metric(property, fallback) {
+          var styles = window.getComputedStyle ? window.getComputedStyle(editor) : null
+          var value = styles ? parseFloat(styles[property]) : NaN
+          return isNaN(value) ? fallback : value
+        }
+
+        function lineHeight() {
+          return metric('lineHeight', 20.625)
+        }
+
+        function renderGutter(count) {
+          if (gutterEl.childElementCount === count) return
+          while (gutterEl.firstChild) gutterEl.removeChild(gutterEl.firstChild)
+          prevLineNode = null
+          for (var i = 1; i <= count; i++) {
+            var span = document.createElement('span')
+            span.className = 'ln' + (i === cursorLine ? ' ln--on' : '')
+            span.textContent = String(i)
+            if (i === cursorLine) prevLineNode = span
+            gutterEl.appendChild(span)
+          }
+        }
+
+        function renderMinimap(text) {
+          var lines = text.split('\n')
+          var blocks = ''
+          var cap = Math.min(lines.length, 120)
+          for (var i = 0; i < cap; i++) {
+            var width = lines[i].replace(/\t/g, '  ').length
+            var pct = Math.max(4, Math.min(100, Math.round((width / 48) * 100)))
+            var cls = i % 3 === 0 ? 'a' : i % 3 === 1 ? 'b' : 'c'
+            blocks += '<span class="' + cls + '" style="width:' + pct + '%"></span>'
+          }
+          minimapEl.innerHTML = blocks
+        }
+
+        function positionActiveLine() {
+          var lh = lineHeight()
+          var top = metric('paddingTop', 12) + (cursorLine - 1) * lh - (editor.scrollTop || 0)
+          activeLineEl.style.height = lh + 'px'
+          activeLineEl.style.transform = 'translateY(' + top + 'px)'
+          activeLineEl.style.opacity = top + lh < 0 ? '0' : '1'
+        }
+
+        function syncScroll() {
+          var top = editor.scrollTop || 0
+          var left = editor.scrollLeft || 0
+          gutterEl.style.transform = 'translateY(' + -top + 'px)'
+          hlCode.style.transform = 'translate(' + -left + 'px,' + -top + 'px)'
+          positionActiveLine()
+        }
+
+        function renderCaret() {
+          var upto = editor.value.slice(0, editor.selectionStart)
+          var newline = upto.lastIndexOf('\n')
+          cursorLine = upto.split('\n').length
+          var col = upto.length - newline
+          caretEl.textContent = 'Ln ' + cursorLine + ', Col ' + col
+
+          if (prevLineNode) prevLineNode.classList.remove('ln--on')
+          var node = gutterEl.children[cursorLine - 1]
+          if (node) {
+            node.classList.add('ln--on')
+            prevLineNode = node
+          }
+          positionActiveLine()
+        }
+
+        function current() {
+          return active >= 0 && buffers[active] ? buffers[active] : null
+        }
+
+        function refresh() {
+          var text = editor.value
+          var buffer = current()
+          renderGutter(text.split('\n').length)
+          hlCode.innerHTML = highlight(text, buffer ? buffer.lang : 'txt')
+          renderMinimap(text)
+          syncScroll()
+          renderCaret()
+        }
+
+        var SAVE_LABELS = { saved: 'Saved', dirty: 'Unsaved', busy: 'Saving…', error: 'Save failed', idle: 'No buffer' }
+
+        function setSaveState(kind, title) {
+          saveStateEl.className = 'save-state save-state--' + kind
+          saveStateText.textContent = SAVE_LABELS[kind] || kind
+          saveStateEl.setAttribute('title', title || '')
+        }
+
+        function renderSaveState() {
+          var buffer = current()
+          if (!buffer) {
+            setSaveState('idle', 'No buffer open')
+            return
+          }
+          if (buffer.dirty) {
+            setSaveState(
+              'dirty',
+              buffer.disk ? 'Unsaved changes — press Ctrl+S to write to disk' : 'Unsaved changes (scratch buffer, not on disk)'
+            )
+          } else if (buffer.disk) {
+            setSaveState('saved', 'Saved — matches ' + buffer.path + ' on disk')
+          } else {
+            setSaveState('saved', 'Empty scratch buffer — not backed by a file')
+          }
+        }
+
+        /* ================================================================
+           Tabs
+           ================================================================ */
+        /* ================================================================
+           Editor tabs
+
+           One tab per open buffer. Disk-backed tabs carry the file path the
+           bridge reads and writes; scratch tabs (disk: false) never touch the
+           filesystem and are marked as such.
+           ================================================================ */
+        var LANGUAGES = {
+          html: { lang: 'html', label: 'HTML' },
+          htm: { lang: 'html', label: 'HTML' },
+          js: { lang: 'js', label: 'JavaScript' },
+          mjs: { lang: 'js', label: 'JavaScript' },
+          cjs: { lang: 'js', label: 'JavaScript' },
+          jsx: { lang: 'js', label: 'JavaScript' },
+          json: { lang: 'json', label: 'JSON' },
+        }
+
+        function languageFor(name) {
+          var dot = name.lastIndexOf('.')
+          var ext = dot === -1 ? '' : name.slice(dot + 1).toLowerCase()
+          return LANGUAGES[ext] || { lang: 'txt', label: 'Plain text' }
+        }
+
+        function findBuffer(relPath) {
+          for (var i = 0; i < buffers.length; i++) {
+            if (buffers[i].path && buffers[i].path === relPath) return i
+          }
+          return -1
+        }
+
+        function renderTabStrip() {
+          while (tabsEl.firstChild) tabsEl.removeChild(tabsEl.firstChild)
+
+          buffers.forEach(function (buffer, index) {
+            var tab = document.createElement('button')
+            tab.type = 'button'
+            tab.className =
+              'tab' +
+              (index === active ? ' tab--active' : '') +
+              (buffer.disk ? '' : ' tab--scratch')
+            tab.setAttribute('role', 'tab')
+            tab.setAttribute('aria-selected', index === active ? 'true' : 'false')
+            tab.title = buffer.disk ? 'HPOS-Desktop/' + buffer.path : buffer.name + ' (scratch buffer, not on disk)'
+
+            var icon = document.createElement('span')
+            icon.className = 'tab-ico'
+            icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-file" /></svg>'
+            tab.appendChild(icon)
+
+            var label = document.createElement('span')
+            label.className = 'label'
+            label.textContent = buffer.name
+            tab.appendChild(label)
+
+            if (buffer.dirty) {
+              var dot = document.createElement('span')
+              dot.className = 'dirty'
+              dot.setAttribute('aria-hidden', 'true')
+              dot.setAttribute('title', 'Unsaved changes')
+              tab.appendChild(dot)
+            }
+
+            tab.addEventListener('click', function () {
+              activate(index, true)
+            })
+            tabsEl.appendChild(tab)
+          })
+
+          var add = document.createElement('button')
+          add.type = 'button'
+          add.id = 'addTab'
+          add.className = 'tab tab--add'
+          add.title = 'New scratch buffer (in-memory, never written to disk)'
+          add.setAttribute('aria-label', 'New scratch buffer')
+          add.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-plus" /></svg>'
+          add.addEventListener('click', newBuffer)
+          tabsEl.appendChild(add)
+        }
+
+        function setEditorVisible(visible) {
+          if (visible) {
+            editorEmpty.setAttribute('hidden', '')
+            editor.readOnly = false
+          } else {
+            editorEmpty.removeAttribute('hidden')
+            editor.readOnly = true
+          }
+        }
+
+        /**
+         * Make a buffer active. The outgoing buffer's text is stashed first so
+         * switching tabs never loses edits, and the explorer highlight and the
+         * File info panel follow the active buffer.
+         */
+        function activate(index, focusEditor) {
+          var outgoing = current()
+          if (outgoing) outgoing.text = editor.value
+
+          active = index
+          var buffer = current()
+
+          if (!buffer) {
+            editor.value = ''
+            editor.selectionStart = 0
+            editor.selectionEnd = 0
+            cursorLine = 1
+            prevLineNode = null
+            langEl.textContent = '—'
+            bufferKindEl.textContent = 'no buffer'
+            crumbEl.textContent = 'no file open'
+            crumbRootEl.textContent = 'HPOS-Desktop'
+            statusFileEl.textContent = 'no file open'
+            setEditorVisible(false)
+          } else {
+            editor.value = buffer.text
+            if (editor.setSelectionRange) editor.setSelectionRange(0, 0)
+            editor.scrollTop = 0
+            editor.scrollLeft = 0
+            cursorLine = 1
+            prevLineNode = null
+            langEl.textContent = buffer.label
+            bufferKindEl.textContent = buffer.disk ? 'on disk' + (buffer.missing ? ' · missing' : '') : 'scratch · in-memory'
+            crumbEl.textContent = buffer.path || buffer.name
+            crumbRootEl.textContent = buffer.disk ? 'HPOS-Desktop' : 'scratch'
+            statusFileEl.textContent = buffer.disk ? 'HPOS-Desktop/' + buffer.path : buffer.name + ' (scratch)'
+            setEditorVisible(true)
+          }
+
+          renderTabStrip()
+          renderSaveState()
+          renderFileInfo()
+          renderTree()
+          refresh()
+
+          if (focusEditor && editor.focus) editor.focus()
+        }
+
+        function newBuffer() {
+          untitled += 1
+          var name = 'untitled-' + untitled + '.txt'
+          buffers.push({
+            path: null,
+            name: name,
+            lang: 'txt',
+            label: 'Plain text',
+            text: '',
+            dirty: false,
+            disk: false,
+            missing: false,
+            bytes: 0,
+          })
+          activate(buffers.length - 1, true)
+          logLine(consoleEl, 'info', '[tab] opened ' + name + ' as an in-memory scratch buffer (never written to disk)')
+        }
+
+        function markEdited() {
+          var buffer = current()
+          if (!buffer) return
+          if (!buffer.dirty) {
+            buffer.dirty = true
+            renderTabStrip()
+          }
+          renderSaveState()
+          renderFileInfo()
+        }
+
+        function applyEdit(nextValue, selStart, selEnd) {
+          var top = editor.scrollTop || 0
+          var left = editor.scrollLeft || 0
+          editor.value = nextValue
+          if (editor.setSelectionRange) editor.setSelectionRange(selStart, selEnd)
+          editor.scrollTop = top
+          editor.scrollLeft = left
+          markEdited()
+          refresh()
+        }
+
+        function insertText(text) {
+          var start = editor.selectionStart
+          var end = editor.selectionEnd
+          var value = editor.value
+          applyEdit(value.slice(0, start) + text + value.slice(end), start + text.length, start + text.length)
+        }
+
+        /* Tab / Shift+Tab: indent or outdent the caret line, or every line of
+           the current selection. */
+        function reindent(direction) {
+          var value = editor.value
+          var start = editor.selectionStart
+          var end = editor.selectionEnd
+          var lineStart = value.lastIndexOf('\n', start - 1) + 1
+
+          if (start === end) {
+            if (direction > 0) {
+              insertText('  ')
+              return
+            }
+            var lineEnd = value.indexOf('\n', start)
+            if (lineEnd === -1) lineEnd = value.length
+            var line = value.slice(lineStart, lineEnd)
+            var lead = line.match(/^ {1,2}/)
+            if (!lead) return
+            var outdented = value.slice(0, lineStart) + line.slice(lead[0].length) + value.slice(lineEnd)
+            applyEdit(outdented, Math.max(lineStart, start - lead[0].length), Math.max(lineStart, end - lead[0].length))
+            return
+          }
+
+          var blockEnd = value.indexOf('\n', end)
+          if (blockEnd === -1) blockEnd = value.length
+          var shifted = value
+            .slice(lineStart, blockEnd)
+            .split('\n')
+            .map(function (line) {
+              if (direction > 0) return '  ' + line
+              var prefix = line.match(/^ {1,2}/)
+              return prefix ? line.slice(prefix[0].length) : line
+            })
+            .join('\n')
+          applyEdit(value.slice(0, lineStart) + shifted + value.slice(blockEnd), lineStart, lineStart + shifted.length)
+        }
+
+        /* Auto-indent on Enter: keep the leading whitespace and add one level
+           when the line opens a block. */
+        function autoIndent() {
+          var value = editor.value
+          var start = editor.selectionStart
+          var end = editor.selectionEnd
+          var lineStart = value.lastIndexOf('\n', start - 1) + 1
+          var head = value.slice(lineStart, start)
+          var lead = head.match(/^[ \t]*/)
+          var indent = lead ? lead[0] : ''
+          if (/[{\[(<]$/.test(head.trim())) indent += '  '
+          var next = value.slice(0, start) + '\n' + indent + value.slice(end)
+          var caret = start + 1 + indent.length
+          applyEdit(next, caret, caret)
+        }
+
+        /* ================================================================
+           Save (UI only) · Run (placeholder) · event log
+           ================================================================ */
+        function emit(type, detail) {
+          var event
+          try {
+            event = new CustomEvent(type, { detail: detail, bubbles: true })
+          } catch (err) {
+            return
+          }
+          if (editor.dispatchEvent) editor.dispatchEvent(event)
+        }
+
+        function logLine(pane, kind, text) {
+          var row = document.createElement('div')
+          row.className = 'term-line' + (kind ? ' term-line--' + kind : '')
+          row.textContent = text
+          pane.appendChild(row)
+          if (typeof pane.scrollHeight === 'number') pane.scrollTop = pane.scrollHeight
+        }
+
+        function pulseSave() {
+          saveStateEl.classList.add('save-state--pulse')
+          if (pulseTimer) window.clearTimeout(pulseTimer)
+          pulseTimer = window.setTimeout(function () {
+            saveStateEl.classList.remove('save-state--pulse')
+          }, 900)
+        }
+
+        /**
+         * Ctrl+S. With the preload bridge attached the active buffer is written
+         * to its real file inside HPOS-Desktop; without one (plain browser) the
+         * old in-memory behaviour is kept so the shell still works standalone.
+         * Always emits `hpos:save` so future steps can observe the outcome.
+         */
+        function saveBuffer() {
+          if (saveInFlight) return Promise.resolve()
+
+          var buffer = current()
+          if (!buffer) {
+            logLine(consoleEl, 'info', '[save] nothing to save — no buffer is open')
+            return Promise.resolve()
+          }
+
+          var text = editor.value
+          var lines = text.split('\n').length
+          var bytes = text.length
+
+          if (!buffer.disk) {
+            setSaveState('error', buffer.name + ' is a scratch buffer with no file on disk')
+            logLine(consoleEl, 'err', '[save] FAILED — ' + buffer.name + ' is a scratch buffer with no file on disk')
+            showNotice('error', 'Scratch buffers stay in memory. Open a real file from the Explorer to save to disk.')
+            emit('hpos:save', { name: buffer.name, lines: lines, bytes: bytes, persisted: false, error: 'no file on disk' })
+            return Promise.resolve()
+          }
+
+          if (!bridge) {
+            buffer.dirty = false
+            renderTabStrip()
+            renderSaveState()
+            pulseSave()
+            logLine(
+              consoleEl,
+              'ok',
+              '[save] ' + buffer.path + ' → Saved (' + lines + ' lines, ' + bytes + ' bytes, in-memory only — no preload bridge attached)'
+            )
+            showNotice('ok', 'Saved in memory only — this window has no preload bridge.')
+            emit('hpos:save', { name: buffer.path, lines: lines, bytes: bytes, persisted: false })
+            return Promise.resolve()
+          }
+
+          saveInFlight = true
+          setSaveState('busy', 'Writing ' + buffer.path + ' to disk…')
+          logLine(consoleEl, 'out', '[save] writing ' + buffer.path + ' (' + lines + ' lines, ' + bytes + ' bytes)…')
+
+          var fileName = buffer.path
+          return bridge
+            .saveFile(fileName, text)
+            .then(
+              function (result) {
+                return result
+              },
+              function (err) {
+                return { ok: false, code: 'EBRIDGE', error: err && err.message ? err.message : String(err) }
+              }
+            )
+            .then(function (result) {
+              saveInFlight = false
+
+              // The tab may have been switched away while the write was in flight.
+              var index = findBuffer(fileName)
+              var target = index === -1 ? buffer : buffers[index]
+
+              if (result && result.ok) {
+                target.dirty = false
+                target.missing = false
+                target.bytes = result.bytes
+                target.text = text
+                if (index !== -1 && index === active) {
+                  renderTabStrip()
+                  setSaveState('saved', 'Saved to ' + result.path)
+                } else if (index !== -1) {
+                  renderTabStrip()
+                }
+                pulseSave()
+                hideNotice()
+                logLine(
+                  consoleEl,
+                  'ok',
+                  '[save] ' + fileName + ' → Saved (' + result.lines + ' lines, ' + result.bytes + ' bytes) → ' + result.path
+                )
+                emit('hpos:save', {
+                  name: fileName,
+                  lines: result.lines,
+                  bytes: result.bytes,
+                  persisted: true,
+                  path: result.path,
+                })
+                renderFileInfo()
+                loadDir(parentOf(fileName), { force: true })
+                maybeReloadPreview(fileName)
+                maybeRefreshGit()
+                return
+              }
+
+              var reason = result && result.error ? result.error : 'unknown error'
+              var code = result && result.code ? ' [' + result.code + ']' : ''
+              target.dirty = true
+              if (index !== -1) renderTabStrip()
+              if (index === -1 || index === active) {
+                setSaveState('error', reason)
+              }
+              showNotice('error', 'Save failed — ' + reason + (lastOpenAttempt ? '' : ''))
+              logLine(consoleEl, 'err', '[save] FAILED — ' + fileName + code + ' ' + reason)
+              emit('hpos:save', { name: fileName, lines: lines, bytes: bytes, persisted: false, error: reason })
+              renderFileInfo()
+            })
+        }
+
+        function runBuffer() {
+          var buffer = current()
+          logLine(termEl, 'out', '$ hpos run ' + (buffer ? buffer.name : '—'))
+          if (!previewBridge) {
+            logLine(termEl, 'info', '[runtime] no preview bridge in this window — run is a no-op')
+            return
+          }
+          if (preview.running) {
+            reloadPreview('run')
+            logLine(termEl, 'ok', '[runtime] preview is already serving ' + preview.url + ' — reloaded')
+            return
+          }
+          startPreview()
+        }
+
+        /* ================================================================
+           File Explorer — driven by the real directory listing
+
+           The tree mirrors what is actually inside HPOS-Desktop. Folders load
+           their children on first expand; refresh re-lists the expanded
+           folders and re-reads open buffers, but never overwrites one with
+           unsaved changes.
+           ================================================================ */
+        function parentOf(relPath) {
+          if (!relPath) return ''
+          var slash = relPath.lastIndexOf('/')
+          return slash === -1 ? '' : relPath.slice(0, slash)
+        }
+
+        function dirState(dirPath) {
+          var key = dirPath || ''
+          if (!treeDirs[key]) {
+            treeDirs[key] = {
+              key: key,
+              loaded: false,
+              loading: false,
+              expanded: key === '',
+              entries: [],
+              error: null,
+              truncated: false,
+              skipped: 0,
+            }
+          }
+          return treeDirs[key]
+        }
+
+        function loadDir(dirPath, options) {
+          var key = dirPath || ''
+          var state = dirState(key)
+          if (state.loading) return Promise.resolve()
+          if (state.loaded && !(options && options.force)) return Promise.resolve()
+          if (!bridge) {
+            state.error = 'No preload bridge — cannot list HPOS-Desktop'
+            renderTree()
+            return Promise.resolve()
+          }
+
+          state.loading = true
+          state.error = null
+          renderTree()
+
+          return bridge.listDirectory(key).then(
+            function (result) {
+              state.loading = false
+              if (!result || !result.ok) {
+                state.loaded = false
+                state.error = (result && result.error) || 'Could not list ' + (key || 'HPOS-Desktop')
+                logLine(consoleEl, 'err', '[fs] could not list ' + (key || '.') + (result && result.code ? ' [' + result.code + ']' : ''))
+              } else {
+                state.loaded = true
+                state.entries = result.entries || []
+                state.truncated = !!result.truncated
+                state.skipped = result.skipped || 0
+              }
+              renderTree()
+              return result
+            },
+            function (err) {
+              state.loading = false
+              state.loaded = false
+              state.error = err && err.message ? err.message : String(err)
+              renderTree()
+            }
+          )
+        }
+
+        function treeNote(text, kind) {
+          var row = document.createElement('li')
+          row.className = 'tree-note' + (kind ? ' tree-note--' + kind : '')
+          if (kind === 'loading') {
+            var spinner = document.createElement('span')
+            spinner.className = 'spinner'
+            row.appendChild(spinner)
+          } else {
+            var icon = document.createElement('span')
+            icon.className = 'tab-ico'
+            icon.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-alert" /></svg>'
+            row.appendChild(icon)
+          }
+          var label = document.createElement('span')
+          label.textContent = text
+          row.appendChild(label)
+          return row
+        }
+
+        function dirChildrenNode(dirPath, state) {
+          var list = document.createElement('ul')
+          list.className = 'tree'
+
+          if (state.loading) {
+            list.appendChild(treeNote('Loading…', 'loading'))
+            return list
+          }
+          if (state.error) {
+            var errorRow = treeNote(state.error, 'error')
+            var retry = document.createElement('button')
+            retry.type = 'button'
+            retry.className = 'btn btn-xs'
+            retry.textContent = 'Retry'
+            retry.addEventListener('click', function (event) {
+              if (event && event.stopPropagation) event.stopPropagation()
+              loadDir(dirPath, { force: true })
+            })
+            errorRow.appendChild(retry)
+            list.appendChild(errorRow)
+            return list
+          }
+          if (!state.loaded) {
+            list.appendChild(treeNote('Not loaded', 'muted'))
+            return list
+          }
+          if (!state.entries.length) {
+            list.appendChild(treeNote(state.skipped ? 'No visible files here' : 'Empty folder', 'muted'))
+            return list
+          }
+
+          state.entries.forEach(function (entry) {
+            list.appendChild(entryNode(entry))
+          })
+
+          if (state.truncated) {
+            list.appendChild(treeNote('Listing truncated at 400 entries', 'muted'))
+          }
+          return list
+        }
+
+        function entryNode(entry) {
+          var li = document.createElement('li')
+          var isDir = entry.type === 'directory'
+          var index = isDir ? -1 : findBuffer(entry.path)
+          var buffer = index === -1 ? null : buffers[index]
+          var state = isDir ? dirState(entry.path) : null
+
+          var node = document.createElement('div')
+          node.className =
+            'node' +
+            (isDir ? ' node--folder' : '') +
+            (isDir && state.expanded ? ' node--open' : '') +
+            (index !== -1 && index === active ? ' node--active' : '')
+          node.setAttribute('data-path', entry.path)
+          node.setAttribute('data-kind', isDir ? 'directory' : 'file')
+          node.setAttribute('title', isDir ? entry.path + '/' : entry.path)
+
+          if (isDir) {
+            var chev = document.createElement('span')
+            chev.className = 'tab-ico ico-chev'
+            chev.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chev" /></svg>'
+            node.appendChild(chev)
+          }
+
+          var icon = document.createElement('span')
+          icon.className = 'tab-ico'
+          icon.innerHTML =
+            '<svg viewBox="0 0 16 16" aria-hidden="true"><use href="#' +
+            (isDir ? (state && state.expanded ? 'i-folder-open' : 'i-folder') : 'i-file') +
+            '" /></svg>'
+          node.appendChild(icon)
+
+          var label = document.createElement('span')
+          label.className = 'label'
+          label.textContent = entry.name
+          node.appendChild(label)
+
+          if (entry.type === 'symlink') {
+            var linkTag = document.createElement('span')
+            linkTag.className = 'tag'
+            linkTag.textContent = 'LINK'
+            node.appendChild(linkTag)
+          } else if (buffer && buffer.dirty) {
+            var dirtyTag = document.createElement('span')
+            dirtyTag.className = 'tag tag--dirty'
+            dirtyTag.setAttribute('title', 'Unsaved changes')
+            dirtyTag.textContent = 'M'
+            node.appendChild(dirtyTag)
+          }
+
+          li.appendChild(node)
+
+          if (isDir && state.expanded) {
+            li.appendChild(dirChildrenNode(entry.path, state))
+          }
+
+          return li
+        }
+
+        function renderTree() {
+          if (!treeRootEl) return
+          while (treeRootEl.firstChild) treeRootEl.removeChild(treeRootEl.firstChild)
+          treeRootEl.appendChild(dirChildrenNode('', dirState('')))
+
+          var root = dirState('')
+          if (treeCountEl) {
+            treeCountEl.textContent = root.loaded ? root.entries.length + (root.truncated ? '+' : '') + ' entries' : ''
+          }
+        }
+
+        /** Re-read every open disk-backed buffer, skipping unsaved ones. */
+        function refreshOpenBuffers() {
+          if (!bridge) return Promise.resolve()
+
+          var chain = Promise.resolve()
+          buffers.forEach(function (buffer, index) {
+            if (!buffer.disk) return
+            chain = chain.then(function () {
+              if (buffer.dirty) {
+                logLine(
+                  consoleEl,
+                  'info',
+                  '[fs] kept unsaved changes in ' + buffer.path + ' — not reloaded from disk'
+                )
+                return
+              }
+              return bridge.readFile(buffer.path).then(function (result) {
+                if (!result || !result.ok) {
+                  buffer.missing = true
+                  logLine(consoleEl, 'info', '[fs] ' + buffer.path + ' is no longer readable — buffer kept as-is')
+                  return
+                }
+                buffer.missing = false
+                if (result.content === buffer.text) return
+                buffer.text = result.content
+                buffer.bytes = result.bytes
+                if (index === active) {
+                  var caret = Math.min(editor.selectionStart || 0, result.content.length)
+                  editor.value = result.content
+                  if (editor.setSelectionRange) editor.setSelectionRange(caret, caret)
+                  refresh()
+                }
+                logLine(consoleEl, 'out', '[fs] refreshed ' + buffer.path + ' from disk')
+              })
+            })
+          })
+          return chain
+        }
+
+        /** Toolbar refresh: re-list expanded folders, then re-read clean buffers. */
+        function refreshExplorer() {
+          if (!bridge) {
+            showNotice('error', 'No preload bridge in this window — the Explorer cannot read the real folder.')
+            return Promise.resolve()
+          }
+          refreshBtn.classList.add('icon-btn--busy')
+          var expanded = Object.keys(treeDirs).filter(function (key) {
+            return treeDirs[key].expanded
+          })
+          var chain = Promise.resolve()
+          expanded.forEach(function (key) {
+            chain = chain.then(function () {
+              return loadDir(key, { force: true })
+            })
+          })
+          return chain
+            .then(refreshOpenBuffers)
+            .then(function () {
+              refreshBtn.classList.remove('icon-btn--busy')
+              renderTree()
+              renderFileInfo()
+              logLine(consoleEl, 'out', '[fs] explorer refreshed from disk')
+            })
+        }
+
+        /* ================================================================
+           Opening files
+           ================================================================ */
+        function openPath(relPath, focusEditor) {
+          var existing = findBuffer(relPath)
+          if (existing !== -1) {
+            activate(existing, focusEditor)
+            logLine(
+              consoleEl,
+              'out',
+              '[fs] ' + relPath + ' is already open' + (buffers[existing].dirty ? ' — unsaved changes kept' : '')
+            )
+            return Promise.resolve()
+          }
+          if (!bridge) {
+            showNotice('error', 'No preload bridge in this window — cannot read ' + relPath + ' from disk.')
+            return Promise.resolve()
+          }
+
+          lastOpenAttempt = relPath
+          showNotice('loading', 'Loading ' + relPath + '…')
+
+          return bridge.readFile(relPath).then(
+            function (result) {
+              if (!result || !result.ok) {
+                var reason = (result && result.error) || 'Could not read ' + relPath
+                showNotice('error', reason, true)
+                logLine(consoleEl, 'err', '[fs] could not open ' + relPath + (result && result.code ? ' [' + result.code + ']' : '') + ' ' + reason)
+                return
+              }
+              var language = languageFor(result.name || relPath)
+              buffers.push({
+                path: result.relative || relPath,
+                name: result.name || relPath.split('/').pop(),
+                lang: language.lang,
+                label: language.label,
+                text: result.content,
+                dirty: false,
+                disk: true,
+                missing: false,
+                bytes: result.bytes,
+              })
+              activate(buffers.length - 1, focusEditor)
+              hideNotice()
+              logLine(
+                consoleEl,
+                'out',
+                '[fs] opened ' + (result.relative || relPath) + ' (' + result.lines + ' lines, ' + result.bytes + ' bytes) from disk'
+              )
+            },
+            function (err) {
+              var message = err && err.message ? err.message : String(err)
+              showNotice('error', 'Could not read ' + relPath + ': ' + message, true)
+              logLine(consoleEl, 'err', '[fs] could not open ' + relPath + ' ' + message)
+            }
+          )
+        }
+
+        /* ================================================================
+           Live Preview
+
+           The main process owns the static server; this side only starts and
+           stops it, shows the URL it hands back, and points an iframe at it.
+           Reloading is a src reset with a cache-buster, because the iframe is
+           a different origin (http://127.0.0.1:PORT from file://) and cannot
+           be touched through the DOM.
+           ================================================================ */
+        var PREVIEW_EXTENSIONS = {
+          html: true, htm: true, css: true, js: true, mjs: true, cjs: true, jsx: true,
+          json: true, map: true, svg: true, png: true, jpg: true, jpeg: true, gif: true,
+          webp: true, ico: true, woff: true, woff2: true, ttf: true, txt: true,
+        }
+
+        var preview = { running: false, url: null, port: null, busy: false, loads: 0, fails: 0, reloads: 0 }
+
+        /** Only files the served page could actually use are worth a reload. */
+        function isPreviewRelevant(relPath) {
+          if (!relPath) return false
+          var name = relPath.split('/').pop()
+          if (!name || name.charAt(0) === '.') return false
+          var dot = name.lastIndexOf('.')
+          if (dot === -1) return false
+          return PREVIEW_EXTENSIONS[name.slice(dot + 1).toLowerCase()] === true
+        }
+
+        function renderPreview() {
+          if (!previewFrame) return
+          var running = preview.running
+
+          previewChip.className = 'chip' + (running ? ' chip--live' : '')
+          previewChipText.textContent = running ? 'Running :' + preview.port : 'Stopped'
+          previewUrlEl.textContent = running ? preview.url : 'not running'
+          previewUrlEl.setAttribute('title', running ? preview.url : 'The preview server is not running')
+          previewToggleText.textContent = preview.busy ? '…' : running ? 'Stop' : 'Start'
+          previewToggleBtn.setAttribute('title', running ? 'Stop the preview server' : 'Start the local preview server')
+
+          if (running) {
+            previewPlaceholder.setAttribute('hidden', '')
+            previewNote.setAttribute('hidden', '')
+            previewFrame.removeAttribute('hidden')
+            if (previewFrame.getAttribute('src') !== preview.url) previewFrame.setAttribute('src', preview.url)
+          } else {
+            previewFrame.setAttribute('hidden', '')
+            previewFrame.removeAttribute('src')
+            previewPlaceholder.removeAttribute('hidden')
+            previewNote.removeAttribute('hidden')
+          }
+        }
+
+        function applyPreviewStatus(result) {
+          preview.busy = false
+          if (!result) return
+          preview.running = !!result.running
+          preview.url = result.url || null
+          preview.port = result.port || null
+          renderPreview()
+        }
+
+        function startPreview() {
+          if (!previewBridge) {
+            logLine(consoleEl, 'err', '[preview] no preload bridge — cannot start the local preview server')
+            showNotice('error', 'Live Preview needs the Electron preload bridge.')
+            return Promise.resolve()
+          }
+          if (preview.running || preview.busy) return Promise.resolve()
+
+          preview.busy = true
+          previewToggleText.textContent = '…'
+          logLine(consoleEl, 'out', '[preview] starting local preview server…')
+
+          return previewBridge.startPreview().then(
+            function (result) {
+              if (!result || !result.ok) {
+                preview.busy = false
+                renderPreview()
+                var reason = (result && result.error) || 'unknown error'
+                var code = result && result.code ? ' [' + result.code + ']' : ''
+                logLine(termEl, 'err', '$ hpos preview' + code + ' ' + reason)
+                logLine(consoleEl, 'err', '[preview] FAILED — ' + reason)
+                showNotice('error', 'Preview failed to start — ' + reason)
+                return
+              }
+              applyPreviewStatus(result)
+              logLine(termEl, 'ok', '[preview] serving ' + result.root + ' at ' + result.url)
+              logLine(consoleEl, 'ok', '[preview] running on ' + result.url + ' (127.0.0.1 only, port ' + result.port + ')')
+              hideNotice()
+            },
+            function (err) {
+              preview.busy = false
+              renderPreview()
+              var message = err && err.message ? err.message : String(err)
+              logLine(consoleEl, 'err', '[preview] FAILED — ' + message)
+              showNotice('error', 'Preview failed to start — ' + message)
+            }
+          )
+        }
+
+        function stopPreview() {
+          if (!previewBridge) return Promise.resolve()
+          if (!preview.running && !preview.busy) return Promise.resolve()
+
+          preview.busy = true
+          previewToggleText.textContent = '…'
+          logLine(consoleEl, 'out', '[preview] stopping the preview server…')
+
+          return previewBridge.stopPreview().then(
+            function (result) {
+              applyPreviewStatus(result)
+              logLine(consoleEl, 'ok', '[preview] stopped — port released')
+              logLine(termEl, 'out', '[preview] server stopped')
+            },
+            function (err) {
+              preview.busy = false
+              renderPreview()
+              logLine(consoleEl, 'err', '[preview] stop failed — ' + (err && err.message ? err.message : String(err)))
+            }
+          )
+        }
+
+        function reloadPreview(reason) {
+          if (!previewFrame || !preview.running || !preview.url) return false
+          // The counter matters: two reloads inside the same millisecond would
+          // otherwise produce an identical URL and the iframe would not reload.
+          preview.reloads += 1
+          var url = preview.url + '?hpos-reload=' + Date.now() + '-' + preview.reloads
+          previewFrame.setAttribute('src', url)
+          preview.loads += 1
+          logLine(consoleEl, 'out', '[preview] reloaded (' + (reason || 'manual') + ')')
+          return true
+        }
+
+        /**
+         * Ctrl+S hook. Only files the served page can use trigger a reload, and
+         * only while the server is running — everything else is reported and
+         * left alone.
+         */
+        function maybeReloadPreview(relPath) {
+          if (!previewBridge) return
+          if (!isPreviewRelevant(relPath)) {
+            logLine(consoleEl, 'out', '[preview] no reload — ' + relPath + ' is not used by the preview')
+            return
+          }
+          if (!preview.running) {
+            logLine(consoleEl, 'out', '[preview] no reload — preview is stopped')
+            return
+          }
+          reloadPreview(relPath + ' saved')
+        }
+
+        function setDeviceWidth(width) {
+          var ids = ['deviceDesktop', 'deviceTablet', 'deviceMobile']
+          ids.forEach(function (id) {
+            var el = byId(id)
+            if (!el) return
+            var on = String(el.getAttribute('data-width')) === String(width)
+            el.className = 'device' + (on ? ' device--on' : '')
+          })
+          if (!previewFrame) return
+          previewFrame.className = 'preview-frame' + (width ? (width >= 700 ? ' preview-frame--tablet' : ' preview-frame--mobile') : '')
+          previewFrame.style.width = width ? width + 'px' : '100%'
+          previewFrame.style.maxWidth = '100%'
+        }
+
+        /* ================================================================
+           Notice strip + File info panel
+           ================================================================ */
+        function showNotice(kind, text, retry) {
+          if (!noticeEl) return
+          noticeEl.className = 'notice notice--' + kind
+          noticeEl.removeAttribute('hidden')
+          noticeTextEl.textContent = text
+          if (retry) noticeActionEl.removeAttribute('hidden')
+          else noticeActionEl.setAttribute('hidden', '')
+        }
+
+        function hideNotice() {
+          if (!noticeEl) return
+          noticeEl.setAttribute('hidden', '')
+          noticeActionEl.setAttribute('hidden', '')
+        }
+
+        function infoRow(label, value, tone) {
+          var li = document.createElement('li')
+          li.className = 'outline-item'
+          var key = document.createElement('span')
+          key.className = 'depth'
+          key.textContent = label
+          var val = document.createElement('span')
+          val.className = 'value' + (tone ? ' value--' + tone : '')
+          val.textContent = value
+          li.appendChild(key)
+          li.appendChild(val)
+          return li
+        }
+
+        function renderFileInfo() {
+          if (!fileInfoEl) return
+          while (fileInfoEl.firstChild) fileInfoEl.removeChild(fileInfoEl.firstChild)
+
+          var buffer = current()
+          if (!buffer) {
+            fileInfoEl.appendChild(infoRow('status', 'no file open'))
+            return
+          }
+
+          fileInfoEl.appendChild(infoRow('name', buffer.name))
+          fileInfoEl.appendChild(infoRow('source', buffer.disk ? 'HPOS-Desktop (on disk)' : 'scratch · in-memory'))
+          if (buffer.disk) fileInfoEl.appendChild(infoRow('path', buffer.path))
+          var lines = editor.value.split('\n').length
+          var bytes = buffer.dirty ? editor.value.length : buffer.bytes || editor.value.length
+          fileInfoEl.appendChild(infoRow('lines', String(lines)))
+          fileInfoEl.appendChild(infoRow('bytes', bytes + (buffer.dirty ? ' (unsaved)' : '')))
+          fileInfoEl.appendChild(
+            infoRow('state', buffer.dirty ? 'Unsaved' : buffer.disk ? 'Saved' : 'Not on disk', buffer.dirty ? 'warn' : 'ok')
+          )
+          if (buffer.missing) fileInfoEl.appendChild(infoRow('disk', 'file no longer readable', 'warn'))
+        }
+
+        function setBridgeStatus(online) {
+          var badge = byId('statusBridge')
+          var line = byId('bridgeLine')
+          if (badge) badge.textContent = online ? 'Electron · preload bridge' : 'browser · in-memory only'
+          if (line) {
+            line.textContent = online
+              ? '[bridge] preload bridge online · explorer lists HPOS-Desktop, saves write inside it'
+              : '[bridge] no preload bridge in this context · buffers stay in memory'
+          }
+        }
+
+        /**
+         * Boot: with the bridge attached, list the project root and open
+         * index.html (or the first real file) from disk. Without one, keep the
+         * shell usable with a single in-memory scratch buffer.
+         */
+        function bootFilesystem() {
+          if (!bridge) {
+            setBridgeStatus(false)
+            logLine(consoleEl, 'info', '[fs] no preload bridge — the Explorer cannot list real files in this window')
+            showNotice('error', 'No preload bridge: open this file through Electron (npm start) to browse real files.')
+            // The tree reports the same reason instead of showing fake entries.
+            dirState('').error = 'No preload bridge — cannot list HPOS-Desktop'
+            renderTree()
+            newBuffer()
+            return Promise.resolve()
+          }
+
+          setBridgeStatus(true)
+          logLine(consoleEl, 'ok', '[bridge] preload bridge online — listing HPOS-Desktop')
+          showNotice('loading', 'Loading HPOS-Desktop…')
+
+          return loadDir('', { force: true }).then(function (result) {
+            var state = dirState('')
+            if (!state.loaded || !state.entries.length) {
+              showNotice('error', state.error || 'HPOS-Desktop looks empty')
+              setEditorVisible(false)
+              return
+            }
+            var files = state.entries.filter(function (entry) {
+              return entry.type !== 'directory'
+            })
+            var pick = null
+            for (var i = 0; i < files.length; i++) {
+              if (files[i].name === 'index.html') pick = files[i]
+            }
+            if (!pick) pick = files[0] || null
+            if (!pick) {
+              showNotice('error', 'No files to open in HPOS-Desktop')
+              return
+            }
+            return openPath(pick.path, false)
+          })
+        }
+
+        /* ================================================================
+           Git status panel
+
+           Read-only. The renderer calls gitStatus() with no arguments and
+           paints the structured result — it never builds a command, never
+           picks a directory and never sees raw shell output.
+           ================================================================ */
+        var git = {
+          loading: false,
+          loaded: false,
+          data: null,
+          error: null,
+          /* commit state */
+          selected: {},      // project-relative path -> true
+          committing: false,
+          commitError: null,
+          lastCommit: null,  // the commit this window just created
+          /* push state: the renderer only ever asks the main process to push
+             the current repository and paints whatever comes back. It never
+             sees, holds or sends a credential, a remote URL or a refspec. */
+          push: { running: false, error: null, detail: null, message: null },
+        }
+
+        var GIT_BADGE_CLASS = {
+          M: 'git-badge--mod',
+          A: 'git-badge--add',
+          D: 'git-badge--del',
+          '?': 'git-badge--new',
+          R: 'git-badge--mod',
+          C: 'git-badge--add',
+          T: 'git-badge--mod',
+          U: 'git-badge--del',
+        }
+
+        function gitEl(tag, className, text) {
+          var el = document.createElement(tag)
+          if (className) el.className = className
+          if (text !== undefined && text !== null) el.textContent = String(text)
+          return el
+        }
+
+        function gitRow(term, value) {
+          var dt = gitEl('dt', null, term)
+          var dd = gitEl('dd', null, value)
+          return [dt, dd]
+        }
+
+        /** Branch label shared by the header, the busy chip and the facts grid. */
+        function gitBranchLabel(data) {
+          if (!data) return '…'
+          if (data.detached) return 'detached @ ' + String(data.head || '').slice(0, 7)
+          return data.branch || '(no branch)'
+        }
+
+        /** One-line summary that tolerates partial payloads (error / no repo). */
+        function gitSummary() {
+          if (git.error) return 'status failed — ' + git.error
+          var data = git.data
+          if (!data) return 'no status'
+          if (!data.available) return 'git unavailable'
+          if (!data.isRepo) return 'not a git repository'
+          if (data.error) return 'status error — ' + (data.message || 'unknown')
+          var counts = data.counts || {}
+          var total =
+            (counts.staged || 0) + (counts.modified || 0) + (counts.untracked || 0) + (counts.conflicted || 0)
+          return (data.branch || 'detached') + ' · ' + (data.clean ? 'clean' : total + ' changed')
+        }
+
+        /** Every path the panel currently offers as committable. */
+        function gitSelectablePaths() {
+          var data = git.data
+          if (!data || !data.available || !data.isRepo || data.error) return []
+          var files = data.files || {}
+          var out = []
+          ;['staged', 'modified', 'untracked', 'conflicted'].forEach(function (key) {
+            ;(files[key] || []).forEach(function (entry) {
+              if (entry && entry.path && out.indexOf(entry.path) === -1) out.push(entry.path)
+            })
+          })
+          return out
+        }
+
+        /** The ticked subset, in the order the panel lists them. */
+        function selectedGitPaths() {
+          return gitSelectablePaths().filter(function (p) {
+            return git.selected[p] === true
+          })
+        }
+
+        /** Drop ticks for paths that are no longer changed (after a commit). */
+        function pruneGitSelection() {
+          var keep = {}
+          gitSelectablePaths().forEach(function (p) {
+            if (git.selected[p] === true) keep[p] = true
+          })
+          git.selected = keep
+        }
+
+        function setGitSelected(path, on) {
+          if (on) git.selected[path] = true
+          else delete git.selected[path]
+          git.commitError = null
+        }
+
+        /**
+         * One row of a status list. When the row can be committed it is a
+         * <label> wrapping a checkbox, so clicking the row itself toggles the
+         * box natively — no extra click wiring, no double toggles.
+         */
+        function gitFileRow(entry, badgeLetter, selectable) {
+          var li = gitEl(selectable ? 'label' : 'li', 'git-file' + (selectable ? ' git-file--pick' : ''))
+          var letter = badgeLetter || entry.index || entry.worktree || '?'
+          if (letter === '.') letter = entry.worktree && entry.worktree !== '.' ? entry.worktree : 'M'
+
+          if (selectable) {
+            var box = document.createElement('input')
+            box.type = 'checkbox'
+            box.className = 'git-pick'
+            box.checked = git.selected[entry.path] === true
+            box.setAttribute('aria-label', 'Include ' + entry.path + ' in the commit')
+            box.addEventListener('change', function () {
+              setGitSelected(entry.path, box.checked === true)
+              renderGit()
+            })
+            li.appendChild(box)
+          }
+
+          li.appendChild(gitEl('span', 'git-badge ' + (GIT_BADGE_CLASS[letter] || ''), letter))
+          li.appendChild(gitEl('span', 'git-path', entry.path))
+          li.setAttribute('title', entry.path)
+          return li
+        }
+
+        function gitSection(title, entries, badgeLetter, selectable) {
+          var box = gitEl('div', 'git-section')
+          var head = gitEl('div', 'git-section-head')
+          head.appendChild(gitEl('span', null, title))
+          head.appendChild(gitEl('span', 'git-count', entries.length))
+          box.appendChild(head)
+
+          if (!entries.length) {
+            box.appendChild(gitEl('div', 'git-empty', 'none'))
+            return box
+          }
+          var list = gitEl('ul', 'git-list')
+          entries.forEach(function (entry) {
+            list.appendChild(gitFileRow(entry, badgeLetter, selectable))
+          })
+          box.appendChild(list)
+          return box
+        }
+
+        /** One repaint entry point: the status body, commit box and push button. */
+        function renderGit() {
+          paintGit()
+          renderGitCommit()
+          renderGitPush()
+        }
+
+        function paintGit() {
+          if (!gitBodyEl) return
+
+          // toolbar: a refresh with content on screen keeps that content and
+          // just marks itself busy; the first load shows the spinner instead.
+          if (gitRefreshBtn) {
+            if (git.loading || git.committing) gitRefreshBtn.classList.add('icon-btn--busy')
+            else gitRefreshBtn.classList.remove('icon-btn--busy')
+          }
+          if (git.committing) {
+            /* A commit keeps the status it is replacing on screen. */
+            gitStateChip.className = 'chip chip--live'
+            gitStateText.textContent = 'Committing…'
+            gitMetaEl.textContent = 'staging + committing the ticked files'
+            gitBranchTextEl.textContent = gitBranchLabel(git.data)
+          } else if (git.loading) {
+            gitStateChip.className = 'chip' + (git.data ? '' : ' chip--live')
+            gitStateText.textContent = git.data ? 'Refreshing…' : 'Loading'
+            if (!git.data) gitBranchTextEl.textContent = '…'
+          }
+
+          while (gitBodyEl.firstChild) gitBodyEl.removeChild(gitBodyEl.firstChild)
+
+          if (git.loading && !git.data) {
+            var loading = gitEl('div', 'git-empty')
+            loading.appendChild(gitEl('span', 'spinner'))
+            loading.appendChild(document.createTextNode(' reading git status…'))
+            gitBodyEl.appendChild(loading)
+            return
+          }
+
+          if (git.error) {
+            gitStateChip.className = 'chip chip--warn'
+            gitStateText.textContent = 'Error'
+            var errBox = gitEl('div', 'git-section')
+            var errHead = gitEl('div', 'git-section-head')
+            errHead.appendChild(gitEl('span', null, 'Git error'))
+            errBox.appendChild(errHead)
+            errBox.appendChild(gitEl('div', 'git-empty', git.error))
+            gitBodyEl.appendChild(errBox)
+            return
+          }
+
+          var data = git.data
+          if (!data) return
+
+          /* Tolerate partial payloads (error / unavailable) so the panel can
+             never throw while rendering. */
+          data.counts = data.counts || { staged: 0, modified: 0, untracked: 0, conflicted: 0 }
+          data.files = data.files || { staged: [], modified: [], untracked: [], conflicted: [], truncated: false }
+
+          if (!data.available) {
+            gitBranchTextEl.textContent = 'no git'
+            gitStateChip.className = 'chip chip--warn'
+            gitStateText.textContent = 'Unavailable'
+            gitBodyEl.appendChild(gitEl('div', 'git-empty', data.message || 'Git is not available'))
+            gitBodyEl.appendChild(
+              gitEl('div', 'git-empty', 'Install Git and reopen the project to see repository status here.')
+            )
+            return
+          }
+
+          if (!data.isRepo) {
+            gitBranchTextEl.textContent = 'not a repo'
+            gitStateChip.className = 'chip chip--warn'
+            gitStateText.textContent = 'Not a Git repository'
+            gitBodyEl.appendChild(
+              gitEl('div', 'git-empty', data.message || 'HPOS-Desktop is not inside a Git repository')
+            )
+            gitBodyEl.appendChild(
+              gitEl('div', 'git-empty', 'git init inside HPOS-Desktop (or its parent) to track changes here.')
+            )
+            return
+          }
+
+          if (data.error) {
+            gitStateChip.className = 'chip chip--warn'
+            gitStateText.textContent = 'Error'
+            gitBodyEl.appendChild(gitEl('div', 'git-empty', data.message || 'Could not read the Git status'))
+            if (data.detail) gitBodyEl.appendChild(gitEl('div', 'git-empty', data.detail))
+            return
+          }
+
+          // toolbar state — left alone while a refresh is in flight so the
+          // busy indicator stays visible.
+          var branchLabel = gitBranchLabel(data)
+          if (!git.loading && !git.committing) {
+            gitBranchTextEl.textContent = branchLabel
+            var stateText = data.conflicted ? 'Conflicts' : data.clean ? 'Clean' : 'Changes'
+            gitStateChip.className = 'chip' + (data.clean && !data.conflicted ? ' chip--live' : ' chip--warn')
+            gitStateText.textContent = stateText
+            gitMetaEl.textContent = data.clean ? 'working tree clean' : 'local commit · push upstream'
+          }
+
+          // the commit this window just made, shown above the fresh status
+          if (git.lastCommit) {
+            var fresh = gitEl('div', 'git-commit git-commit--new')
+            fresh.appendChild(gitEl('span', 'hash', git.lastCommit.short || String(git.lastCommit.hash || '').slice(0, 7)))
+            fresh.appendChild(gitEl('span', 'subject', git.lastCommit.subject || git.lastCommit.message || ''))
+            fresh.appendChild(
+              gitEl('span', 'who', (git.lastCommit.files ? git.lastCommit.files.length + ' file(s)' : 'committed'))
+            )
+            fresh.appendChild(gitEl('span', 'git-just', 'just committed'))
+            fresh.setAttribute(
+              'title',
+              String(git.lastCommit.hash || '') +
+                '\n' +
+                String(git.lastCommit.subject || '') +
+                (git.lastCommit.files ? '\n\n' + git.lastCommit.files.join('\n') : '')
+            )
+            gitBodyEl.appendChild(fresh)
+          }
+
+          // push target + ahead/behind + last push outcome
+          var pushBar = gitPushBar()
+          if (pushBar) gitBodyEl.appendChild(pushBar)
+
+          // repository facts
+          var grid = gitEl('dl', 'git-grid')
+          gitRow('branch', branchLabel).forEach(function (el) { grid.appendChild(el) })
+          gitRow('state', data.conflicted ? 'merge conflicts present' : data.clean ? 'clean working tree' : 'uncommitted changes')
+            .forEach(function (el) { grid.appendChild(el) })
+          gitRow('repository', data.projectIsRepoRoot
+            ? 'HPOS-Desktop is the repository root'
+            : 'HPOS-Desktop inside ' + data.repoRoot).forEach(function (el) { grid.appendChild(el) })
+          gitRow('upstream', data.upstream || 'not configured').forEach(function (el) { grid.appendChild(el) })
+          if (data.upstream) {
+            gitRow('ahead/behind', '+' + data.ahead + ' / -' + data.behind).forEach(function (el) { grid.appendChild(el) })
+          }
+          gitRow('remote', data.remote ? data.remote.name + ' · ' + data.remote.url : 'no remote configured')
+            .forEach(function (el) { grid.appendChild(el) })
+          gitRow('changes', String(data.counts.staged + data.counts.modified + data.counts.untracked + data.counts.conflicted))
+            .forEach(function (el) { grid.appendChild(el) })
+          gitBodyEl.appendChild(grid)
+
+          // latest local commit
+          if (data.lastCommit) {
+            var commit = gitEl('div', 'git-commit')
+            commit.appendChild(gitEl('span', 'hash', data.lastCommit.short))
+            commit.appendChild(gitEl('span', 'subject', data.lastCommit.subject))
+            commit.appendChild(gitEl('span', 'who', data.lastCommit.author + ' · ' + data.lastCommit.relative))
+            commit.setAttribute('title', data.lastCommit.hash + '\n' + data.lastCommit.subject)
+            gitBodyEl.appendChild(commit)
+          } else {
+            gitBodyEl.appendChild(gitEl('div', 'git-empty', 'No commits in this repository yet (unborn HEAD).'))
+          }
+
+          // working tree — every row here is tickable for the commit below
+          gitBodyEl.appendChild(gitSection('Modified', data.files.modified, null, true))
+          gitBodyEl.appendChild(gitSection('Untracked', data.files.untracked, '?', true))
+          if (data.files.staged.length) gitBodyEl.appendChild(gitSection('Staged', data.files.staged, null, true))
+          if (data.files.conflicted.length) {
+            gitBodyEl.appendChild(gitSection('Conflicts', data.files.conflicted, 'U', true))
+          }
+          if (data.files.truncated) {
+            gitBodyEl.appendChild(gitEl('div', 'git-empty', 'Listing truncated — showing the first 200 entries per group.'))
+          }
+        }
+
+        /* ------------------------------------------------------- commit box
+           The renderer sends two things and nothing else: the message the user
+           typed and the paths they ticked. It never builds a command, never
+           names a flag or a directory, and shows whatever the main process
+           reports back. */
+        function renderGitCommit() {
+          if (!gitCommitBox) return
+
+          var data = git.data
+          var usable = !!(data && data.available && data.isRepo && !data.error)
+          var paths = gitSelectablePaths()
+          var chosen = selectedGitPaths()
+          var message = gitMessageEl ? String(gitMessageEl.value || '') : ''
+
+          /* Nothing to commit into — no repo, no git, a broken status, or a
+             clean tree. After a commit the new commit itself is reported by
+             the "just committed" strip in the status body, so the box can go
+             away with the last changed file. */
+          var worthShowing = usable && (paths.length > 0 || git.committing || !!git.commitError)
+          if (!worthShowing) {
+            gitCommitBox.setAttribute('hidden', '')
+            return
+          }
+          gitCommitBox.removeAttribute('hidden')
+
+          if (gitSelectionEl) {
+            if (!paths.length) gitSelectionEl.textContent = 'no changed files'
+            else if (!chosen.length) gitSelectionEl.textContent = '0 of ' + paths.length + ' selected'
+            else gitSelectionEl.textContent = chosen.length + ' of ' + paths.length + ' selected'
+          }
+
+          if (gitSelectAllBtn) {
+            var all = paths.length > 0 && chosen.length === paths.length
+            gitSelectAllBtn.textContent = all ? 'Clear' : 'Select all'
+            gitSelectAllBtn.setAttribute('title', all ? 'Untick every changed file' : 'Tick every changed file')
+            if (git.committing || !paths.length) gitSelectAllBtn.setAttribute('disabled', '')
+            else gitSelectAllBtn.removeAttribute('disabled')
+          }
+
+          if (gitCommitBtn) {
+            var ready = chosen.length > 0 && message.trim() !== '' && !git.committing
+            if (ready) gitCommitBtn.removeAttribute('disabled')
+            else gitCommitBtn.setAttribute('disabled', '')
+            gitCommitBtn.setAttribute(
+              'title',
+              git.committing
+                ? 'Commit in progress'
+                : chosen.length === 0
+                ? 'Tick at least one file'
+                : message.trim() === ''
+                ? 'Write a commit message'
+                : 'Stage and commit the ticked files'
+            )
+          }
+          if (gitCommitBtnText) gitCommitBtnText.textContent = git.committing ? 'Committing…' : 'Commit'
+
+          if (!gitCommitNoteEl) return
+          gitCommitNoteEl.className = 'git-commit-note'
+          if (git.committing) {
+            gitCommitNoteEl.textContent = 'committing ' + chosen.length + ' file(s)…'
+          } else if (git.commitError) {
+            gitCommitNoteEl.classList.add('git-commit-note--err')
+            gitCommitNoteEl.textContent = git.commitError
+          } else if (git.lastCommit) {
+            gitCommitNoteEl.classList.add('git-commit-note--ok')
+            gitCommitNoteEl.textContent =
+              'committed ' + (git.lastCommit.short || '') + ' — ' + (git.lastCommit.subject || '')
+          } else {
+            gitCommitNoteEl.textContent = 'stages the ticked files only · no push'
+          }
+        }
+
+        function toggleGitSelectionAll() {
+          var paths = gitSelectablePaths()
+          var next = {}
+          if (selectedGitPaths().length < paths.length) {
+            paths.forEach(function (p) {
+              next[p] = true
+            })
+          }
+          git.selected = next
+          git.commitError = null
+          renderGit()
+        }
+
+        /**
+         * Commit the ticked files. The two arguments below are the whole
+         * request: a message string and an array of project-relative paths.
+         * Every check here is a courtesy repeat of one the main process makes
+         * for real — the renderer is not trusted with any of them.
+         */
+        function commitGitSelected() {
+          if (!gitCommitBtn || git.committing) return Promise.resolve()
+
+          var message = gitMessageEl ? String(gitMessageEl.value || '') : ''
+          var files = selectedGitPaths()
+
+          if (!bridge || typeof bridge.gitCommit !== 'function') {
+            git.commitError = 'This preload build has no commit bridge.'
+            renderGit()
+            logLine(consoleEl, 'err', '[git] commit FAILED — no commit bridge in this window')
+            return Promise.resolve()
+          }
+          if (!files.length) {
+            git.commitError = 'Tick at least one file to commit.'
+            renderGit()
+            return Promise.resolve()
+          }
+          if (message.trim() === '') {
+            git.commitError = 'Write a commit message before committing.'
+            renderGit()
+            return Promise.resolve()
+          }
+
+          git.committing = true
+          git.commitError = null
+          git.lastCommit = null
+          renderGit()
+
+          return bridge.gitCommit(message, files).then(
+            function (result) {
+              git.committing = false
+
+              if (!result || !result.ok) {
+                git.commitError = (result && result.error) || 'Commit failed'
+                if (result && result.status) {
+                  git.data = result.status
+                  pruneGitSelection()
+                }
+                renderGit()
+                var code = result && result.code ? ' [' + result.code + ']' : ''
+                var where = result && result.stage ? ' during ' + result.stage : ''
+                logLine(consoleEl, 'err', '[git] commit FAILED' + code + where + ' — ' + git.commitError)
+                return
+              }
+
+              /* Success: show the new commit, then the refreshed status that
+                 came back with it (and confirm with a live re-read). */
+              git.lastCommit = result.commit || null
+              if (result.status) git.data = result.status
+              pruneGitSelection()
+              if (gitMessageEl) gitMessageEl.value = ''
+              renderGit()
+
+              var short = git.lastCommit && git.lastCommit.short ? git.lastCommit.short : '(new commit)'
+              var subject = git.lastCommit && git.lastCommit.subject ? git.lastCommit.subject : message
+              logLine(
+                consoleEl,
+                'ok',
+                '[git] committed ' + short + ' — ' + subject + ' (' + files.length + ' file(s): ' + files.join(', ') + ')'
+              )
+              logLine(termEl, 'ok', '$ hpos commit -m "' + message.split('\n')[0] + '" → ' + short)
+              emit('hpos:commit', {
+                commit: git.lastCommit,
+                files: files,
+                message: message,
+                persisted: true,
+              })
+              refreshGit({ quiet: true })
+            },
+            function (err) {
+              git.committing = false
+              git.commitError = err && err.message ? err.message : String(err)
+              renderGit()
+              logLine(consoleEl, 'err', '[git] commit FAILED — ' + git.commitError)
+            }
+          )
+        }
+
+        /* ------------------------------------------------------- push row
+           Shows where a push would go, how far ahead/behind the branch is, and
+           the outcome of the last push. The renderer supplies nothing: the
+           target and the counts all come from the main process payload. */
+        function gitPushBar() {
+          var data = git.data
+          if (!data || !data.available || !data.isRepo || data.error) return null
+
+          var upstream = data.upstream || ''
+          var ahead = Number(data.ahead) || 0
+          var behind = Number(data.behind) || 0
+
+          var bar = gitEl('div', 'git-push-bar')
+          bar.appendChild(gitEl('span', 'git-push-label', 'push target'))
+
+          var target = gitEl('span', 'git-target' + (upstream ? '' : ' git-target--none'), upstream || 'no upstream configured')
+          target.setAttribute('title', upstream
+            ? 'The branch upstream a push would go to'
+            : 'No upstream branch is configured for this branch')
+          bar.appendChild(target)
+
+          var state = gitEl('span', 'git-push-state')
+          if (behind > 0) {
+            state.classList.add('git-push-state--warn')
+            state.textContent = behind + ' behind'
+          } else if (ahead > 0) {
+            state.classList.add('git-push-state--ahead')
+            state.textContent = ahead + ' to push'
+          } else if (upstream) {
+            state.textContent = 'up to date'
+          } else {
+            state.textContent = 'nothing to push'
+          }
+          bar.appendChild(state)
+
+          var note = gitEl('span', 'git-push-note')
+          if (git.push.running) {
+            note.classList.add('git-push-note--busy')
+            note.textContent = 'pushing ' + (upstream || 'the current branch') + '…'
+          } else if (git.push.error) {
+            note.classList.add('git-push-note--err')
+            note.textContent = git.push.error + (git.push.detail ? ' — ' + git.push.detail : '')
+            note.setAttribute('title', git.push.error + (git.push.detail ? '\n\n' + git.push.detail : ''))
+          } else if (git.push.message) {
+            note.classList.add('git-push-note--ok')
+            note.textContent = git.push.message
+          } else if (!upstream) {
+            note.textContent = 'set an upstream first: git push -u <remote> ' + (data.branch || 'branch')
+          } else {
+            note.textContent = 'uses your configured Git credentials'
+          }
+          bar.appendChild(note)
+          return bar
+        }
+
+        /**
+         * One predicate decides both whether the button is enabled and whether a
+         * click starts a push — a disabled button and the code path behind it can
+         * never disagree. Being behind blocks it too: the main process refuses
+         * that case (HPOS never force-pushes), so the UI does not pretend.
+         */
+        function pushBlocked() {
+          var data = git.data
+          var usable = !!(data && data.available && data.isRepo && !data.error)
+          var upstream = usable ? data.upstream : null
+          var behind = Number(data && data.behind) || 0
+          return !usable || !upstream || behind > 0 || git.push.running || git.committing
+        }
+
+        /** The Push button: enabled only when a push could actually be attempted. */
+        function renderGitPush() {
+          if (!gitPushBtn) return
+          var data = git.data
+          var usable = !!(data && data.available && data.isRepo && !data.error)
+          var upstream = usable ? data.upstream : null
+          var ahead = Number(data && data.ahead) || 0
+          var behind = Number(data && data.behind) || 0
+
+          if (gitPushTextEl) gitPushTextEl.textContent = git.push.running ? 'Pushing…' : 'Push'
+          if (git.push.running) gitPushBtn.classList.add('icon-btn--busy')
+          else gitPushBtn.classList.remove('icon-btn--busy')
+
+          if (pushBlocked()) gitPushBtn.setAttribute('disabled', '')
+          else gitPushBtn.removeAttribute('disabled')
+
+          var why
+          if (git.push.running) why = 'Push in progress'
+          else if (git.committing) why = 'Wait for the commit to finish'
+          else if (!usable) why = 'Open a Git repository first'
+          else if (!upstream) why = 'No upstream configured — set one in a terminal first'
+          else if (behind > 0) why = 'The upstream has commits you do not have — HPOS never force-pushes'
+          else if (ahead === 0) why = 'Everything is already up to date'
+          else why = 'Push ' + (data.branch || 'this branch') + ' to ' + upstream
+          gitPushBtn.setAttribute('title', why)
+        }
+
+        /**
+         * Ask the main process to push. The call carries no arguments at all —
+         * no remote, no URL, no branch, no refspec, no credential. The main
+         * process decides the branch from HEAD and the remote from the branch's
+         * configured upstream, then reports what happened (and a fresh status).
+         */
+        function pushGitBranch() {
+          if (!gitPushBtn || pushBlocked()) return Promise.resolve()
+
+          if (!bridge || typeof bridge.gitPush !== 'function') {
+            git.push.error = 'This preload build has no push bridge.'
+            git.push.detail = null
+            git.push.message = null
+            renderGit()
+            logLine(consoleEl, 'err', '[git] push FAILED — no push bridge in this window')
+            return Promise.resolve()
+          }
+
+          git.push.running = true
+          git.push.error = null
+          git.push.detail = null
+          git.push.message = null
+          renderGit()
+
+          return bridge.gitPush().then(
+            function (result) {
+              git.push.running = false
+
+              if (!result || !result.ok) {
+                var code = (result && result.code) || 'EPUSH'
+                git.push.error = (result && result.error) || 'Push failed'
+                /* already scrubbed of credentials by the main process */
+                git.push.detail = (result && result.detail) || null
+                if (result && result.status) {
+                  git.data = result.status
+                  pruneGitSelection()
+                }
+                renderGit()
+                logLine(consoleEl, 'err', '[git] push FAILED [' + code + '] — ' + git.push.error)
+                logLine(termEl, 'err', '$ hpos push [' + code + '] ' + git.push.error)
+                return
+              }
+
+              if (result.status) {
+                git.data = result.status
+                pruneGitSelection()
+              }
+              git.push.message = result.upToDate
+                ? 'already up to date — nothing to push'
+                : 'pushed ' + (result.branch || 'branch') + ' → ' + (result.upstream || 'upstream')
+              renderGit()
+
+              var refs = result.report && result.report.summaries ? result.report.summaries.join(' · ') : ''
+              logLine(
+                consoleEl,
+                'ok',
+                '[git] ' + git.push.message + (refs ? ' (' + refs + ')' : '') +
+                  (result.ahead ? ' · ' + result.ahead + ' commit(s) sent' : '')
+              )
+              logLine(termEl, 'ok', '$ hpos push → ' + (result.upstream || 'upstream'))
+              emit('hpos:push', {
+                pushed: !!result.pushed,
+                upToDate: !!result.upToDate,
+                branch: result.branch || null,
+                upstream: result.upstream || null,
+                ahead: Number(result.ahead) || 0,
+                behind: Number(result.behind) || 0,
+                status: result.status || null,
+              })
+              /* confirm the new ahead/behind with a live read */
+              refreshGit({ quiet: true })
+            },
+            function (err) {
+              git.push.running = false
+              git.push.error = err && err.message ? err.message : String(err)
+              git.push.detail = null
+              renderGit()
+              logLine(consoleEl, 'err', '[git] push FAILED — ' + git.push.error)
+            }
+          )
+        }
+
+        function refreshGit(options) {
+          /* An explicit refresh is also how a user clears a stale push note: the
+             note belongs to the attempt, not to the status that replaces it. The
+             quiet confirmation that follows a successful push keeps it. */
+          if (!options || options.quiet !== true) {
+            git.push.error = null
+            git.push.detail = null
+            git.push.message = null
+          }
+          if (!gitBodyEl) return Promise.resolve()
+          if (!bridge || typeof bridge.gitStatus !== 'function') {
+            git.data = { available: true, isRepo: false, message: 'This preload build has no Git bridge.' }
+            git.loading = false
+            renderGit()
+            return Promise.resolve()
+          }
+          if (git.loading) return Promise.resolve()
+
+          // A fresh request supersedes the previous outcome, so the in-flight
+          // state is never masked by a stale error chip.
+          git.loading = true
+          git.error = null
+          if (!(options && options.quiet)) renderGit()
+
+          return bridge.gitStatus().then(
+            function (result) {
+              git.loading = false
+              git.loaded = true
+              git.error = null
+              if (!result || !result.ok) {
+                git.error = (result && result.error) || 'Git status failed'
+              } else {
+                git.data = result
+                pruneGitSelection()   // drop ticks for paths that are gone
+              }
+              renderGit()
+              if (!(options && options.quiet)) {
+                logLine(consoleEl, 'out', '[git] ' + gitSummary())
+              }
+            },
+            function (err) {
+              git.loading = false
+              git.error = err && err.message ? err.message : String(err)
+              renderGit()
+              logLine(consoleEl, 'err', '[git] status failed — ' + git.error)
+            }
+          )
+        }
+
+        function maybeRefreshGit() {
+          // Cheap and local, but only worth doing when the panel is on screen.
+          if (!gitBodyEl || gitBodyEl.offsetParent === null) return
+          if (!(git.loading || git.loaded)) refreshGit({ quiet: true })
+          else refreshGit({ quiet: true })
+        }
+
+        /* ================================================================
+           Bottom panel tabs
+           ================================================================ */
+        var PANES = [
+          { key: 'terminal', button: 'tabTerminal', pane: 'paneTerminal' },
+          { key: 'console', button: 'tabConsole', pane: 'paneConsole' },
+          { key: 'problems', button: 'tabProblems', pane: 'paneProblems' },
+          { key: 'github', button: 'tabGitHub', pane: 'paneGitHub' },
+        ]
+
+        var PANE_NOTES = {
+          terminal: 'static log · no shell attached',
+          console: 'bridge activity',
+          problems: 'UI placeholder · no diagnostics yet',
+          github: 'local commit · push upstream',
+        }
+
+        function showPane(key) {
+          if (paneNoteEl && PANE_NOTES[key]) paneNoteEl.textContent = PANE_NOTES[key]
+          if (key === 'github') refreshGit()
+          PANES.forEach(function (entry) {
+            var on = entry.key === key
+            var button = byId(entry.button)
+            var pane = byId(entry.pane)
+            if (button) {
+              button.className = 'panel-tab' + (on ? ' panel-tab--on' : '')
+              button.setAttribute('aria-selected', on ? 'true' : 'false')
+            }
+            if (!pane) return
+            if (on) pane.removeAttribute('hidden')
+            else pane.setAttribute('hidden', '')
+          })
+        }
+
+        /* ================================================================
+           Wiring
+           ================================================================ */
+        editor.addEventListener('input', function () {
+          markEdited()
+          refresh()
+        })
+
+        editor.addEventListener('scroll', syncScroll)
+
+        editor.addEventListener('focus', function () {
+          tabEscape = false
+          renderCaret()
+        })
+
+        editor.addEventListener('blur', function () {
+          activeLineEl.style.opacity = '0'
+        })
+
+        editor.addEventListener('click', renderCaret)
+        editor.addEventListener('keyup', function (e) {
+          var keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']
+          if (keys.indexOf(e.key) !== -1) renderCaret()
+        })
+
+        editor.addEventListener('keydown', function (e) {
+          var mod = e.ctrlKey || e.metaKey
+
+          if (mod && (e.key === 's' || e.key === 'S')) {
+            e.preventDefault()
+            saveBuffer()
+            return
+          }
+          if (mod && e.key === 'Enter') {
+            e.preventDefault()
+            runBuffer()
+            return
+          }
+          if (e.key === 'Escape') {
+            tabEscape = true
+            return
+          }
+          if (e.key === 'Tab') {
+            if (tabEscape) return
+            e.preventDefault()
+            reindent(e.shiftKey ? -1 : 1)
+            return
+          }
+          if (e.key === 'Enter' && !e.shiftKey && !mod && !e.altKey) {
+            e.preventDefault()
+            autoIndent()
+          }
+        })
+
+        /* Clicking the code area or a gutter number moves the caret. */
+        byId('codeView').addEventListener('mousedown', function (e) {
+          if (e.target === editor || e.target === hlCode) return
+          if (editor.focus) editor.focus()
+        })
+
+        byId('gutter').addEventListener('click', function (e) {
+          var node = e.target
+          var index = 0
+          while (node && node !== gutterEl) {
+            if (node.classList && node.classList.contains('ln')) break
+            node = node.parentNode
+            index += 1
+          }
+          if (!node || node === gutterEl) return
+          var n = parseInt(node.textContent, 10)
+          if (isNaN(n) || n < 1) return
+          var lines = editor.value.split('\n')
+          var offset = 0
+          for (var i = 0; i < n - 1 && i < lines.length; i++) offset += lines[i].length + 1
+          if (editor.focus) editor.focus()
+          if (editor.setSelectionRange) editor.setSelectionRange(offset, offset)
+          renderCaret()
+        })
+
+        /* Explorer filter (the toolbar search box) + tree interactions.
+           Filtering only hides rows that are already listed, so it never
+           triggers a filesystem call. */
+        function treeRows() {
+          var rows = []
+          var all = treeRootEl ? treeRootEl.getElementsByTagName('div') : []
+          for (var i = 0; i < all.length; i++) {
+            if (all[i].getAttribute && all[i].getAttribute('data-path') !== null) rows.push(all[i])
+          }
+          return rows
+        }
+
+        function filterTree() {
+          var query = cmdInput.value.trim().toLowerCase()
+          var rows = treeRows()
+          for (var i = 0; i < rows.length; i++) {
+            var row = rows[i]
+            var label = (row.textContent || '').toLowerCase()
+            if (!query) row.classList.remove('node--hide')
+            else if (label.indexOf(query) === -1) row.classList.add('node--hide')
+            else row.classList.remove('node--hide')
+          }
+        }
+
+        function closestRow(node) {
+          var cur = node
+          while (cur && cur !== treeRootEl) {
+            if (cur.getAttribute && cur.getAttribute('data-path') !== null) return cur
+            cur = cur.parentNode
+          }
+          return null
+        }
+
+        if (treeRootEl) {
+          treeRootEl.addEventListener('click', function (event) {
+            var row = closestRow(event.target)
+            if (!row) return
+            var path = row.getAttribute('data-path')
+            var kind = row.getAttribute('data-kind')
+            if (kind === 'directory') {
+              var state = dirState(path)
+              state.expanded = !state.expanded
+              if (state.expanded && !state.loaded) loadDir(path)
+              else renderTree()
+              return
+            }
+            openPath(path, true)
+          })
+        }
+
+        if (refreshBtn) refreshBtn.addEventListener('click', refreshExplorer)
+
+        if (gitRefreshBtn) {
+          gitRefreshBtn.addEventListener('click', function () {
+            refreshGit({ quiet: false })
+          })
+        }
+
+        if (gitPushBtn) {
+          gitPushBtn.addEventListener('click', function () {
+            pushGitBranch()
+          })
+        }
+
+        /* Commit box: a message, a file selection and one button. */
+        if (gitCommitBtn) {
+          gitCommitBtn.addEventListener('click', function () {
+            commitGitSelected()
+          })
+        }
+        if (gitSelectAllBtn) {
+          gitSelectAllBtn.addEventListener('click', function () {
+            toggleGitSelectionAll()
+          })
+        }
+        if (gitMessageEl) {
+          gitMessageEl.addEventListener('input', function () {
+            git.commitError = null
+            renderGitCommit()
+          })
+          gitMessageEl.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+              e.preventDefault()
+              commitGitSelected()
+            }
+          })
+        }
+
+        if (previewToggleBtn) {
+          previewToggleBtn.addEventListener('click', function () {
+            if (preview.running) stopPreview()
+            else startPreview()
+          })
+        }
+        if (previewReloadBtn) previewReloadBtn.addEventListener('click', function () { reloadPreview('manual') })
+        if (previewFrame) {
+          // A failed navigation (server stopped, bad port) shows an inline notice.
+          previewFrame.addEventListener('load', function () {
+            if (!preview.running) return
+            logLine(consoleEl, 'out', '[preview] frame loaded ' + preview.url)
+          })
+        }
+        ;['deviceDesktop', 'deviceTablet', 'deviceMobile'].forEach(function (id) {
+          var el = byId(id)
+          if (!el) return
+          el.addEventListener('click', function () {
+            setDeviceWidth(Number(el.getAttribute('data-width')) || 0)
+          })
+        })
+
+        if (noticeActionEl) {
+          noticeActionEl.addEventListener('click', function () {
+            if (lastOpenAttempt) openPath(lastOpenAttempt, true)
+            else hideNotice()
+          })
+        }
+
+        cmdInput.addEventListener('input', filterTree)
+        cmdInput.addEventListener('keydown', function (e) {
+          if (e.key !== 'Escape') return
+          cmdInput.value = ''
+          filterTree()
+          if (cmdInput.blur) cmdInput.blur()
+        })
+
+        document.addEventListener('keydown', function (e) {
+          if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault()
+            if (cmdInput.focus) cmdInput.focus()
+          }
+        })
+
+        runBtn.addEventListener('click', runBuffer)
+
+        PANES.forEach(function (entry) {
+          var button = byId(entry.button)
+          if (button) {
+            button.addEventListener('click', function () {
+              showPane(entry.key)
+            })
+          }
+        })
+
+        /* Keep the overlay glued to the textarea when the window resizes. */
+        window.addEventListener('resize', syncScroll)
+
+        /* ------------------------------------------------------------ boot
+           Nothing is read from disk until the bridge says it is available:
+           bootFilesystem() lists HPOS-Desktop and opens a real file, or falls
+           back to a single scratch buffer when running in a plain browser. */
+        renderTabStrip()
+        renderSaveState()
+        renderFileInfo()
+        renderTree()
+        setEditorVisible(false)
+
+        logLine(consoleEl, 'out', '[console] HPOS Code Arena ready — Explorer, tabs and saves use the preload bridge')
+        logLine(consoleEl, 'out', '[console] Ctrl+S save · Ctrl+Enter run · Tab indent · Ctrl+K filter files')
+        bootFilesystem()
+
+        renderGit()
+        refreshGit({ quiet: true })
+
+        renderPreview()
+        if (previewBridge) {
+          previewBridge.previewStatus().then(
+            function (result) {
+              applyPreviewStatus(result)
+              if (preview.running) logLine(consoleEl, 'ok', '[preview] already running on ' + preview.url)
+            },
+            function (err) {
+              logLine(consoleEl, 'info', '[preview] status unavailable — ' + (err && err.message ? err.message : String(err)))
+            }
+          )
+        } else if (bridge) {
+          logLine(consoleEl, 'info', '[preview] this preload build has no preview methods — Live Preview disabled')
+        }
+
+      })()
+    </script>
+  </body>
+</html>

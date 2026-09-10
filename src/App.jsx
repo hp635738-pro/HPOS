@@ -4,6 +4,7 @@ import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
 import ChatPage from './pages/ChatPage'
+import CodeArena from './pages/CodeArena'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 import { getBrowserBridge } from './lib/bridge'
@@ -92,19 +93,21 @@ export default function App() {
           runtimeStatusRef={runtimeStatusRef}
         />
 
-        {view === 'settings'
-          ? <Settings
-              jumpTo={advancedPage}
-              onJumped={() => setAdvancedPage(null)}
-            />
-          : view === 'aiagents'
-            ? <ChatPage
-              historyOpen={historyOpen}
-              onCloseHistory={() => setHistoryOpen(false)}
-              detailsOpen={runtimeDetailsOpen}
-              onBackFromDetails={closeRuntimeDetails}
-            />
-            : <Blank />}
+{view === 'settings'
+  ? <Settings
+      jumpTo={advancedPage}
+      onJumped={() => setAdvancedPage(null)}
+    />
+  : view === 'aiagents'
+    ? <ChatPage
+        historyOpen={historyOpen}
+        onCloseHistory={() => setHistoryOpen(false)}
+        detailsOpen={runtimeDetailsOpen}
+        onBackFromDetails={closeRuntimeDetails}
+      />
+    : view === 'codearena'
+      ? <CodeArena />
+      : <Blank />}
       </main>
 
       <CommandPalette

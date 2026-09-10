@@ -11,7 +11,7 @@ const DEV_URL = process.env.HPOS_DEV_URL || null
    anything that escapes it (../ traversal, absolute paths, symlinks, name
    tricks). Reads and writes are size-capped and never throw across IPC —
    failures come back as { ok: false, code, error } so the UI can show them. */
-const PROJECT_ROOT = __dirname
+const PROJECT_ROOT = path.resolve(__dirname, '..')
 const MAX_FILE_BYTES = 4 * 1024 * 1024
 const MAX_DIR_ENTRIES = 400
 /* Hidden entries are skipped so the explorer stays clean and a save's
@@ -1465,7 +1465,6 @@ async function pushGitBranchOnce() {
     )
   }
 }
-
 function registerFsBridge() {
   ipcMain.handle(CHANNEL_LIST, (event, dir) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
@@ -1497,27 +1496,50 @@ function registerFsBridge() {
     return previewStatusPayload()
   })
 
-  /* No arguments are accepted here on purpose: the renderer cannot name a
-     command, a flag, a path or a working directory. */
   ipcMain.handle(CHANNEL_GIT_STATUS, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return readGitStatus()
   })
 
-  /* The one channel that can change repository state. It takes a message and
-     a list of project-relative paths — no command, no flag, no directory —
-     and every one of them is validated in commitGitChanges() before the only
-     two allowlisted write commands (add, commit) are spawned. */
   ipcMain.handle(CHANNEL_GIT_COMMIT, (event, message, files) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return commitGitChanges(message, files)
   })
 
-  /* Push takes no renderer arguments at all: no remote, no URL, no refspec, no
-     branch and no working directory can be named from the renderer. */
   ipcMain.handle(CHANNEL_GIT_PUSH, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return pushGitBranch()
+  })
+
+  ipcMain.handle('hpos:open-code-arena', (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+
+    const parent = BrowserWindow.fromWebContents(event.sender)
+
+    const arena = new BrowserWindow({
+      width: 1440,
+      height: 900,
+      minWidth: 1000,
+      minHeight: 650,
+      title: 'HPOS Code Arena',
+      parent,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+
+    trustedContents.add(arena.webContents)
+
+    arena.on('closed', () => {
+      trustedContents.delete(arena.webContents)
+    })
+
+    arena.loadFile(path.join(__dirname, 'index.html'))
+
+    return { ok: true }
   })
 }
 
@@ -1531,7 +1553,6 @@ function createWindow() {
     backgroundColor: '#0f1013',
     show: false,
     webPreferences: {
-      // The bridge is the only way in or out of the renderer.
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -1539,11 +1560,9 @@ function createWindow() {
     },
   })
 
-  // Only renderers created here may talk to the fs bridge.
   const contents = win.webContents
   trustedContents.add(contents)
   contents.on('destroyed', () => trustedContents.delete(contents))
-
   return win
 }
 

@@ -3,7 +3,7 @@
  *
  * This is the only thing that stands between the renderer and the main
  * process. It runs with contextIsolation on and nodeIntegration off, and it
- * exposes exactly these nine functions — nothing else:
+ * exposes exactly these ten functions — nothing else:
  *
  *   window.hpos.listDirectory(dir)      -> { ok, path, relative, entries[], truncated }
  *   window.hpos.readFile(name)          -> { ok, name, path, relative, bytes, lines, content }
@@ -14,41 +14,23 @@
  *   window.hpos.gitStatus()             -> structured read-only Git state
  *   window.hpos.gitCommit(msg, files[]) -> { committed, commit, status, … }
  *   window.hpos.gitPush()               -> { pushed, ahead, behind, status, … }
+ *   window.hpos.openCodeArena()         -> opens Code Arena
  *
- * gitStatus() takes no arguments at all — the renderer cannot supply a
- * command, a flag, a path or a working directory. The main process runs
- * allowlisted read-only git commands (rev-parse/status/log/remote/rev-list) with
- * shell:false, always inside HPOS-Desktop, and returns parsed data.
+ * gitStatus() takes no arguments at all — there is nothing for the renderer
+ * to inject.
  *
- * gitCommit() is the only call that changes repository state and it accepts
- * exactly two things: a commit message string and an array of project-relative
- * file paths. There is no command, no flag, no branch and no working
- * directory to pass. The main process rejects empty/whitespace messages and
- * over-long ones, resolves every path through the same project-root gate the
- * fs bridge uses (no absolute paths, no '..', no symlink escapes, nothing
- * outside HPOS-Desktop), refuses files that do not exist, caps the list at 200
- * and then runs only `git add -- <paths>` and `git commit -- <paths>` —
- * a partial commit, so nothing that was not selected is included. No pull, no
- * fetch and no other subcommand is reachable through gitCommit(); pushing is
- * only ever reachable through gitPush() below, and only as `git push`.
+ * gitCommit() accepts exactly two things: a commit message string and an
+ * array of project-relative file paths. The main process validates them again.
  *
- * gitPush() takes no arguments either — the renderer cannot name a remote, a
- * URL, a branch, a refspec, a flag or a working directory; it can only ask
- * "push this repository". The main process pushes the checked-out branch to
- * the upstream configured for it in the user's own Git config, with
- * --no-force and a refspec it builds itself, and authentication is whatever
- * Git's configured credential helper or SSH key provides. Nothing here reads,
- * transports or stores a token, and no credential ever crosses this bridge.
+ * gitPush() takes no arguments either — the renderer can only ask the main
+ * process to push the repository.
  *
  * The preview methods take no path and no command: the renderer can start or
- * stop the main process's static server and read back its local URL, nothing
- * more. There is no child_process/shell access here, and none is needed —
- * the server is plain Node http owned by main.
+ * stop the main process's static server and read back its local URL.
  *
- * `dir` / `name` are always relative to the HPOS-Desktop project root. The
- * renderer has no way to name anything outside it: the main process resolves
- * every request, refuses traversal, absolute paths and symlink escapes, and
- * returns { ok: false, code, error } instead of throwing.
+ * `dir` / `name` are always relative to the HPOS project root. The main
+ * process resolves every request and rejects traversal, absolute paths and
+ * symlink escapes.
  *
  * Deliberately NOT exposed: `require`, `process`, `fs`, `path`, `ipcRenderer`,
  * any dynamic channel name, and any generic send/invoke passthrough.
@@ -70,7 +52,7 @@ const CHANNEL_GIT_PUSH = 'hpos:git:push'
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
-   * List the immediate children of a directory inside HPOS-Desktop.
+   * List the immediate children of a directory inside the HPOS project.
    * @param {string} dir project-relative folder ('' or '.' means the root)
    */
   listDirectory(dir) {
@@ -78,16 +60,16 @@ contextBridge.exposeInMainWorld('hpos', {
   },
 
   /**
-   * Read a file from the HPOS-Desktop project directory.
-   * @param {string} name file name, relative to HPOS-Desktop
+   * Read a file from the HPOS project directory.
+   * @param {string} name file name, relative to the project root
    */
   readFile(name) {
     return ipcRenderer.invoke(CHANNEL_READ, name)
   },
 
   /**
-   * Write a file inside the HPOS-Desktop project directory.
-   * @param {string} name file name, relative to HPOS-Desktop
+   * Write a file inside the HPOS project directory.
+   * @param {string} name file name, relative to the project root
    * @param {string} content full replacement contents
    */
   saveFile(name, content) {
@@ -95,8 +77,8 @@ contextBridge.exposeInMainWorld('hpos', {
   },
 
   /**
-   * Start the local Live Preview server (main process owns it).
-   * @param {number} [port] optional preferred port; falls back to a free one
+   * Start the local Live Preview server.
+   * @param {number} [port] optional preferred port
    */
   startPreview(port) {
     return ipcRenderer.invoke(CHANNEL_PREVIEW_START, port)
@@ -107,25 +89,22 @@ contextBridge.exposeInMainWorld('hpos', {
     return ipcRenderer.invoke(CHANNEL_PREVIEW_STOP)
   },
 
-  /** Current preview state: { running, url, port, host, root }. */
+  /** Current preview state. */
   previewStatus() {
     return ipcRenderer.invoke(CHANNEL_PREVIEW_STATUS)
   },
 
   /**
-   * Read-only Git status for HPOS-Desktop.
-   * Takes no arguments by design — there is nothing for the renderer to inject.
+   * Read-only Git status.
    */
   gitStatus() {
     return ipcRenderer.invoke(CHANNEL_GIT_STATUS)
   },
 
   /**
-   * Commit the listed files (project-relative) with the given message.
-   * Nothing else can be sent: the message is a string, the paths are an array
-   * of strings, and both are validated again in the main process.
+   * Commit selected project-relative files.
    * @param {string} message commit message
-   * @param {string[]} files project-relative paths to stage and commit
+   * @param {string[]} files project-relative paths
    */
   gitCommit(message, files) {
     return ipcRenderer.invoke(CHANNEL_GIT_COMMIT, message, files)
@@ -133,10 +112,15 @@ contextBridge.exposeInMainWorld('hpos', {
 
   /**
    * Push the current branch to its configured upstream.
-   * Takes no arguments by design — there is no remote, URL, branch, refspec or
-   * flag for the renderer to supply, and no credential is passed through here.
    */
   gitPush() {
     return ipcRenderer.invoke(CHANNEL_GIT_PUSH)
+  },
+
+  /**
+   * Open the existing HPOS Code Arena window.
+   */
+  openCodeArena() {
+    return ipcRenderer.invoke('hpos:open-code-arena')
   },
 })

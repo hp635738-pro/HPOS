@@ -14,9 +14,10 @@ export const NAV = [
     id: 'aianalyz',
     label: 'AI tools',
     Icon: Sparkle,
-    children: [
-      { id: 'aiagents', label: 'AI chats', Icon: Bot },
-    ],
+  children: [
+  { id: 'aiagents', label: 'AI chats', Icon: Bot },
+  { id: 'codearena', label: 'Code Arena', Icon: Bot },
+],
   },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
   { id: 'assistant', label: 'Assistant',      Icon: Ghost },

@@ -9,6 +9,7 @@
     "start:dev": "cross-env HPOS_DEV_URL=http://localhost:5173 electron ."
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^31.0.0"
   }
 }
