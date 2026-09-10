@@ -172,6 +172,170 @@ function rpcFetch(payloadFor) {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Browser "Illegal invocation" regression.
+
+   LocalRuntimeBridge captures the native fetch as its default (globalThis.fetch)
+   and invokes it through this instance (this._fetch(...) in _fetchUrl()). The
+   browser's fetch is a receiver-brand-checked Window native: calling it as a
+   method of the bridge (this._fetch(...)) throws `TypeError: Illegal
+   invocation`, which surfaced as a blank screen via
+   RuntimeConnectionController -> RuntimeActivityController -> useRuntimeActivity.
+   The fix binds the stored fetch to globalThis so the receiver is always
+   correct while keeping the injected-function test seam intact. Node's own fetch
+   tolerates a wrong receiver, so a browser-native-shaped brand-check is used to
+   lock the exact failure.
+   ------------------------------------------------------------------------ */
+
+/* Default/native fetch path: the bridge is built with the real platform fetch
+   (no injection) exactly as the browser singleton is, and must perform its
+   RPC without Illegal invocation. */
+{
+  const originalFetch = globalThis.fetch
+  let fetchCalls = 0
+  const brandCheckedDefault = async function (url, options) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation')
+    fetchCalls += 1
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(
+      request.requestId,
+      request.action === RUNTIME_ACTION.PING ? 'PONG' : request.action,
+      true,
+      { action: request.action },
+    ))
+  }
+  globalThis.fetch = brandCheckedDefault
+  try {
+    const bridge = new LocalRuntimeBridge()
+    const result = await bridge.ping()
+    assert(fetchCalls === 1, 'default fetch path: native fetch is invoked once')
+    assert(result.action === 'PING', 'default fetch path: PING succeeds with native fetch')
+    // health also must work with the bound native fetch
+    const healthFetchCallsBefore = fetchCalls
+    // Replace again to handle health's different response shape
+    globalThis.fetch = async function (url) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      fetchCalls += 1
+      assert(url === '/hpos-runtime/health', 'default fetch path: health uses fixed route')
+      return jsonResponse(200, { status: 'up', name: 'hpos-runtime' })
+    }
+    // Re-create bridge so its _fetch captures the new globalThis.fetch
+    const bridge2 = new LocalRuntimeBridge()
+    const health = await bridge2.health()
+    assert(health.status === 'up', 'default fetch path: health succeeds with native fetch')
+    assert(fetchCalls === healthFetchCallsBefore + 1, 'default fetch path: health invokes native fetch')
+    assert(true, 'default fetch path: native fetch with globalThis receiver does not throw')
+  } catch (err) {
+    assert(false, `default fetch path: native fetch threw ${err && err.message ? err.message : err}`)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
+/* Brand-checked injected fetch path that mirrors the browser's native Window.fetch.
+   A brand-checked function only accepts the global object as `this`; invoked
+   as a method of the bridge (pre-fix) it throws Illegal invocation. */
+{
+  const brandCheckedFetch = async function (url, options) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation')
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(
+      request.requestId,
+      request.action === RUNTIME_ACTION.PING ? 'PONG' : request.action,
+      true,
+      { action: request.action, brandChecked: true },
+    ))
+  }
+  const bridge = new LocalRuntimeBridge({ fetchImpl: brandCheckedFetch })
+  try {
+    const result = await bridge.ping()
+    assert(result.brandChecked === true, 'brand-checked fetch: PING succeeds without Illegal invocation')
+    assert(result.action === 'PING', 'brand-checked fetch: payload is correct')
+  } catch (err) {
+    assert(false, `brand-checked fetch: threw ${err && err.message ? err.message : err}`)
+  }
+  // Also verify RT_STATUS via same brand-checked fetch
+  const statusPayload = { status: 'up', tasks: {} }
+  const brandCheckedWithStatus = async function (url, options) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation')
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(request.requestId, request.action, true, statusPayload))
+  }
+  const bridge3 = new LocalRuntimeBridge({ fetchImpl: brandCheckedWithStatus })
+  try {
+    const s = await bridge3.getStatus()
+    assert(s.status === 'up', 'brand-checked fetch: RT_STATUS succeeds without Illegal invocation')
+  } catch (err) {
+    assert(false, `brand-checked fetch RT_STATUS threw ${err && err.message ? err.message : err}`)
+  }
+}
+
+/* Custom injection seam remains functional: plain functions, arrow functions,
+   and already-bound functions must still work, and non-function values are
+   preserved verbatim. */
+{
+  // Plain async function (no brand check) works
+  let plainCalls = 0
+  const plainFetch = async (url, options) => {
+    plainCalls += 1
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(request.requestId, 'PONG', true, { ok: true }))
+  }
+  const plainBridge = new LocalRuntimeBridge({ fetchImpl: plainFetch })
+  await plainBridge.ping()
+  assert(plainCalls === 1, 'custom seam: plain function fetch is still invoked')
+
+  // Arrow function seam
+  let arrowCalls = 0
+  const arrowFetch = async (url, options) => {
+    arrowCalls += 1
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(request.requestId, 'PONG', true, { arrow: true }))
+  }
+  const arrowBridge = new LocalRuntimeBridge({ fetchImpl: arrowFetch })
+  const arrowResult = await arrowBridge.ping()
+  assert(arrowCalls === 1 && arrowResult.arrow === true, 'custom seam: arrow function fetch works')
+
+  // Already-bound function remains functional after double-bind
+  let boundCalls = 0
+  function unboundFetch(url, options) {
+    boundCalls += 1
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(request.requestId, 'PONG', true, { bound: true }))
+  }
+  const preBound = unboundFetch.bind(null)
+  const boundBridge = new LocalRuntimeBridge({ fetchImpl: preBound })
+  const boundResult = await boundBridge.ping()
+  assert(boundCalls === 1 && boundResult.bound === true, 'custom seam: pre-bound fetch still works')
+
+  // Non-function fetchImpl is preserved (constructor must not throw on bind)
+  const nullBridge = new LocalRuntimeBridge({ fetchImpl: null })
+  assert(nullBridge._fetch === null, 'custom seam: null fetchImpl is preserved verbatim')
+  try {
+    await nullBridge.ping()
+    assert(false, 'custom seam: null fetch rejects with NOT_AVAILABLE')
+  } catch (err) {
+    assert(err.code === RUNTIME_ERROR.NOT_AVAILABLE, 'custom seam: null fetch maps to NOT_AVAILABLE')
+  }
+  const undefBridge = new LocalRuntimeBridge({ fetchImpl: undefined })
+  assert(typeof undefBridge._fetch === 'function', 'custom seam: undefined fetchImpl falls back to bound default fetch')
+  const zeroBridge = new LocalRuntimeBridge({ fetchImpl: 0 })
+  assert(zeroBridge._fetch === 0, 'custom seam: non-function fetchImpl is preserved verbatim')
+
+  // Verify that the stored fetch is indeed bound to globalThis (its `this` is
+  // globalThis even when called as a method of the bridge), without breaking
+  // the seam: an unbound plain function that checks `this` must see globalThis.
+  let receiver = null
+  const receiverCheckingFetch = function (url, options) {
+    receiver = this
+    const request = JSON.parse(options.body)
+    return jsonResponse(200, makeResponse(request.requestId, 'PONG', true, {}))
+  }
+  const receiverBridge = new LocalRuntimeBridge({ fetchImpl: receiverCheckingFetch })
+  await receiverBridge.ping()
+  assert(receiver === globalThis, 'custom seam: stored fetch is bound to globalThis')
+}
+
 /* The browser-facing module contains no endpoint-file or header credential boundary. */
 {
   const source = readFileSync(join(root, 'src/lib/bridge/LocalRuntimeBridge.js'), 'utf8')

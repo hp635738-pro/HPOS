@@ -83,7 +83,12 @@ function isHttpSuccess(status) {
  */
 export class LocalRuntimeBridge {
   constructor({ fetchImpl = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-    this._fetch = fetchImpl
+    /* Browser-safe fetch receiver. The native fetch (the default here) must be
+       invoked with the global object as its `this`; calling it as a method of
+       this instance throws `TypeError: Illegal invocation` in the browser.
+       Binding to globalThis fixes the receiver while keeping the
+       injected-function test seam intact. */
+    this._fetch = typeof fetchImpl === 'function' ? fetchImpl.bind(globalThis) : fetchImpl
     this._timeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
       ? Math.floor(timeoutMs)
       : DEFAULT_TIMEOUT_MS
