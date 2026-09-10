@@ -4,7 +4,6 @@ import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
-import ConversationList from './chat/ConversationList'
 
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
@@ -299,9 +298,6 @@ export default function Sidebar({ active, onChange }) {
                             {child.label}
                           </span>
                         </button>
-                        {child.id === 'aiagents' && (
-                          <ConversationList onOpen={() => onChange('aiagents')} />
-                        )}
                       </div>
                     )
                   })}

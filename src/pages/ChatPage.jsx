@@ -1,7 +1,8 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MessageList from '../components/chat/MessageList'
 import MessageComposer from '../components/chat/MessageComposer'
 import RuntimeDeepSeekStatus from '../components/chat/RuntimeDeepSeekStatus'
+import ChatHistorySidebar from '../components/chat/ChatHistorySidebar'
 import { createMessage } from '../lib/chat/mock'
 import {
   DEEPSEEK_RUNTIME_ERROR,
@@ -15,6 +16,8 @@ import {
   patchMessage,
   saveMessage,
 } from '../lib/storage/conversationStore.js'
+import { loadChatUiPrefs, saveChatUiPrefs } from '../lib/chat/chatUiPrefs.js'
+import { startNewChat } from '../lib/chat/history.js'
 
 /**
  * AI Chat → local runtime → supervised browser.deepseek task.
@@ -23,10 +26,19 @@ import {
  * execution path here. Every prompt is submitted once to the runtime and is
  * correlated by the pending assistant-message id. Streaming patches the same
  * persisted HPOS conversation even when the visible conversation changes.
+ *
+ * Layout: current conversation + composer on the left, dedicated chat history
+ * sidebar docked on the right (opposite the main navigation rail). Model and
+ * DeepThink are session-level UI state only — they are never sent anywhere.
  */
-export default function ChatPage() {
+export default function ChatPage({ historyOpen = true, onCloseHistory }) {
   const { ready, active } = useConversations()
   const inflight = useRef(null)
+  const [uiPrefs, setUiPrefs] = useState(() => loadChatUiPrefs())
+
+  useEffect(() => {
+    saveChatUiPrefs(uiPrefs)
+  }, [uiPrefs])
 
   const ensureConversation = () => {
     const existing = getActiveId()
@@ -178,21 +190,47 @@ export default function ChatPage() {
 
   return (
     <section style={S.page} aria-label="AI chats">
-      <MessageList
-        messages={messages}
-        empty={empty}
-        onSuggestion={send}
-        onStop={stop}
+      <div style={S.main}>
+        <MessageList
+          messages={messages}
+          empty={empty}
+          onSuggestion={send}
+          onStop={stop}
+        />
+        <RuntimeDeepSeekStatus />
+        <MessageComposer
+          key={active?.id || 'none'}
+          onSend={send}
+          model={uiPrefs.model}
+          onModelChange={(model) => setUiPrefs((p) => ({ ...p, model }))}
+          deepThink={uiPrefs.deepThink}
+          onDeepThinkChange={(deepThink) => setUiPrefs((p) => ({ ...p, deepThink }))}
+        />
+      </div>
+      <ChatHistorySidebar
+        open={historyOpen}
+        onClose={onCloseHistory}
+        onNewChat={() => startNewChat()}
       />
-      <RuntimeDeepSeekStatus />
-      <MessageComposer key={active?.id || 'none'} onSend={send} />
+      <button
+        type="button"
+        className="chat-history-scrim"
+        data-open={historyOpen ? 'true' : 'false'}
+        onClick={onCloseHistory}
+        aria-label="Close chat history"
+        tabIndex={-1}
+      />
     </section>
   )
 }
 
 const S = {
   page: {
-    flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
-    background: 'var(--bg)',
+    flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'row',
+    background: 'var(--bg)', position: 'relative',
+  },
+  main: {
+    flex: 1, minWidth: 0, minHeight: 0,
+    display: 'flex', flexDirection: 'column',
   },
 }

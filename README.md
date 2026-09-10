@@ -244,9 +244,9 @@ Header ka standalone **New chat** naya conversation create karta hai (`title: "N
 
 Pehli meaningful user message se title **local** truncate hota hai (koi API nahi): `"Explain quantum computing"` → wahi title.
 
-### Sidebar list
+### History sidebar
 
-AI tools → AI chats ke neeche conversations: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
+Conversations right-side Chat History panel mein rehte hain (header ke History toggle se open/close): New Chat sabse upar, phir Today / Yesterday / Earlier groups. Row: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
 
 Delete active conversation: remaining mein sabse recent active ho jaati hai. Last wali delete ho to “Start a new chat”.
 

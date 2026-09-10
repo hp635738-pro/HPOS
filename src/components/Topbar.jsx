@@ -1,5 +1,5 @@
 import { useTheme } from '../theme/ThemeContext'
-import { Sun, Moon, Plus } from './Icons'
+import { Sun, Moon, Plus, History } from './Icons'
 import Notch, { TOOLS } from './Notch'
 import RuntimeStatus from './RuntimeStatus.jsx'
 
@@ -11,7 +11,7 @@ export { TOOLS }
  * Page-specific actions (e.g. New chat) sit in the same right cluster as
  * independent controls — never inside the notch pill.
  */
-export default function Topbar({ title, active, onNavigate, onNewChat }) {
+export default function Topbar({ title, active, onNavigate, onNewChat, historyOpen, onToggleHistory }) {
   const { prefs, resolved, set } = useTheme()
 
   return (
@@ -48,6 +48,25 @@ export default function Topbar({ title, active, onNavigate, onNewChat }) {
           >
             <Plus size={15} />
             <span>New chat</span>
+          </button>
+        )}
+
+        {onToggleHistory && (
+          <button
+            type="button"
+            onClick={onToggleHistory}
+            className="hdr-action"
+            title={historyOpen ? 'Hide chat history' : 'Show chat history'}
+            aria-label={historyOpen ? 'Hide chat history' : 'Show chat history'}
+            aria-pressed={historyOpen === true}
+            style={{
+              ...S.iconBtn,
+              width: prefs.barBtn,
+              height: prefs.barBtn,
+              ...(historyOpen ? S.historyOn : null),
+            }}
+          >
+            <History size={17} />
           </button>
         )}
 
@@ -99,5 +118,10 @@ const S = {
     background: 'var(--surface-2)',
     cursor: 'pointer',
     transition: 'background .16s, color .16s',
+  },
+  historyOn: {
+    color: 'var(--accent)',
+    borderColor: 'var(--accent)',
+    background: 'var(--accent-soft)',
   },
 }

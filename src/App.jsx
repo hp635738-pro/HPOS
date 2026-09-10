@@ -8,13 +8,16 @@ import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 import { getBrowserBridge } from './lib/bridge'
 import { getDeepSeekConnector } from './lib/bridge/DeepSeekConnector.js'
-import { createConversation } from './lib/storage/conversationStore.js'
+import { startNewChat } from './lib/chat/history.js'
 
 export default function App() {
   const [view, setView] = useState('overview')
   const [previousView, setPreviousView] = useState('overview')
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
+  // Chat history sidebar (right rail) visibility. Lives here so the header
+  // toggle and ChatPage stay in sync.
+  const [historyOpen, setHistoryOpen] = useState(true)
 
   const navigate = (nextView) => {
     if (nextView === 'files') setPreviousView(view)
@@ -68,7 +71,9 @@ export default function App() {
           title={title}
           active={inRail ? null : view}
           onNavigate={navigate}
-          onNewChat={view === 'aiagents' ? () => { createConversation({ provider: 'deepseek' }) } : undefined}
+          onNewChat={view === 'aiagents' ? () => { startNewChat() } : undefined}
+          historyOpen={historyOpen}
+          onToggleHistory={view === 'aiagents' ? () => setHistoryOpen((v) => !v) : undefined}
         />
 
         {view === 'settings'
@@ -77,7 +82,7 @@ export default function App() {
               onJumped={() => setAdvancedPage(null)}
             />
           : view === 'aiagents'
-            ? <ChatPage />
+            ? <ChatPage historyOpen={historyOpen} onCloseHistory={() => setHistoryOpen(false)} />
             : <Blank />}
       </main>
 

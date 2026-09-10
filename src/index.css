@@ -343,4 +343,74 @@ button:hover > .rail-grip { opacity: .45; }
 
 @media (prefers-reduced-motion: reduce) {
   .ig-blob, .ig-glow, .ig-dot { animation: none; }
+  .chat-history { transition: none; }
+}
+
+/* -------------------------------------- chat history sidebar (right rail)
+   Secondary panel docked on the RIGHT — the exact opposite side from the main
+   navigation rail. Desktop: flex item that collapses to zero width when
+   closed. Narrow screens: overlay drawer sliding in from the right + scrim. */
+.chat-history {
+  flex-shrink: 0;
+  width: 264px;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  opacity: 1;
+  visibility: visible;
+  transition: width .22s cubic-bezier(.4,0,.2,1), opacity .18s ease,
+    border-color .2s ease, transform .22s cubic-bezier(.4,0,.2,1), visibility 0s;
+}
+.chat-history[data-open="false"] {
+  width: 0;
+  opacity: 0;
+  border-left-color: transparent;
+  visibility: hidden;
+  /* Fade out first, then drop from the tab order. */
+  transition: width .22s cubic-bezier(.4,0,.2,1), opacity .18s ease,
+    border-color .2s ease, transform .22s cubic-bezier(.4,0,.2,1), visibility 0s .22s;
+}
+/* Fixed inner width so rows never squash mid-collapse. */
+.chat-history-inner {
+  width: 264px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chat-history-new:hover { filter: brightness(1.07); }
+.chat-history-close:hover { background: var(--surface-2); color: var(--text); }
+.chat-history .conv-row:hover { background: var(--surface-2); }
+.chat-history .conv-del:focus-visible { opacity: 1; }
+.chat-history-scrim { display: none; }
+
+@media (max-width: 860px) {
+  .chat-history {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    z-index: 40;
+    width: 264px;
+    max-width: 82vw;
+    box-shadow: -18px 0 44px -22px rgba(0,0,0,.5);
+  }
+  .chat-history-inner { width: 264px; max-width: 82vw; }
+  .chat-history[data-open="false"] {
+    width: 264px;
+    max-width: 82vw;
+    border-left-color: var(--line);
+    transform: translateX(105%);
+  }
+  .chat-history-scrim[data-open="true"] {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: rgba(10,11,14,.42);
+    cursor: default;
+  }
 }

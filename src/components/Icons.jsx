@@ -378,3 +378,13 @@ export const Layers = (p) => (
 export const Blocks = (p) => (
   <Svg {...p}><rect x="3.2" y="3.2" width="7.6" height="7.6" rx="1.8" /><rect x="13.2" y="3.2" width="7.6" height="7.6" rx="3.8" /><rect x="3.2" y="13.2" width="7.6" height="7.6" rx="3.8" /><rect x="13.2" y="13.2" width="7.6" height="7.6" rx="1.8" /></Svg>
 )
+
+/** History — a clock with a rewind arrow, for the chat history panel. */
+export const History = (p) => (
+  <Svg {...p}><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6L3.5 20.5" /><path d="M3.5 16.5v4h4M12 7.5V12l3 2" /></Svg>
+)
+
+/** X — closes panels and dismisses menus. */
+export const X = (p) => (
+  <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
+)
