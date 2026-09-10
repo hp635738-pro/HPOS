@@ -30,7 +30,7 @@ class ErrorBoundary extends React.Component {
   render() {
     if (!this.state.error) return this.props.children
     return (
-      <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 13, color: '#16171a' }}>
+      <div data-hpos-crash-boundary style={{ padding: 24, fontFamily: 'monospace', fontSize: 13, color: '#16171a' }}>
         <h2 style={{ margin: '0 0 8px' }}>HPOS hit a problem</h2>
         <pre style={{ whiteSpace: 'pre-wrap', color: '#a33' }}>
           {String(this.state.error && this.state.error.message || this.state.error)}

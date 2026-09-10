@@ -85,8 +85,8 @@ export class DeepSeekRuntimeClient {
     this._bridge = bridge
     this._streamFactory = streamFactory
     this._pollMs = Number.isFinite(pollMs) && pollMs > 0 ? Math.floor(pollMs) : DEFAULT_POLL_MS
-    this._setTimeout = setTimeoutFn
-    this._clearTimeout = clearTimeoutFn
+    this._setTimeout = (...args) => setTimeoutFn(...args)
+    this._clearTimeout = (...args) => clearTimeoutFn(...args)
     this._stream = null
     this._byCorrelation = new Map()
     this._byTask = new Map()
