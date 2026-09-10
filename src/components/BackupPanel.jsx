@@ -90,8 +90,8 @@ export default function BackupPanel() {
       {status && (
         <div style={{
           ...L.status,
-          borderColor: status.tone === 'ok' ? '#2ea86b' : 'var(--danger)',
-          color: status.tone === 'ok' ? '#2ea86b' : 'var(--danger)',
+          borderColor: status.tone === 'ok' ? 'var(--success)' : 'var(--danger)',
+          color: status.tone === 'ok' ? 'var(--success)' : 'var(--danger)',
         }}>
           {status.text}
         </div>

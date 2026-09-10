@@ -293,8 +293,8 @@ export function Badge({ children, tone = 'neutral' }) {
   const tones = {
     neutral: { color: 'var(--text-2)', background: 'var(--surface-2)', border: '1px solid var(--line)' },
     accent:  { color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid transparent' },
-    success: { color: '#2ea86b', background: 'rgba(46,168,107,.14)', border: '1px solid transparent' },
-    warn:    { color: '#d9a441', background: 'rgba(217,164,65,.16)', border: '1px solid transparent' },
+    success: { color: 'var(--success)', background: 'var(--success-soft)', border: '1px solid transparent' },
+    warn:    { color: 'var(--warning)', background: 'var(--warning-soft)', border: '1px solid transparent' },
     danger:  { color: 'var(--danger)', background: 'var(--danger-line)', border: '1px solid transparent' },
   }
   return <span style={{ ...K.badge, ...tones[tone] }}>{children}</span>
@@ -312,8 +312,8 @@ export function Tag({ children, onRemove }) {
 export function Alert({ tone = 'info', title, children, onClose }) {
   const tones = {
     info:    'var(--accent)',
-    success: '#2ea86b',
-    warn:    '#d9a441',
+    success: 'var(--success)',
+    warn:    'var(--warning)',
     danger:  'var(--danger)',
   }
   return (
@@ -737,7 +737,7 @@ const K = {
   tip: {
     position: 'absolute', zIndex: 70,
     padding: '5px 9px', borderRadius: 5,
-    background: 'var(--rail)', color: '#fff',
+    background: 'var(--rail)', color: 'var(--rail-fg-on)',
     fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap',
     pointerEvents: 'none',
   },

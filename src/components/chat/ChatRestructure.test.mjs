@@ -41,6 +41,7 @@ const topbar = readFileSync(join(root, 'src/components/Topbar.jsx'), 'utf8')
 const app = readFileSync(join(root, 'src/App.jsx'), 'utf8')
 const css = readFileSync(join(root, 'src/index.css'), 'utf8')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const tailwindConfig = readFileSync(join(root, 'tailwind.config.js'), 'utf8')
 
 /* 1. model selector */
 assert(
@@ -224,7 +225,10 @@ assert(
 {
   const deps = { ...pkg.dependencies, ...pkg.devDependencies }
   const names = Object.keys(deps).join(' ').toLowerCase()
-  assert(!names.includes('tailwind'), 'no Tailwind added')
+  assert(
+    names.includes('tailwindcss') && tailwindConfig.includes('preflight: false'),
+    'tailwind is setup-only (v3, preflight off, zero global impact)'
+  )
   assert(!names.includes('shadcn'), 'no shadcn added')
   assert(!names.includes('lucide'), 'no lucide added')
   assert(!names.includes('typescript'), 'no TypeScript added')

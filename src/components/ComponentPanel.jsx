@@ -155,7 +155,7 @@ export default function ComponentPanel() {
               <span style={{ ...G.badge, color: 'var(--accent)', background: 'var(--accent-soft)', borderColor: 'transparent' }}>
                 Accent
               </span>
-              <span style={{ ...G.badge, color: '#2ea86b', background: 'rgba(46,168,107,.14)', borderColor: 'transparent' }}>
+              <span style={{ ...G.badge, color: 'var(--success)', background: 'var(--success-soft)', borderColor: 'transparent' }}>
                 Success
               </span>
               <span style={{ ...G.badge, color: 'var(--danger)', background: 'var(--danger-line)', borderColor: 'transparent' }}>

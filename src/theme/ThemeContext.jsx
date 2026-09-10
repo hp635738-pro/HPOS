@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { DARK_TOKENS, LIGHT_TOKENS } from './tokens.js'
 
 const KEY = 'nexa.prefs'
 
@@ -29,6 +30,9 @@ export const TOKENS = [
   { key: '--bg',         name: 'App background', group: 'Surfaces' },
   { key: '--surface',    name: 'Card surface',   group: 'Surfaces' },
   { key: '--surface-2',  name: 'Inset surface',  group: 'Surfaces' },
+  { key: '--elevated',   name: 'Elevated surface', group: 'Surfaces' },
+  { key: '--hover',      name: 'Hover wash',     group: 'Surfaces' },
+  { key: '--selected',   name: 'Selected wash',  group: 'Surfaces' },
   { key: '--line',       name: 'Borders',        group: 'Surfaces' },
   { key: '--text',       name: 'Primary text',   group: 'Text' },
   { key: '--text-2',     name: 'Secondary text', group: 'Text' },
@@ -36,11 +40,13 @@ export const TOKENS = [
   { key: '--rail',       name: 'Sidebar',        group: 'Sidebar' },
   { key: '--rail-fg',    name: 'Sidebar text',   group: 'Sidebar' },
   { key: '--rail-fg-on', name: 'Sidebar active', group: 'Sidebar' },
+  { key: '--success',    name: 'Success',        group: 'Status' },
+  { key: '--warning',    name: 'Warning',        group: 'Status' },
   { key: '--danger',     name: 'Danger',         group: 'Status' },
 ]
 
 export const ACCENTS = [
-  { id: 'blue',   hex: '#3b82f6', name: 'Blue'   },
+  { id: 'blue',   hex: '#2383e2', name: 'Blue'   },
   { id: 'violet', hex: '#8b5cf6', name: 'Violet' },
   { id: 'green',  hex: '#10b981', name: 'Green'  },
   { id: 'amber',  hex: '#f59e0b', name: 'Amber'  },
@@ -59,7 +65,7 @@ export const DENSITY = {
 export const DEFAULTS = {
   theme: 'system',        // light | dark | system
   accent: 'blue',         // an ACCENTS id, or 'custom'
-  accentCustom: '#3b82f6',
+  accentCustom: '#2383e2',
   accentFg: 'auto',       // auto | light | dark — text colour on accent
   accentSoft: 12,         // tint strength of --accent-soft, in %
   customLight: {},        // token overrides for the light palette
@@ -166,47 +172,17 @@ export const DEFAULTS = {
   notchShadow: true,
 }
 
-/* Palettes for the two real themes. */
+/* Palettes for the two real themes — single source of truth in tokens.js. */
 const PALETTE = {
-  light: {
-    '--bg':        '#f4f5f7',
-    '--surface':   '#ffffff',
-    '--surface-2': '#fafafc',
-    '--rail':      '#16171a',
-    '--rail-fg':   '#8e9098',
-    '--rail-fg-on':'#ffffff',
-    '--rail-hover':'rgba(255,255,255,.08)',
-    '--text':      '#16171a',
-    '--text-2':    '#5c5f68',
-    '--muted':     '#9a9ca4',
-    '--line':      '#e8e9ed',
-    '--shadow':    '0 8px 24px -20px rgba(20,22,28,.5)',
-    '--danger':      '#d94b4b',
-    '--danger-line': 'rgba(217,75,75,.3)',
-  },
-  dark: {
-    '--bg':        '#0f1013',
-    '--surface':   '#191a1f',
-    '--surface-2': '#212228',
-    '--rail':      '#0a0b0d',
-    '--rail-fg':   '#7c7f89',
-    '--rail-fg-on':'#ffffff',
-    '--rail-hover':'rgba(255,255,255,.07)',
-    '--text':      '#f2f3f5',
-    '--text-2':    '#a8abb4',
-    '--muted':     '#6e7179',
-    '--line':      '#2a2c33',
-    '--shadow':    '0 8px 24px -18px rgba(0,0,0,.8)',
-    '--danger':      '#ff6b6b',
-    '--danger-line': 'rgba(255,107,107,.28)',
-  },
+  light: LIGHT_TOKENS,
+  dark: DARK_TOKENS,
 }
 
 function hexToRgb(hex) {
   let h = String(hex || '').replace('#', '')
   if (h.length === 3) h = h.split('').map((c) => c + c).join('')
   const n = parseInt(h, 16)
-  if (Number.isNaN(n)) return [59, 130, 246]
+  if (Number.isNaN(n)) return [35, 131, 226]
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
@@ -320,7 +296,7 @@ export function ThemeProvider({ children }) {
 
   const resolved = prefs.theme === 'system' ? (systemDark ? 'dark' : 'light') : prefs.theme
   const accentHex = prefs.accent === 'custom'
-    ? (prefs.accentCustom || '#3b82f6')
+    ? (prefs.accentCustom || '#2383e2')
     : (ACCENTS.find((a) => a.id === prefs.accent) || ACCENTS[0]).hex
   const d = DENSITY[prefs.density] || DENSITY.Comfortable
 
@@ -331,10 +307,19 @@ export function ThemeProvider({ children }) {
     const pal = { ...PALETTE[resolved], ...overrides }
     Object.entries(pal).forEach(([k, v]) => r.style.setProperty(k, v))
 
-    // keep the derived danger tint in step with a custom danger colour
+    // keep the derived status tints in step with custom status colours
     if (overrides['--danger']) {
       const [dr, dg, db] = hexToRgb(overrides['--danger'])
       r.style.setProperty('--danger-line', `rgba(${dr},${dg},${db},.3)`)
+      r.style.setProperty('--danger-soft', `rgba(${dr},${dg},${db},.1)`)
+    }
+    if (overrides['--success']) {
+      const [sr, sg, sb] = hexToRgb(overrides['--success'])
+      r.style.setProperty('--success-soft', `rgba(${sr},${sg},${sb},.14)`)
+    }
+    if (overrides['--warning']) {
+      const [wr, wg, wb] = hexToRgb(overrides['--warning'])
+      r.style.setProperty('--warning-soft', `rgba(${wr},${wg},${wb},.14)`)
     }
 
     const [rr, gg, bb] = hexToRgb(accentHex)
@@ -347,6 +332,8 @@ export function ThemeProvider({ children }) {
       prefs.accentFg === 'light' ? '#ffffff'
       : prefs.accentFg === 'dark' ? '#101114'
       : isLight(accentHex) ? '#101114' : '#ffffff')
+    // Focus-ring colour, derived from the accent so it always matches.
+    r.style.setProperty('--ring', `rgba(${rr},${gg},${bb},${resolved === 'dark' ? .55 : .35})`)
 
     r.style.setProperty('--radius', `${prefs.radius}px`)
     r.style.setProperty('--radius-sm', `${Math.max(prefs.radius - 5, 3)}px`)
@@ -370,7 +357,19 @@ export function ThemeProvider({ children }) {
       : prefs.notchBg === 'accent' ? 'var(--accent)'
       : 'var(--rail)')
     r.style.setProperty('--notch-fg',
-      prefs.notchBg === 'surface' ? 'var(--text-2)' : 'rgba(255,255,255,.66)')
+      prefs.notchBg === 'surface' ? 'var(--text-2)'
+      : prefs.notchBg === 'accent' ? 'rgba(255,255,255,.66)'
+      : resolved === 'dark' ? 'rgba(255,255,255,.66)' : 'var(--rail-fg)')
+    r.style.setProperty('--notch-hover-fg',
+      prefs.notchBg === 'surface'
+        ? (resolved === 'dark' ? '#ffffff' : 'var(--text)')
+        : prefs.notchBg === 'accent' ? '#ffffff'
+        : (resolved === 'dark' ? '#ffffff' : 'var(--rail-fg-on)'))
+    r.style.setProperty('--notch-hover-bg',
+      prefs.notchBg === 'surface'
+        ? (resolved === 'dark' ? 'rgba(255,255,255,.1)' : 'var(--hover)')
+        : prefs.notchBg === 'accent' ? 'rgba(255,255,255,.15)'
+        : (resolved === 'dark' ? 'rgba(255,255,255,.1)' : 'var(--rail-hover)'))
     r.style.setProperty('--notch-fg-on',
       prefs.notchBg === 'accent' ? 'var(--accent)' : 'var(--accent-fg)')
     r.style.setProperty('--notch-on-bg',
@@ -399,7 +398,7 @@ export function ThemeProvider({ children }) {
     r.style.setProperty('--cmp-shadow', prefs.cmpShadow
       ? '0 1px 2px rgba(0,0,0,.12), 0 4px 12px -6px rgba(0,0,0,.2)' : 'none')
     r.style.setProperty('--cmp-ring', prefs.cmpFocusRing
-      ? '0 0 0 3px var(--accent-soft)' : 'none')
+      ? '0 0 0 3px var(--ring)' : 'none')
 
     r.style.setProperty('--bar-h', `${prefs.barH}px`)
     r.style.setProperty('--bar-pad-x', `${prefs.barPadX}px`)

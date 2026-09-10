@@ -38,7 +38,7 @@ const PRESETS = {
 
 export default function PickerPanel() {
   const { prefs, set } = useTheme()
-  const [demo, setDemo] = useState('#3b82f6')
+  const [demo, setDemo] = useState('#2383e2')
 
   const apply = (n) =>
     Object.entries(PRESETS[n].values).forEach(([k, v]) => set(k, v))

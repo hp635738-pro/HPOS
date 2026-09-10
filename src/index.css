@@ -5,24 +5,38 @@
 @tailwind utilities;
 
 :root {
-  /* Overwritten at runtime by ThemeProvider — these are just fallbacks. */
-  --bg: #f4f5f7;
+  /* Overwritten at runtime by ThemeProvider — these are just fallbacks.
+     Values must match LIGHT_TOKENS in src/theme/tokens.js exactly
+     (tokens.test.mjs asserts the sync, compact rgba form included). */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #fafafc;
-  --rail: #16171a;
-  --rail-fg: #8e9098;
-  --rail-fg-on: #ffffff;
-  --rail-hover: rgba(255, 255, 255, .08);
-  --text: #16171a;
-  --text-2: #5c5f68;
-  --muted: #9a9ca4;
-  --line: #e8e9ed;
-  --shadow: 0 8px 24px -20px rgba(20, 22, 28, .5);
+  --surface-2: #f7f7f5;
+  --elevated: #ffffff;
+  --rail: #f7f7f5;
+  --rail-fg: #6f6e69;
+  --rail-fg-on: #37352f;
+  --rail-hover: rgba(55,53,47,.06);
+  --rail-line: #e7e7e4;
+  --text: #37352f;
+  --text-2: #6f6e69;
+  --muted: #767672;
+  --line: #e9e9e8;
+  --hover: rgba(55,53,47,.04);
+  --selected: rgba(55,53,47,.08);
+  --shadow: 0 1px 2px rgba(55,53,47,.06), 0 8px 24px -16px rgba(55,53,47,.12);
+  --success: #0f7b6c;
+  --success-soft: rgba(15,123,108,.14);
+  --warning: #b25e09;
+  --warning-soft: rgba(178,94,9,.14);
+  --danger: #d13438;
+  --danger-soft: rgba(209,52,56,.10);
+  --danger-line: rgba(209,52,56,.3);
 
-  --accent: #3b82f6;
-  --accent-rgb: 59 130 246;
-  --accent-soft: rgba(59, 130, 246, .12);
+  --accent: #2383e2;
+  --accent-rgb: 35 131 226;
+  --accent-soft: rgba(35,131,226,.12);
   --accent-fg: #ffffff;
+  --ring: rgba(35,131,226,.35);
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -120,7 +134,7 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
   transition: background .16s, color .16s, height .18s, padding .18s, border-radius .18s;
 }
-.notch-btn:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.notch-btn:hover { color: var(--notch-hover-fg); background: var(--notch-hover-bg); }
 .notch-btn[data-on='true'] {
   background: var(--notch-on-bg);
   color: var(--notch-fg-on);

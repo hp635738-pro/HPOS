@@ -53,9 +53,18 @@ assert(
   'no visible status text — dot + cat carry state visually',
 )
 assert(
-  status.includes("'Runtime connected'") && status.includes("'Runtime disconnected'") &&
-    status.includes('#22c55e'),
-  'accessible labels and dot tones stay distinguishable',
+  status.includes("'Runtime connected'") && status.includes("'Runtime disconnected'"),
+  'accessible labels stay distinguishable',
+)
+assert(
+  status.includes('var(--success)') && status.includes('var(--warning)') &&
+    status.includes('var(--danger)'),
+  'dot tones use semantic status tokens',
+)
+assert(
+  !status.includes('#22c55e') && !status.includes('#f59e0b') &&
+    !status.includes('#f97316') && !status.includes('#ef4444'),
+  'no hardcoded dot colors remain',
 )
 assert(
   status.includes('aria-label={`${label}') && status.includes('title={`${conn.detail || label}'),
@@ -187,7 +196,12 @@ assert(
 /* 8. no new stacks, send path untouched */
 {
   const names = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).join(' ').toLowerCase()
-  assert(!names.includes('tailwind') && !names.includes('shadcn'), 'no Tailwind/shadcn added')
+  assert(!names.includes('shadcn'), 'no shadcn dependency added')
+  assert(
+    names.includes('tailwindcss') &&
+      readFileSync(join(root, 'tailwind.config.js'), 'utf8').includes('preflight: false'),
+    'tailwind is setup-only (v3, preflight off, zero global impact)'
+  )
   assert(!names.includes('lucide') && !names.includes('typescript'), 'no lucide/TypeScript added')
 }
 assert(

@@ -107,7 +107,7 @@ npm test        # bridge, runtime-connection, runtime-event-stream, runtime-acti
 ### Theming
 - Light / Dark / System
 - 8 accent presets + custom colour picker
-- 11 colour tokens editable, light aur dark ke alag overrides
+- 16 colour tokens editable, light aur dark ke alag overrides
 - Density, radius, aur poora typography control
 
 ### Systems

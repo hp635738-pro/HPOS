@@ -16,11 +16,11 @@ const CONN_COPY = {
 
 const CONN_DOT = {
   [RUNTIME_CONNECTION_STATE.UNKNOWN]: 'var(--muted)',
-  [RUNTIME_CONNECTION_STATE.CHECKING]: '#f59e0b',
-  [RUNTIME_CONNECTION_STATE.CONNECTED]: '#22c55e',
+  [RUNTIME_CONNECTION_STATE.CHECKING]: 'var(--warning)',
+  [RUNTIME_CONNECTION_STATE.CONNECTED]: 'var(--success)',
   [RUNTIME_CONNECTION_STATE.DISCONNECTED]: 'var(--muted)',
-  [RUNTIME_CONNECTION_STATE.UNAUTHORIZED]: '#f97316',
-  [RUNTIME_CONNECTION_STATE.ERROR]: '#ef4444',
+  [RUNTIME_CONNECTION_STATE.UNAUTHORIZED]: 'var(--warning)',
+  [RUNTIME_CONNECTION_STATE.ERROR]: 'var(--danger)',
 }
 
 const STREAM_COPY = {
@@ -33,10 +33,10 @@ const STREAM_COPY = {
 }
 
 const RECENT_TONE = {
-  COMPLETE: '#22c55e',
-  FAILED: '#ef4444',
-  CANCELLED: '#d9a441',
-  TIMEOUT: '#f97316',
+  COMPLETE: 'var(--success)',
+  FAILED: 'var(--danger)',
+  CANCELLED: 'var(--warning)',
+  TIMEOUT: 'var(--warning)',
 }
 
 function shortId(id) {
@@ -237,7 +237,7 @@ export default function RuntimeDetailsPanel({ onBack }) {
                   {row.executor === 'linux' && <span style={S.execTag} title="ran on the Linux executor">linux</span>}
                   <span
                     className={row.status === 'GENERATING' || row.status === 'STREAMING' ? 'bridge-dot-pulse' : undefined}
-                    style={S.statusChip(row.status === 'QUEUED' ? '#f59e0b' : '#22c55e')}
+                    style={S.statusChip(row.status === 'QUEUED' ? 'var(--warning)' : 'var(--success)')}
                   >
                     {row.status}
                   </span>
@@ -274,9 +274,9 @@ export default function RuntimeDetailsPanel({ onBack }) {
           )}
           <div style={S.countersRow}>
             <span>{counters.total || 0} total</span>
-            <span style={{ color: '#22c55e' }}>{counters.completed || 0} ok</span>
-            <span style={{ color: '#ef4444' }}>{counters.failed || 0} failed</span>
-            <span style={{ color: '#d9a441' }}>{counters.cancelled || 0} cancelled</span>
+            <span style={{ color: 'var(--success)' }}>{counters.completed || 0} ok</span>
+            <span style={{ color: 'var(--danger)' }}>{counters.failed || 0} failed</span>
+            <span style={{ color: 'var(--warning)' }}>{counters.cancelled || 0} cancelled</span>
           </div>
         </div>
 
@@ -333,8 +333,8 @@ const S = {
   metricLabel: { fontSize: 10, letterSpacing: '.4px', color: 'var(--muted)', textTransform: 'uppercase' },
   metricValue: { fontSize: 12.5, fontWeight: 700, color: 'var(--text)' },
   errorRow: {
-    color: '#ef4444', fontSize: 11.5, margin: '10px 0 0',
-    padding: '6px 10px', borderRadius: 7, background: 'rgba(239,68,68,.08)',
+    color: 'var(--danger)', fontSize: 11.5, margin: '10px 0 0',
+    padding: '6px 10px', borderRadius: 7, background: 'var(--danger-soft)',
   },
   capRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   capName: { fontSize: 12.5, fontWeight: 800 },
@@ -352,7 +352,7 @@ const S = {
   taskService: { fontSize: 11, color: 'var(--muted)', flexShrink: 0, textTransform: 'uppercase' },
   execTag: {
     fontSize: 10, fontWeight: 700, letterSpacing: '.2px',
-    color: '#f59e0b', border: '1px solid currentColor',
+    color: 'var(--warning)', border: '1px solid currentColor',
     borderRadius: 999, padding: '0 6px', flexShrink: 0,
   },
   statusChip: (color) => ({
@@ -362,8 +362,8 @@ const S = {
   }),
   stopBtn: {
     marginLeft: 'auto', flexShrink: 0,
-    fontSize: 11, fontWeight: 800, color: '#ef4444',
-    border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.06)',
+    fontSize: 11, fontWeight: 800, color: 'var(--danger)',
+    border: '1px solid var(--danger-line)', background: 'var(--danger-soft)',
     borderRadius: 999, padding: '2px 11px', cursor: 'pointer',
   },
   countersRow: {
