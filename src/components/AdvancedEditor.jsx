@@ -226,7 +226,7 @@ export default function AdvancedEditor({ onClose, initialPage }) {
           <button onClick={cancel} style={S.btnGhost}>Cancel</button>
           <button
             onClick={save}
-            style={{ ...S.btnPrimary, background: saved ? '#2ea86b' : 'var(--accent)' }}
+            style={{ ...S.btnPrimary, background: saved ? 'var(--success)' : 'var(--accent)' }}
           >
             {saved ? <><Check size={13} /> Saved</> : 'Save'}
           </button>

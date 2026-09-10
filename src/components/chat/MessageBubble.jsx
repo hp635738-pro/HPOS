@@ -1,4 +1,5 @@
 import { Bot } from '../Icons'
+import ImageGeneration from './ImageGeneration'
 
 const fmtTime = (ts) =>
   new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -6,11 +7,18 @@ const fmtTime = (ts) =>
 /**
  * One message in the conversation. User messages sit right on the accent,
  * assistant messages sit left on a quiet surface with a small bot avatar.
+ *
+ * Assistant messages with `meta.kind === 'image-generation'` render the
+ * representative ImageGeneration result state (UI only — no backend).
+ * User messages with `meta.attachments` show the attached image thumbnails
+ * above the bubble (local state only — never sent to the runtime).
  */
 export default function MessageBubble({ m, onStop }) {
   const user = m.role === 'user'
   const thinking = m.status === 'thinking'
   const streaming = thinking && Boolean(m.content)
+  const imageGen = !user && m.meta?.kind === 'image-generation'
+  const files = user && Array.isArray(m.meta?.attachments) ? m.meta.attachments : []
 
   return (
     <div
@@ -23,8 +31,25 @@ export default function MessageBubble({ m, onStop }) {
       )}
 
       <div style={{ ...S.group, alignItems: user ? 'flex-end' : 'flex-start' }}>
-        <div style={user ? S.bubbleUser : S.bubbleBot}>
-          {thinking && !streaming ? (
+        {files.length > 0 && (
+          <span style={S.files} aria-label="Attached images">
+            {files.map((a) => (
+              <img
+                key={a.id || a.name}
+                src={a.dataUrl}
+                alt={a.name || 'Attached image'}
+                style={S.file}
+              />
+            ))}
+          </span>
+        )}
+        <div style={user ? S.bubbleUser : imageGen ? S.bubbleImage : S.bubbleBot}>
+          {imageGen ? (
+            <ImageGeneration
+              prompt={m.meta?.prompt || undefined}
+              resolution={m.meta?.resolution || undefined}
+            />
+          ) : thinking && !streaming ? (
             <span style={S.dots} aria-label="Assistant is typing">
               <i style={{ ...S.dot, animationDelay: '0ms' }} />
               <i style={{ ...S.dot, animationDelay: '160ms' }} />
@@ -61,6 +86,11 @@ const S = {
     border: '1px solid var(--line)',
   },
   group: { display: 'flex', flexDirection: 'column', gap: 3, maxWidth: '78%', minWidth: 0 },
+  files: { display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' },
+  file: {
+    width: 96, height: 96, objectFit: 'cover', display: 'block',
+    borderRadius: 10, border: '1px solid var(--line)',
+  },
   text: { whiteSpace: 'pre-wrap', overflowWrap: 'break-word', display: 'block' },
   bubbleUser: {
     padding: '9px 13px', fontSize: 'var(--font)', lineHeight: 1.5,
@@ -69,6 +99,13 @@ const S = {
   },
   bubbleBot: {
     padding: '9px 13px', fontSize: 'var(--font)', lineHeight: 1.5,
+    color: 'var(--text)', background: 'var(--surface)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg)',
+  },
+  // Wider, roomier bubble so the image canvas (max 420px) fits comfortably.
+  bubbleImage: {
+    width: '100%', maxWidth: 452, padding: 12,
     color: 'var(--text)', background: 'var(--surface)',
     border: '1px solid var(--line)',
     borderRadius: 'var(--radius-sm) var(--radius-lg) var(--radius-lg) var(--radius-lg)',

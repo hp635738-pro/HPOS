@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
@@ -8,17 +8,35 @@ import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 import { getBrowserBridge } from './lib/bridge'
 import { getDeepSeekConnector } from './lib/bridge/DeepSeekConnector.js'
-import { createConversation } from './lib/storage/conversationStore.js'
 
 export default function App() {
   const [view, setView] = useState('overview')
   const [previousView, setPreviousView] = useState('overview')
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
+  // Chat history sidebar (right rail) visibility. Lives here so the header
+  // toggle and ChatPage stay in sync.
+  const [historyOpen, setHistoryOpen] = useState(true)
+  // Full-panel runtime details overlay, opened by holding the header status
+  // container. Lives here so the header trigger and ChatPage stay in sync.
+  const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false)
+  const runtimeStatusRef = useRef(null)
 
   const navigate = (nextView) => {
     if (nextView === 'files') setPreviousView(view)
     setView(nextView)
+  }
+
+  // Details live in the chat area: opening from any page lands in chat.
+  const openRuntimeDetails = () => {
+    if (view !== 'aiagents') navigate('aiagents')
+    setRuntimeDetailsOpen(true)
+  }
+
+  // Closing returns focus to the header status container.
+  const closeRuntimeDetails = () => {
+    setRuntimeDetailsOpen(false)
+    requestAnimationFrame(() => runtimeStatusRef.current?.focus())
   }
 
   // Browser bridge handshake, then DeepSeek tab detect. Safe no-op if extension absent.
@@ -68,7 +86,10 @@ export default function App() {
           title={title}
           active={inRail ? null : view}
           onNavigate={navigate}
-          onNewChat={view === 'aiagents' ? () => { createConversation({ provider: 'deepseek' }) } : undefined}
+          historyOpen={historyOpen}
+          onToggleHistory={view === 'aiagents' ? () => setHistoryOpen((v) => !v) : undefined}
+          onOpenRuntimeDetails={openRuntimeDetails}
+          runtimeStatusRef={runtimeStatusRef}
         />
 
         {view === 'settings'
@@ -77,7 +98,12 @@ export default function App() {
               onJumped={() => setAdvancedPage(null)}
             />
           : view === 'aiagents'
-            ? <ChatPage />
+            ? <ChatPage
+              historyOpen={historyOpen}
+              onCloseHistory={() => setHistoryOpen(false)}
+              detailsOpen={runtimeDetailsOpen}
+              onBackFromDetails={closeRuntimeDetails}
+            />
             : <Blank />}
       </main>
 

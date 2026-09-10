@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTheme, ACCENTS, DENSITY, isLight } from '../theme/ThemeContext'
+import { DARK_TOKENS, LIGHT_TOKENS } from '../theme/tokens.js'
 import ColourField from '../components/ColourField'
 import AdvancedEditor from '../components/AdvancedEditor'
 import { Sun, Moon, Monitor, Check, Chevron } from '../components/Icons'
@@ -51,24 +52,24 @@ export default function Settings({ jumpTo, onJumped }) {
                 >
                   <span style={{
                     ...S.thumb,
-                    background: isDark ? '#0f1013' : '#f4f5f7',
-                    borderColor: isDark ? '#2a2c33' : '#e8e9ed',
+                    background: isDark ? DARK_TOKENS['--bg'] : LIGHT_TOKENS['--bg'],
+                    borderColor: isDark ? DARK_TOKENS['--line'] : LIGHT_TOKENS['--line'],
                   }}>
-                    <span style={{ ...S.thumbRail, background: isDark ? '#0a0b0d' : '#16171a' }}>
+                    <span style={{ ...S.thumbRail, background: isDark ? DARK_TOKENS['--rail'] : LIGHT_TOKENS['--rail'] }}>
                       <span style={{ ...S.thumbMark, background: accentHex }} />
-                      <span style={S.thumbLine} />
-                      <span style={S.thumbLine} />
+                      <span style={{ ...S.thumbLine, background: isDark ? 'rgba(255,255,255,.25)' : 'rgba(55,53,47,.22)' }} />
+                      <span style={{ ...S.thumbLine, background: isDark ? 'rgba(255,255,255,.25)' : 'rgba(55,53,47,.22)' }} />
                     </span>
                     <span style={S.thumbBody}>
                       <span style={{
                         ...S.thumbBar,
-                        background: isDark ? '#191a1f' : '#fff',
-                        borderColor: isDark ? '#2a2c33' : '#e8e9ed',
+                        background: isDark ? DARK_TOKENS['--surface'] : LIGHT_TOKENS['--surface'],
+                        borderColor: isDark ? DARK_TOKENS['--line'] : LIGHT_TOKENS['--line'],
                       }} />
                       <span style={{
                         ...S.thumbBlock,
-                        background: isDark ? '#191a1f' : '#fff',
-                        borderColor: isDark ? '#2a2c33' : '#e8e9ed',
+                        background: isDark ? DARK_TOKENS['--surface'] : LIGHT_TOKENS['--surface'],
+                        borderColor: isDark ? DARK_TOKENS['--line'] : LIGHT_TOKENS['--line'],
                       }}>
                         <span style={{ ...S.thumbPill, background: accentHex }} />
                       </span>
@@ -125,7 +126,7 @@ export default function Settings({ jumpTo, onJumped }) {
                 position: 'relative', overflow: 'hidden', cursor: 'pointer',
                 background: prefs.accent === 'custom'
                   ? prefs.accentCustom
-                  : 'conic-gradient(from .25turn, #f43f5e, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #f43f5e)',
+                  : 'conic-gradient(from .25turn, #f43f5e, #f59e0b, #10b981, #06b6d4, #2383e2, #8b5cf6, #f43f5e)',
                 boxShadow: prefs.accent === 'custom'
                   ? `0 0 0 3px var(--surface), 0 0 0 5px ${prefs.accentCustom}`
                   : 'none',
