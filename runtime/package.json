@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node bin/hpos-runtime.js",
-    "test": "node tests/protocol.test.mjs && node tests/endpoints.test.mjs && node tests/limits.test.mjs && node tests/env.test.mjs && node tests/workspace.test.mjs && node tests/supervisor.test.mjs && node tests/linux.test.mjs && node tests/linux-task.test.mjs && node tests/lifecycle.test.mjs && node tests/events.test.mjs && node tests/sse.test.mjs && node tests/deepseek-provider.test.mjs && node tests/deepseek-task.test.mjs && node tests/daemon.test.mjs"
+    "test": "node tests/protocol.test.mjs && node tests/endpoints.test.mjs && node tests/limits.test.mjs && node tests/env.test.mjs && node tests/workspace.test.mjs && node tests/supervisor.test.mjs && node tests/supervisor-logging.test.mjs && node tests/linux.test.mjs && node tests/linux-task.test.mjs && node tests/lifecycle.test.mjs && node tests/events.test.mjs && node tests/sse.test.mjs && node tests/deepseek-provider.test.mjs && node tests/deepseek-task.test.mjs && node tests/daemon.test.mjs"
   },
   "engines": {
     "node": ">=18"

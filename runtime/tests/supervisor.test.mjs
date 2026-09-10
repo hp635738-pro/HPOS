@@ -538,8 +538,16 @@ try {
       'the environment is described only by counts')
     assert(spawnMeta.every((m) => !('env' in m) && !('envReport' in m)), 'and no env report object is logged')
     const settled = logged.filter(([, e]) => e === 'task_process_settled')
-    assert(settled.every(([, , m]) => !('stderrExcerpt' in m) && !('stdout' in m)),
-      'captured task output is never written to the log')
+    const failedSettled = settled.filter(([, , m]) => m.status === TASK_STATE.FAILED)
+    assert(failedSettled.length > 0 && failedSettled.every(([, , m]) => typeof m.stdout === 'string' && typeof m.stderr === 'string'),
+      'failed task logs carry bounded stdout and stderr diagnostics')
+    assert(failedSettled.some(([, , m]) => m.stderr.includes('requested failure')),
+      'the failed-task log includes the child error text')
+    assert(failedSettled.every(([, , m]) => m.stdout.length <= 240 && m.stderr.length <= 240),
+      'failed-task diagnostics stay bounded')
+    const nonFailedSettled = settled.filter(([, , m]) => m.status !== TASK_STATE.FAILED)
+    assert(nonFailedSettled.every(([, , m]) => !('stdout' in m) && !('stderr' in m)),
+      'successful and cancelled task logs do not include child output')
   }
 
   /* ------------------------------- 22. orphan guard inside the runner */
