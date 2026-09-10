@@ -1,3 +1,9 @@
+/* Tailwind (preflight OFF in tailwind.config.js): utilities for shadcn/21st
+   components only. HPOS owns everything below and is unaffected. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   /* Overwritten at runtime by ThemeProvider — these are just fallbacks. */
   --bg: #f4f5f7;
