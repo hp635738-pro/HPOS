@@ -4,6 +4,7 @@ import {
   getSnapshot,
   createConversation,
   setActiveId,
+  setPinned,
   deleteConversation,
   saveMessage,
   patchMessage,
@@ -26,6 +27,7 @@ export function useConversations() {
     active,
     create: createConversation,
     select: setActiveId,
+    setPinned,
     remove: (id) => {
       try { deleteBinding(id) } catch { /* ignore */ }
       return deleteConversation(id)

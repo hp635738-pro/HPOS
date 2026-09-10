@@ -163,6 +163,10 @@ button:hover > .rail-grip { opacity: .45; }
 
 .conv-row:hover .conv-del { opacity: .7; }
 .conv-del:hover { opacity: 1 !important; color: var(--danger); }
+.conv-row:hover .conv-pin { opacity: .7; }
+.conv-pin:hover { opacity: 1 !important; color: var(--text); }
+/* Pinned rows keep a persistent, subtle pin indicator. */
+.conv-pin[data-on='true'] { opacity: .85; color: var(--accent); }
 
 @keyframes bridge-dot-pulse {
   0%, 100% { opacity: .35; }
@@ -386,6 +390,7 @@ button:hover > .rail-grip { opacity: .45; }
 .chat-history-close:hover { background: var(--surface-2); color: var(--text); }
 .chat-history .conv-row:hover { background: var(--surface-2); }
 .chat-history .conv-del:focus-visible { opacity: 1; }
+.chat-history .conv-pin:focus-visible { opacity: 1; }
 .chat-history-scrim { display: none; }
 
 @media (max-width: 860px) {

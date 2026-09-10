@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Plus, Trash, X } from '../Icons'
+import { Pin, Plus, Trash, X } from '../Icons'
 import { useConversations } from '../../lib/chat/useConversations.js'
 import { groupConversations } from '../../lib/chat/history.js'
 
@@ -27,11 +27,12 @@ const isNarrow = () =>
  * and becomes an overlay drawer on narrow screens (see .chat-history CSS).
  *
  * Top slot is always [+ New Chat], then date-based groups (Today /
- * Yesterday / Earlier — empty groups omitted). Selecting a row opens that
- * conversation in the main chat panel.
+ * Yesterday / Earlier — empty groups omitted) with pinned chats lifted into
+ * a leading Pinned group. Each row selects on click and exposes pin/unpin +
+ * delete actions on hover or keyboard focus.
  */
 export default function ChatHistorySidebar({ open, onClose, onNewChat, inert }) {
-  const { ready, conversations, activeId, select, remove } = useConversations()
+  const { ready, conversations, activeId, select, remove, setPinned } = useConversations()
   const groups = useMemo(() => groupConversations(conversations), [conversations])
   const root = useRef(null)
 
@@ -53,6 +54,12 @@ export default function ChatHistorySidebar({ open, onClose, onNewChat, inert }) 
   const create = () => {
     onNewChat?.()
     if (isNarrow()) onClose?.()
+  }
+
+  const onPin = (event, id, pinned) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setPinned(id, !pinned)
   }
 
   const onDelete = (event, id, title) => {
@@ -141,6 +148,19 @@ export default function ChatHistorySidebar({ open, onClose, onNewChat, inert }) 
                         </button>
                         <button
                           type="button"
+                          className="conv-pin chat-focus"
+                          aria-label={c.pinned ? `Unpin ${c.title}` : `Pin ${c.title}`}
+                          aria-pressed={c.pinned ? 'true' : 'false'}
+                          title={c.pinned ? 'Unpin chat' : 'Pin chat'}
+                          data-on={c.pinned ? 'true' : 'false'}
+                          onClick={(e) => onPin(e, c.id, c.pinned)}
+                          style={S.pin}
+                          tabIndex={open ? undefined : -1}
+                        >
+                          <Pin size={12} />
+                        </button>
+                        <button
+                          type="button"
                           className="conv-del chat-focus"
                           aria-label={`Delete ${c.title}`}
                           title="Delete chat"
@@ -215,6 +235,12 @@ const S = {
     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   },
   time: { flexShrink: 0, fontSize: 10.5, fontWeight: 600, color: 'var(--muted)' },
+  pin: {
+    flexShrink: 0, width: 24, height: 24,
+    display: 'grid', placeItems: 'center',
+    borderRadius: 6, color: 'var(--muted)',
+    opacity: 0, background: 'transparent', border: 'none', cursor: 'pointer',
+  },
   del: {
     flexShrink: 0, width: 24, height: 24,
     display: 'grid', placeItems: 'center',

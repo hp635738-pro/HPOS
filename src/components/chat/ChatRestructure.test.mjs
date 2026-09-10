@@ -190,8 +190,13 @@ assert(
   'App wires the toggle and panel on the chat view only',
 )
 assert(
-  app.includes('startNewChat()') && !app.includes('createConversation({ provider'),
-  'header New Chat reuses the no-duplicate helper',
+  !app.includes('onNewChat') && !app.includes('startNewChat'),
+  'header New Chat removed — App wires no header new-chat action',
+)
+assert(
+  !topbar.includes('onNewChat') && !topbar.includes('aria-label="New chat"') &&
+    !topbar.includes('<Plus') && !topbar.includes('S.newChat'),
+  'Topbar renders no New Chat button',
 )
 assert(chatPage.includes('startNewChat()'), 'sidebar New Chat uses the same helper')
 

@@ -114,6 +114,7 @@ function sanitizeConversation(raw) {
     updatedAt,
     provider,
     messages,
+    pinned: raw.pinned === true,
   }
 }
 
@@ -278,6 +279,7 @@ export function createConversationStore({
       updatedAt: ts,
       provider: provider || DEFAULT_PROVIDER,
       messages: [],
+      pinned: false,
     }
     commit({
       ...state,
@@ -315,6 +317,17 @@ export function createConversationStore({
     if (state.activeId === id) return id
     commit({ ...state, activeId: id || null }, 'flush')
     return state.activeId
+  }
+
+  function setPinned(id, pinned) {
+    const index = state.conversations.findIndex((c) => c.id === id)
+    if (index < 0) return null
+    // Pinning is metadata, not activity: keep updatedAt and list order so
+    // the chat returns to its date group on unpin.
+    const conversations = state.conversations.slice()
+    conversations[index] = { ...conversations[index], pinned: pinned === true }
+    commit({ ...state, conversations }, 'flush')
+    return conversations[index]
   }
 
   function deleteConversation(id) {
@@ -398,6 +411,7 @@ export function createConversationStore({
     patchMessage,
     clearConversation,
     setActiveId,
+    setPinned,
     flush,
     subscribe,
     getSnapshot,
@@ -417,6 +431,7 @@ export const saveMessage = singleton.saveMessage
 export const patchMessage = singleton.patchMessage
 export const clearConversation = singleton.clearConversation
 export const setActiveId = singleton.setActiveId
+export const setPinned = singleton.setPinned
 export const flush = singleton.flush
 export const subscribe = singleton.subscribe
 export const getSnapshot = singleton.getSnapshot

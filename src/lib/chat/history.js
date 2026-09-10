@@ -20,9 +20,10 @@ function startOfLocalDay(ts) {
 }
 
 /**
- * Group conversations into date-based buckets. `now` is injectable for tests.
- * Input order is preserved (the store already sorts by updatedAt desc), and
- * groups with no items are omitted — never render an empty group.
+ * Group conversations into date-based buckets, with pinned chats lifted into
+ * a leading Pinned group. `now` is injectable for tests. Input order is
+ * preserved (the store already sorts by updatedAt desc), and groups with no
+ * items are omitted — never render an empty group.
  */
 export function groupConversations(conversations, now = Date.now()) {
   const list = Array.isArray(conversations) ? conversations : []
@@ -30,18 +31,25 @@ export function groupConversations(conversations, now = Date.now()) {
   const todayStart = startOfLocalDay(ref)
   const yesterdayStart = todayStart - DAY_MS
   const groups = [
+    { id: 'pinned', label: 'Pinned', items: [] },
     { id: 'today', label: 'Today', items: [] },
     { id: 'yesterday', label: 'Yesterday', items: [] },
     { id: 'earlier', label: 'Earlier', items: [] },
   ]
   for (const c of list) {
     if (!c || typeof c !== 'object') continue
+    // A pinned chat lives in the Pinned group only — never duplicated in a
+    // date bucket. Unpinning returns it to its chronological group.
+    if (c.pinned === true) {
+      groups[0].items.push(c)
+      continue
+    }
     const ts = Number(c.updatedAt) || Number(c.createdAt) || 0
     const bucket = ts >= todayStart
-      ? groups[0]
+      ? groups[1]
       : ts >= yesterdayStart
-        ? groups[1]
-        : groups[2]
+        ? groups[2]
+        : groups[3]
     bucket.items.push(c)
   }
   return groups.filter((g) => g.items.length > 0)

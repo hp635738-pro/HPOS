@@ -18,6 +18,7 @@ import {
 } from '../lib/storage/conversationStore.js'
 import { loadChatUiPrefs, saveChatUiPrefs } from '../lib/chat/chatUiPrefs.js'
 import { startNewChat } from '../lib/chat/history.js'
+import { sendFailureText } from '../lib/chat/sendFailure.js'
 
 /**
  * AI Chat → local runtime → supervised browser.deepseek task.
@@ -162,10 +163,13 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
       const cancelled = err?.code === DEEPSEEK_RUNTIME_ERROR.CANCELLED || err?.cancelled === true
       const interrupted = err?.code === DEEPSEEK_RUNTIME_ERROR.INTERRUPTED
       const partial = getConversation(convId)?.messages.find((message) => message.id === pending.id)?.content || ''
+      // Availability failures collapse to a neutral message — runtime state
+      // lives in the header container, never in the conversation.
+      const failureText = sendFailureText(err)
       patchMessage(convId, pending.id, {
         /* Streaming text already persisted by onDelta; never erase it with an
            error. With no partial output, the structured failure is the bubble. */
-        ...(!partial ? { content: err?.message || 'DeepSeek runtime task failed.' } : {}),
+        ...(!partial ? { content: failureText } : {}),
         status: 'sent',
         stoppable: false,
         notice: cancelled
@@ -173,7 +177,7 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
           : interrupted
             ? (err?.message || 'Runtime interrupted. The prompt was not sent again.')
             : partial
-              ? (err?.message || 'DeepSeek runtime task failed.')
+              ? failureText
               : null,
         meta: {
           error: !cancelled,

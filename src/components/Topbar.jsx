@@ -1,5 +1,5 @@
 import { useTheme } from '../theme/ThemeContext'
-import { Sun, Moon, Plus, History } from './Icons'
+import { Sun, Moon, History } from './Icons'
 import Notch, { TOOLS } from './Notch'
 import RuntimeStatus from './RuntimeStatus.jsx'
 
@@ -8,10 +8,11 @@ export { TOOLS }
 /**
  * Top bar. The "notch" is an inline pill inside the header holding the
  * primary workspace actions, sat beside the theme and bell buttons.
- * Page-specific actions (e.g. New chat) sit in the same right cluster as
- * independent controls — never inside the notch pill.
+ * Page-specific actions (e.g. the history toggle) sit in the same right
+ * cluster as independent controls — never inside the notch pill. New chat
+ * lives in the history sidebar, not the header.
  */
-export default function Topbar({ title, active, onNavigate, onNewChat, historyOpen, onToggleHistory, onOpenRuntimeDetails, runtimeStatusRef }) {
+export default function Topbar({ title, active, onNavigate, historyOpen, onToggleHistory, onOpenRuntimeDetails, runtimeStatusRef }) {
   const { prefs, resolved, set } = useTheme()
 
   return (
@@ -36,20 +37,6 @@ export default function Topbar({ title, active, onNavigate, onNewChat, historyOp
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
 
         <RuntimeStatus onOpenDetails={onOpenRuntimeDetails} triggerRef={runtimeStatusRef} />
-
-        {onNewChat && (
-          <button
-            type="button"
-            onClick={onNewChat}
-            className="hdr-action"
-            title="Start a new chat"
-            aria-label="New chat"
-            style={{ ...S.newChat, height: prefs.barBtn }}
-          >
-            <Plus size={15} />
-            <span>New chat</span>
-          </button>
-        )}
 
         {onToggleHistory && (
           <button
@@ -106,18 +93,6 @@ const S = {
     border: '1px solid var(--line)',
     background: 'var(--surface-2)',
     transition: 'border-radius .18s, background .22s',
-  },
-  newChat: {
-    padding: '0 11px', flexShrink: 0, width: 'auto',
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    fontSize: 12.5, fontWeight: 700, letterSpacing: '-.1px',
-    lineHeight: 1, whiteSpace: 'nowrap',
-    borderRadius: 'var(--radius-sm)',
-    color: 'var(--text-2)',
-    border: '1px solid var(--line)',
-    background: 'var(--surface-2)',
-    cursor: 'pointer',
-    transition: 'background .16s, color .16s',
   },
   historyOn: {
     color: 'var(--accent)',

@@ -13,6 +13,10 @@
  * I startNewChat creates when there is no active chat
  * J startNewChat reuses the active chat while it is still empty
  * K startNewChat creates once the active chat has messages
+ * L pinned chats lift into a leading Pinned group
+ * M pinned chats never duplicate into date groups
+ * N no Pinned group renders when nothing is pinned
+ * O input order is preserved within the Pinned group
  */
 import { groupConversations, startNewChat } from './history.js'
 import { createConversationStore, memoryStorage } from '../storage/conversationStore.js'
@@ -34,7 +38,10 @@ const startOfLocalDay = (ts) => {
 }
 const NOW = new Date(2026, 8, 10, 12, 0, 0).getTime() // local noon, fixed for tests
 const TODAY = startOfLocalDay(NOW)
-const chat = (id, updatedAt) => ({ id, title: id, updatedAt, createdAt: updatedAt, messages: [] })
+const chat = (id, updatedAt, pinned) => ({
+  id, title: id, updatedAt, createdAt: updatedAt, messages: [],
+  ...(pinned ? { pinned: true } : null),
+})
 
 /* A */
 assert(groupConversations([]).length === 0, 'A: empty list yields no groups')
@@ -129,8 +136,48 @@ const store = () => createConversationStore({ storage: memoryStorage(), now: () 
   assert(s.getConversations().length === 2, 'K: both conversations remain')
 }
 
+/* L — pinned chats lift into a leading Pinned group */
+{
+  const groups = groupConversations(
+    [chat('old', TODAY - 10 * 86_400_000, true), chat('new', NOW)],
+    NOW,
+  )
+  assert(groups.length === 2 && groups[0].id === 'pinned', 'L: Pinned group leads')
+  assert(groups[0].label === 'Pinned', 'L: Pinned label is exact')
+  assert(groups[0].items.map((c) => c.id).join(',') === 'old', 'L: Pinned holds the pinned chat')
+  assert(groups[1].id === 'today', 'L: unpinned chat stays in its date group')
+}
+
+/* M — pinned chats never duplicate into date groups */
+{
+  const groups = groupConversations(
+    [chat('p1', NOW, true), chat('p2', TODAY - 3 * 86_400_000, true), chat('u', NOW)],
+    NOW,
+  )
+  const seen = groups.flatMap((g) => g.items.map((c) => c.id))
+  assert(seen.filter((id) => id === 'p1').length === 1, 'M: pinned chat appears exactly once')
+  assert(seen.filter((id) => id === 'p2').length === 1, 'M: old pinned chat appears exactly once')
+  assert(groups.map((g) => g.id).join(',') === 'pinned,today', 'M: no empty date groups leak in')
+}
+
+/* N */
+{
+  const groups = groupConversations([chat('a', NOW), chat('b', TODAY - 10 * 86_400_000)], NOW)
+  assert(groups.some((g) => g.id === 'pinned') === false, 'N: no Pinned group when nothing is pinned')
+}
+
+/* O */
+{
+  const groups = groupConversations(
+    [chat('a', NOW - 10, true), chat('b', NOW - 20, true), chat('c', NOW - 5, true)],
+    NOW,
+  )
+  assert(groups.length === 1 && groups[0].id === 'pinned', 'O: all pinned yields one Pinned group')
+  assert(groups[0].items.map((c) => c.id).join(',') === 'a,b,c', 'O: input order preserved in Pinned')
+}
+
 if (failed) {
   console.error(`\n${failed} history helper test(s) failed`)
   process.exit(1)
 }
-console.log('\nhistory helpers A–K: all passed (grouping + startNewChat)')
+console.log('\nhistory helpers A–O: all passed (grouping + startNewChat)')

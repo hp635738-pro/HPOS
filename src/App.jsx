@@ -8,7 +8,6 @@ import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 import { getBrowserBridge } from './lib/bridge'
 import { getDeepSeekConnector } from './lib/bridge/DeepSeekConnector.js'
-import { startNewChat } from './lib/chat/history.js'
 
 export default function App() {
   const [view, setView] = useState('overview')
@@ -87,7 +86,6 @@ export default function App() {
           title={title}
           active={inRail ? null : view}
           onNavigate={navigate}
-          onNewChat={view === 'aiagents' ? () => { startNewChat() } : undefined}
           historyOpen={historyOpen}
           onToggleHistory={view === 'aiagents' ? () => setHistoryOpen((v) => !v) : undefined}
           onOpenRuntimeDetails={openRuntimeDetails}
