@@ -6,7 +6,7 @@
  * harness, so component contracts are verified by reading sources. Hold
  * timing semantics have real unit tests in src/lib/chat/longPress.test.mjs.
  *
- *   - header container: dot + text + running cat, compact, labelled
+ *   - header container: dot + running cat (icon-only, no visible text), compact, labelled
  *   - cat motion follows state (idle / run / fast), never the only signal
  *   - hold (~3s, pointer + keyboard) opens full-panel details; clicks don't
  *   - details: labelled view, sections, back/escape close, focus, no secrets
@@ -49,13 +49,17 @@ assert(
 )
 assert(status.includes('height: 28'), 'container stays compact')
 assert(
-  status.includes('CONN_DOT') && status.includes('{label}'),
-  'dot + status text carry state (never animation alone)',
+  status.includes('CONN_DOT') && !status.includes('<span>{label}</span>'),
+  'no visible status text — dot + cat carry state visually',
 )
 assert(
   status.includes("'Runtime connected'") && status.includes("'Runtime disconnected'") &&
     status.includes('#22c55e'),
-  'connected/disconnected labels and tones are distinguishable',
+  'accessible labels and dot tones stay distinguishable',
+)
+assert(
+  status.includes('aria-label={`${label}') && status.includes('title={`${conn.detail || label}'),
+  'full state stays in the accessible label + tooltip',
 )
 assert(!status.includes('onClick'), 'normal clicks never open details (no click handler)')
 assert(

@@ -24,11 +24,12 @@ const CONN_DOT = {
 /**
  * Compact runtime status container for the header:
  *
- *   [ ● ] [running cat] [ Runtime connected ]
+ *   [ ● ] [running cat]
  *
- * State is always carried by dot + text — the cat is a decorative activity
- * hint, never the only signal. The cat idles while disconnected, runs while
- * connected and healthy, and runs faster while runtime tasks are active.
+ * Icon-only by design — no visible status text. State is carried by the dot
+ * tone + the cat (accent + running while connected, muted + idle otherwise,
+ * faster while runtime tasks are active), and the full state stays in the
+ * accessible label + tooltip so assistive tech still announces it.
  *
  * Press-and-hold (~3s, pointer or keyboard) opens the full runtime details
  * view. There is deliberately NO click action, so a normal click can never
@@ -68,7 +69,6 @@ export default function RuntimeStatus({ onOpenDetails, triggerRef }) {
       >
         <RunningCat motion={motion} />
       </span>
-      <span>{label}</span>
       <span
         className="rt-hold"
         data-holding={holding ? 'true' : 'false'}
@@ -81,19 +81,15 @@ export default function RuntimeStatus({ onOpenDetails, triggerRef }) {
 const S = {
   chip: {
     height: 28,
-    padding: '0 10px',
+    padding: '0 9px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 7,
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '-.1px',
+    gap: 6,
     borderRadius: 999,
     color: 'var(--text-2)',
     border: '1px solid var(--line)',
     background: 'var(--surface)',
     cursor: 'pointer',
-    whiteSpace: 'nowrap',
     userSelect: 'none',
     WebkitTouchCallout: 'none',
     touchAction: 'manipulation',
