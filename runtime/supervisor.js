@@ -21,7 +21,7 @@
  *   - No retries. A failed task stays failed; this module never re-spawns.
  *   - `maxConcurrent` bounds live children even if a caller forgets to queue.
  *   - The environment is never logged: only its key *count* is reported, and
- *     captured output is used for parsing, not written to the log.
+ *     failed children expose only bounded, redacted stdout/stderr diagnostics.
  *
  * No dependencies, Node 18+.
  */
@@ -65,6 +65,9 @@ const MAX_INTERNAL_TIMEOUT_MS = 7200000
 const SHUTDOWN_WAIT_MS = 4000
 const STDERR_TAIL_CAP = 8192
 const EXCERPT_MAX = 240
+const DIAGNOSTIC_MARKER_RE = /^(?:HPOS_RESULT|HPOS_PROGRESS)\s/
+const SENSITIVE_DIAGNOSTIC_FIELD_RE = /\b(?:prompt|cookie|password|passwd|passphrase|token|secret|authorization|credential|session|api[_-]?key|access[_-]?key|private[_-]?key)\b\s*(?:=|:)\s*(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\r\n]*)/gi
+const BEARER_RE = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
 /* A launch plan is a fixed argv, so its size is a constant, not a variable:
    an argv the supervisor cannot describe in one line is a bug, not a feature. */
 const MAX_PLAN_ARGV = 16
@@ -194,11 +197,52 @@ function boundResult(result) {
   return result
 }
 
-/** Short diagnostic from captured output — no control chars, no secrets-by-name. */
+/** Short outcome excerpt retained for in-process consumers. */
 function excerpt(captured) {
   const raw = captured.tail(EXCERPT_MAX * 2)
   if (!raw) return ''
   return raw.split('\n').filter((l) => !l.startsWith(RESULT_MARKER)).join('\n').replace(/[^ -~]/g, ' ').trim().slice(-EXCERPT_MAX)
+}
+
+/**
+ * Make child output safe to put in a daemon log. Runner protocol lines are
+ * removed because they can carry the browser response, and diagnostic fields
+ * which could contain a prompt or credential are replaced before the bounded
+ * tail is emitted. `sensitiveValues` is kept in the supervisor only; it lets us
+ * remove the exact prompt/runtime secret even when a child prints it without a
+ * sensitive-looking field name.
+ */
+function diagnosticExcerpt(captured, sensitiveValues = []) {
+  /* The capture itself is already capped. Filter the complete retained tail
+     before taking the diagnostic tail, so a large protocol result cannot hide
+     an earlier useful error line. */
+  const raw = captured.text()
+  if (!raw) return ''
+
+  let text = raw
+    .split('\n')
+    .filter((line) => !DIAGNOSTIC_MARKER_RE.test(line.trimStart()))
+    .join('\n')
+
+  for (const value of sensitiveValues) {
+    if (typeof value !== 'string' || value.length < 3) continue
+    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    text = text.replace(new RegExp(escaped, 'g'), '[redacted]')
+  }
+
+  text = text
+    .replace(BEARER_RE, 'Bearer [redacted]')
+    .replace(SENSITIVE_DIAGNOSTIC_FIELD_RE, (match) => {
+      const separator = match.match(/[=:]\s*/)
+      if (!separator || separator.index == null) return '[redacted]'
+      return `${match.slice(0, separator.index)}${separator[0]}[redacted]`
+    })
+    /* Keep printable diagnostic text and line boundaries, never terminal
+       control sequences or arbitrary binary data. */
+    .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
+    .trim()
+
+  return text.slice(-EXCERPT_MAX)
 }
 
 export function createProcessSupervisor({
@@ -465,6 +509,14 @@ export function createProcessSupervisor({
       killTimer: null,
       stdout: createCapture(plan.maxOutputBytes),
       stderr: createCapture(STDERR_TAIL_CAP),
+      /* Prompt and daemon-side secret values are used only for diagnostic
+         redaction; they never become part of the outcome or log metadata. */
+      sensitiveValues: [
+        safeExecution?.request?.prompt,
+        ...Object.entries(env || {})
+          .filter(([name, value]) => isSensitiveEnvName(name) && typeof value === 'string')
+          .map(([, value]) => value),
+      ],
       progress: createProgressDecoder(typeof onProgress === 'function' ? onProgress : () => {}),
       startedAt: Date.now(),
       done: null,
@@ -701,12 +753,21 @@ export function createProcessSupervisor({
     outcome.result = boundResult(result)
     outcome.stderrExcerpt = excerpt(entry.stderr)
 
-    /* Deliberately thin: no environment, no output content, no task note. */
+    /* Keep the normal lifecycle metadata for every outcome. Failed children
+       additionally get bounded, redacted excerpts so an exit such as 70 has
+       an actionable error without logging a prompt or credential. */
+    const failureDiagnostics = outcome.status === TASK_STATE.FAILED
+      ? {
+          stdout: diagnosticExcerpt(entry.stdout, entry.sensitiveValues),
+          stderr: diagnosticExcerpt(entry.stderr, entry.sensitiveValues),
+        }
+      : {}
     info('task_process_settled', {
       taskId: entry.taskId, pid: entry.pid, status: outcome.status,
       exitCode: outcome.resources.exitCode, signal: outcome.resources.exitSignal, cause,
       stdoutBytes: entry.stdout.bytes, stderrBytes: entry.stderr.bytes,
       workspaceRemoved: cleanup.removed, workspaceReason: cleanup.reason,
+      ...failureDiagnostics,
     })
 
     entry.resolve(outcome)
