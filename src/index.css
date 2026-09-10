@@ -1,22 +1,42 @@
-:root {
-  /* Overwritten at runtime by ThemeProvider — these are just fallbacks. */
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --surface-2: #fafafc;
-  --rail: #16171a;
-  --rail-fg: #8e9098;
-  --rail-fg-on: #ffffff;
-  --rail-hover: rgba(255, 255, 255, .08);
-  --text: #16171a;
-  --text-2: #5c5f68;
-  --muted: #9a9ca4;
-  --line: #e8e9ed;
-  --shadow: 0 8px 24px -20px rgba(20, 22, 28, .5);
+/* Tailwind (preflight OFF in tailwind.config.js): utilities for shadcn/21st
+   components only. HPOS owns everything below and is unaffected. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  --accent: #3b82f6;
-  --accent-rgb: 59 130 246;
-  --accent-soft: rgba(59, 130, 246, .12);
+:root {
+  /* Overwritten at runtime by ThemeProvider — these are just fallbacks.
+     Values must match LIGHT_TOKENS in src/theme/tokens.js exactly
+     (tokens.test.mjs asserts the sync, compact rgba form included). */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f7f7f5;
+  --elevated: #ffffff;
+  --rail: #f7f7f5;
+  --rail-fg: #6f6e69;
+  --rail-fg-on: #37352f;
+  --rail-hover: rgba(55,53,47,.06);
+  --rail-line: #e7e7e4;
+  --text: #37352f;
+  --text-2: #6f6e69;
+  --muted: #767672;
+  --line: #e9e9e8;
+  --hover: rgba(55,53,47,.04);
+  --selected: rgba(55,53,47,.08);
+  --shadow: 0 1px 2px rgba(55,53,47,.06), 0 8px 24px -16px rgba(55,53,47,.12);
+  --success: #0f7b6c;
+  --success-soft: rgba(15,123,108,.14);
+  --warning: #b25e09;
+  --warning-soft: rgba(178,94,9,.14);
+  --danger: #d13438;
+  --danger-soft: rgba(209,52,56,.10);
+  --danger-line: rgba(209,52,56,.3);
+
+  --accent: #2383e2;
+  --accent-rgb: 35 131 226;
+  --accent-soft: rgba(35,131,226,.12);
   --accent-fg: #ffffff;
+  --ring: rgba(35,131,226,.35);
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -114,7 +134,7 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
   transition: background .16s, color .16s, height .18s, padding .18s, border-radius .18s;
 }
-.notch-btn:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.notch-btn:hover { color: var(--notch-hover-fg); background: var(--notch-hover-bg); }
 .notch-btn[data-on='true'] {
   background: var(--notch-on-bg);
   color: var(--notch-fg-on);
@@ -163,6 +183,78 @@ button:hover > .rail-grip { opacity: .45; }
 
 .conv-row:hover .conv-del { opacity: .7; }
 .conv-del:hover { opacity: 1 !important; color: var(--danger); }
+.conv-row:hover .conv-pin { opacity: .7; }
+.conv-pin:hover { opacity: 1 !important; color: var(--text); }
+/* Pinned rows keep a persistent, subtle pin indicator. */
+.conv-pin[data-on='true'] { opacity: .85; color: var(--accent); }
+
+/* ---- Composer upgrade: floating card, action states, files, voice ---- */
+.composer-card:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--cmp-ring), 0 8px 28px -12px rgba(0,0,0,.35);
+}
+.composer-pill:hover { border-color: var(--accent); color: var(--text); }
+
+.composer-action-icon {
+  display: grid; placeItems: center;
+  animation: composer-icon-in .18s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes composer-icon-in {
+  from { opacity: 0; transform: scale(.55); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.composer-files-in { animation: composer-files-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes composer-files-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.composer-menu-in {
+  animation: composer-menu-in .15s ease-out;
+  transform-origin: bottom left;
+}
+@keyframes composer-menu-in {
+  from { opacity: 0; transform: translateY(5px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.composer-label-in {
+  display: inline-block;
+  animation: composer-label-in .18s ease-out;
+}
+@keyframes composer-label-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Voice visualizer bars. Live heights arrive inline; the fallback
+   animation runs while the mic is starting or unavailable. */
+.mic-bar {
+  width: 3px; height: 8px; border-radius: 999px; flex-shrink: 0;
+  background: var(--accent);
+  animation: mic-bar 1s ease-in-out infinite;
+  transition: height .07s linear;
+}
+.mic-bar[data-live='true'] { animation: none; }
+@keyframes mic-bar {
+  0%, 100% { height: 6px; opacity: .55; }
+  50%      { height: 22px; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-action-icon,
+  .composer-files-in,
+  .composer-menu-in,
+  .composer-label-in,
+  .mic-bar { animation: none; }
+  /* Inline transitions need !important to yield. */
+  .composer-card,
+  .composer-area,
+  .composer-action,
+  .composer-pill,
+  .composer-pill * { transition: none !important; }
+}
 
 @keyframes bridge-dot-pulse {
   0%, 100% { opacity: .35; }
@@ -192,3 +284,287 @@ button:hover > .rail-grip { opacity: .45; }
 /* Shared control styling, driven by the Component edit panel. */
 .cmp-btn:hover { filter: brightness(1.06); }
 .cmp-btn:focus-visible, .cmp-input:focus-within { box-shadow: var(--cmp-ring); outline: none; }
+
+/* ------------------------------------------------- image generation (UI only)
+   Representative "generating" result state for Chat. Everything is theme-aware
+   via HPOS tokens — no Tailwind, no component library. Layout is responsive:
+   the card fills its bubble up to a cap, and the canvas keeps a square ratio. */
+.ig-card {
+  margin: 2px 0 0;
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
+}
+.ig-canvas {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--accent-soft), transparent 60%),
+    var(--surface-2);
+}
+.ig-blob {
+  position: absolute;
+  width: 62%;
+  aspect-ratio: 1 / 1;
+  border-radius: 42% 58% 61% 39% / 45% 41% 59% 55%;
+  background: var(--accent-soft);
+  filter: blur(2px);
+  opacity: .9;
+  animation: ig-morph 9s ease-in-out infinite alternate, ig-drift 13s ease-in-out infinite alternate;
+}
+.ig-blob-a { left: -12%; top: -10%; animation-delay: 0s, 0s; }
+.ig-blob-b {
+  right: -14%; top: 22%;
+  border-radius: 58% 42% 39% 61% / 55% 59% 41% 45%;
+  opacity: .7;
+  animation-delay: -3s, -4s;
+  animation-duration: 11s, 15s;
+}
+.ig-blob-c {
+  left: 8%; bottom: -18%;
+  border-radius: 52% 48% 44% 56% / 48% 56% 44% 52%;
+  opacity: .55;
+  animation-delay: -6s, -8s;
+  animation-duration: 12s, 17s;
+}
+/* Soft accent glow washing over the canvas. */
+.ig-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(58% 46% at 50% 46%, var(--accent-soft), transparent 70%);
+  animation: ig-glow 3.6s ease-in-out infinite;
+}
+/* Centered status: icon + "Generating image" + dots. */
+.ig-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+}
+.ig-icon {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.ig-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: .1px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.ig-dots { display: inline-flex; align-items: center; gap: 4px; }
+.ig-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: block;
+  background: var(--accent);
+  animation: ig-dot 1.1s ease-in-out infinite;
+}
+/* Resolution badge pinned to the canvas corner. */
+.ig-res {
+  position: absolute;
+  right: 10px; bottom: 10px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.ig-caption {
+  padding: 8px 4px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.ig-quote {
+  display: block;
+  overflow-wrap: break-word;
+  font-style: italic;
+}
+
+@keyframes ig-morph {
+  0%   { border-radius: 42% 58% 61% 39% / 45% 41% 59% 55%; transform: rotate(0deg) scale(1); }
+  50%  { border-radius: 58% 42% 45% 55% / 52% 58% 42% 48%; transform: rotate(24deg) scale(1.06); }
+  100% { border-radius: 46% 54% 52% 48% / 58% 44% 56% 42%; transform: rotate(-14deg) scale(.97); }
+}
+@keyframes ig-drift {
+  0%   { translate: 0 0; }
+  50%  { translate: 6% -5%; }
+  100% { translate: -5% 6%; }
+}
+@keyframes ig-glow {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
+}
+@keyframes ig-dot {
+  0%, 60%, 100% { opacity: .35; transform: none; }
+  30%           { opacity: 1;   transform: translateY(-2px); }
+}
+
+@media (max-width: 560px) {
+  .ig-card { max-width: 100%; }
+  .ig-icon { width: 34px; height: 34px; }
+  .ig-label { font-size: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ig-blob, .ig-glow, .ig-dot { animation: none; }
+  .chat-history { transition: none; }
+  .rt-cat-bob, .rt-cat-legs-a, .rt-cat-legs-b, .rt-cat-tail { animation: none; }
+  .rt-details { animation: none; }
+}
+
+/* -------------------------------------- chat history sidebar (right rail)
+   Secondary panel docked on the RIGHT — the exact opposite side from the main
+   navigation rail. Desktop: flex item that collapses to zero width when
+   closed. Narrow screens: overlay drawer sliding in from the right + scrim. */
+.chat-history {
+  flex-shrink: 0;
+  width: 264px;
+  min-height: 0;
+  align-self: stretch;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  opacity: 1;
+  visibility: visible;
+  transition: width .22s cubic-bezier(.4,0,.2,1), opacity .18s ease,
+    border-color .2s ease, transform .22s cubic-bezier(.4,0,.2,1), visibility 0s;
+}
+.chat-history[data-open="false"] {
+  width: 0;
+  opacity: 0;
+  border-left-color: transparent;
+  visibility: hidden;
+  /* Fade out first, then drop from the tab order. */
+  transition: width .22s cubic-bezier(.4,0,.2,1), opacity .18s ease,
+    border-color .2s ease, transform .22s cubic-bezier(.4,0,.2,1), visibility 0s .22s;
+}
+/* Fixed inner width so rows never squash mid-collapse. */
+.chat-history-inner {
+  width: 264px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chat-history-new:hover { filter: brightness(1.07); }
+.chat-history-close:hover { background: var(--surface-2); color: var(--text); }
+.chat-history .conv-row:hover { background: var(--surface-2); }
+.chat-history .conv-del:focus-visible { opacity: 1; }
+.chat-history .conv-pin:focus-visible { opacity: 1; }
+.chat-history-scrim { display: none; }
+
+@media (max-width: 860px) {
+  .chat-history {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    z-index: 40;
+    width: 264px;
+    max-width: 82vw;
+    box-shadow: -18px 0 44px -22px rgba(0,0,0,.5);
+  }
+  .chat-history-inner { width: 264px; max-width: 82vw; }
+  .chat-history[data-open="false"] {
+    width: 264px;
+    max-width: 82vw;
+    border-left-color: var(--line);
+    transform: translateX(105%);
+  }
+  .chat-history-scrim[data-open="true"] {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: rgba(10,11,14,.42);
+    cursor: default;
+  }
+}
+
+/* --------------------------------- runtime status: container + running cat
+   Header container. The cat idles while disconnected, runs while connected,
+   and sprints while runtime tasks are active (shorter --cat-dur). Dot + text
+   always carry state too — the cat is never the only signal. */
+.rt-status { position: relative; overflow: hidden; }
+.rt-status[data-holding="true"] { border-color: var(--accent); }
+/* Hold progress: fills over the 3s press (see LONG_PRESS_MS). */
+.rt-hold {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent);
+  transform: scaleX(0); transform-origin: left center;
+}
+.rt-hold[data-holding="true"] { transform: scaleX(1); transition: transform 3s linear; }
+
+.rt-cat { height: 20px; width: auto; display: block; --cat-dur: .72s; }
+.rt-cat[data-motion="fast"] { --cat-dur: .36s; }
+.rt-cat[data-motion="idle"] { opacity: .55; }
+.rt-cat-bob { animation: rt-cat-bob var(--cat-dur) ease-in-out infinite; }
+.rt-cat-legs-a, .rt-cat-legs-b {
+  animation: rt-cat-leg var(--cat-dur) ease-in-out infinite;
+  transform-box: fill-box; transform-origin: 50% 0;
+}
+/* Back legs run half a stride behind the front pair. */
+.rt-cat-legs-b { animation-delay: calc(var(--cat-dur) / -2); }
+.rt-cat-tail {
+  animation: rt-cat-tail var(--cat-dur) ease-in-out infinite;
+  transform-box: fill-box; transform-origin: 100% 100%;
+}
+.rt-cat[data-motion="idle"] .rt-cat-bob,
+.rt-cat[data-motion="idle"] .rt-cat-legs-a,
+.rt-cat[data-motion="idle"] .rt-cat-legs-b,
+.rt-cat[data-motion="idle"] .rt-cat-tail { animation-play-state: paused; }
+
+@keyframes rt-cat-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.4px); }
+}
+@keyframes rt-cat-leg {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2.4px); }
+}
+@keyframes rt-cat-tail {
+  0%, 100% { transform: rotate(-9deg); }
+  50%      { transform: rotate(9deg); }
+}
+
+/* --------------------------------------- runtime details: full-panel view
+   Overlay covering the chat area (above history + scrim), entered by
+   holding the header status container. */
+.rt-details {
+  position: absolute; inset: 0; z-index: 50;
+  overflow-y: auto; background: var(--bg);
+  animation: rt-details-in .22s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes rt-details-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}

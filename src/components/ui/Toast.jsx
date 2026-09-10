@@ -19,9 +19,9 @@ export const useToast = () => useContext(Ctx)
 let seq = 0
 
 const TONES = {
-  success: { ring: '#2ea86b', label: 'Success' },
+  success: { ring: 'var(--success)', label: 'Success' },
   error:   { ring: 'var(--danger)', label: 'Error' },
-  warn:    { ring: '#d9a441', label: 'Warning' },
+  warn:    { ring: 'var(--warning)', label: 'Warning' },
   info:    { ring: 'var(--accent)', label: 'Info' },
 }
 

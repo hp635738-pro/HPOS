@@ -79,11 +79,12 @@ separate fixed, native supervised provider path. Details: `runtime/linux/README.
 
 The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`) over
 SSE, including `GENERATING`/`STREAMING` and the bounded final assistant response
-for Chat. The header **Runtime Activity** popover shows connection/stream state,
-running tasks with Stop, Linux executor labels, bounded recent tasks, counters,
-and safe process metrics; it deliberately discards chat output and remains
-**not a terminal**. Event history is a bounded in-memory ring (never written to
-disk), and there is no arbitrary task, browser, command or shell UI.
+for Chat. Holding the header runtime status container opens the full-panel
+**Runtime details** view: connection/stream state, running tasks with Stop,
+Linux executor labels, bounded recent tasks, counters, and safe process
+metrics; it deliberately discards chat output and remains **not a terminal**.
+Event history is a bounded in-memory ring (never written to disk), and there
+is no arbitrary task, browser, command or shell UI.
 
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
@@ -106,7 +107,7 @@ npm test        # bridge, runtime-connection, runtime-event-stream, runtime-acti
 ### Theming
 - Light / Dark / System
 - 8 accent presets + custom colour picker
-- 11 colour tokens editable, light aur dark ke alag overrides
+- 16 colour tokens editable, light aur dark ke alag overrides
 - Density, radius, aur poora typography control
 
 ### Systems
@@ -244,9 +245,9 @@ Header ka standalone **New chat** naya conversation create karta hai (`title: "N
 
 Pehli meaningful user message se title **local** truncate hota hai (koi API nahi): `"Explain quantum computing"` → wahi title.
 
-### Sidebar list
+### History sidebar
 
-AI tools → AI chats ke neeche conversations: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
+Conversations right-side Chat History panel mein rehte hain (header ke History toggle se open/close): New Chat sabse upar, phir Today / Yesterday / Earlier groups. Row: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
 
 Delete active conversation: remaining mein sabse recent active ho jaati hai. Last wali delete ho to “Start a new chat”.
 

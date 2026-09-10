@@ -4,7 +4,6 @@ import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
-import ConversationList from './chat/ConversationList'
 
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
@@ -299,9 +298,6 @@ export default function Sidebar({ active, onChange }) {
                             {child.label}
                           </span>
                         </button>
-                        {child.id === 'aiagents' && (
-                          <ConversationList onOpen={() => onChange('aiagents')} />
-                        )}
                       </div>
                     )
                   })}
@@ -410,7 +406,7 @@ const S = {
   },
   pinDivider: {
     display: 'block', height: 1, margin: '6px 6px 3px',
-    background: 'rgba(255,255,255,.09)',
+    background: 'var(--rail-line)',
   },
   item: {
     position: 'relative', width: '100%',
@@ -444,7 +440,7 @@ const S = {
   },
   dot: {
     position: 'absolute', top: -2, right: -3,
-    width: 6, height: 6, borderRadius: '50%', background: '#f5c451',
+    width: 6, height: 6, borderRadius: '50%', background: 'var(--warning)',
   },
 
   subList: {

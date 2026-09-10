@@ -29,7 +29,7 @@ export default function MessageList({ messages, onSuggestion, onStop, empty = 'i
           <span style={S.heroIcon}><Sparkle size={26} /></span>
           <h2 style={S.heroTitle}>Start a new chat</h2>
           <p style={S.heroSub}>
-            Use New chat in the header, or type a message below.
+            Use New Chat in the history panel, or type a message below.
           </p>
         </main>
       )

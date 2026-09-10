@@ -55,7 +55,7 @@ export default function ColourField({ value, onChange, onReset, dirty }) {
 
       {open && (
         <ColourPicker
-          value={isValidHex(value) ? normalise(value) : '#3b82f6'}
+          value={isValidHex(value) ? normalise(value) : '#2383e2'}
           anchor={anchor}
           onChange={onChange}
           onClose={() => setOpen(false)}

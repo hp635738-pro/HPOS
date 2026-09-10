@@ -237,7 +237,7 @@ export default function ColourPicker({ value, onChange, onClose, anchor }) {
         {/* ------------------------------------------------------- CONTRAST */}
         {showContrast && (
           <div style={S.contrast}>
-            <span style={{ ...S.ratio, color: ratio >= 4.5 ? '#2ea86b' : ratio >= 3 ? '#d9a441' : 'var(--danger)' }}>
+            <span style={{ ...S.ratio, color: ratio >= 4.5 ? 'var(--success)' : ratio >= 3 ? 'var(--warning)' : 'var(--danger)' }}>
               {ratio.toFixed(2)}:1
             </span>
             <span style={S.ratioNote}>

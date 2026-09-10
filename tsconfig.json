@@ -1,0 +1,17 @@
+{
+  // Minimal config so the shadcn CLI can resolve project paths (@/*).
+  // HPOS stays JavaScript: allowJs + noEmit, and `vite build` never runs tsc.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}
