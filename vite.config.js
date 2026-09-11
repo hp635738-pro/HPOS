@@ -10,6 +10,8 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react(), prefsPlugin(), runtimeProxyPlugin(), diagPlugin()],
+  // Bundled Electron loads dist/index.html through file://, so assets must be relative.
+  base: './',
   // `@/*` mirrors tsconfig paths so shadcn-style `@/components/...` imports resolve.
   resolve: {
     alias: {

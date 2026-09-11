@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>HPOS Code Arena</title>
+    <title>HPOS Code Arena TEST</title>
     <!--
       HPOS Code Arena — desktop IDE shell + functional in-memory code editor.
 
@@ -304,12 +304,73 @@
       /* -------------------------------------------------------- workbench
          Floating panels: explorer | (editor + console) | live preview. */
       .workbench {
+        --preview-width: 26%;
         display: grid;
-        grid-template-columns: 248px minmax(0, 1fr) minmax(300px, 26%);
+        grid-template-columns: 248px minmax(420px, 1fr) 10px minmax(300px, var(--preview-width));
         gap: 10px;
         padding: 10px;
         min-height: 0;
         overflow: hidden;
+      }
+
+      .workbench.preview-full {
+        position: fixed;
+        inset: var(--toolbar-h) 0 var(--status-h);
+        z-index: 15;
+        grid-template-columns: minmax(0, 1fr);
+        padding: 12px;
+        background: var(--bg);
+      }
+
+      .workbench.preview-full > aside[aria-label="Project explorer"],
+      .workbench.preview-full > .center,
+      .workbench.preview-full > .preview-divider {
+        display: none;
+      }
+
+      .workbench.preview-full > aside[aria-label="Live preview"] {
+        grid-column: 1;
+      }
+
+      .preview-divider {
+        position: relative;
+        width: 10px;
+        min-width: 10px;
+        cursor: col-resize;
+        touch-action: none;
+      }
+
+      .preview-divider::before,
+      .preview-divider::after {
+        position: absolute;
+        left: 4px;
+        content: '';
+        width: 2px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+
+      .preview-divider::before {
+        top: 0;
+        bottom: 50%;
+        margin-bottom: 8px;
+      }
+
+      .preview-divider::after {
+        top: 50%;
+        bottom: 0;
+        margin-top: 8px;
+      }
+
+      .preview-divider:hover::before,
+      .preview-divider:hover::after,
+      .preview-divider.is-dragging::before,
+      .preview-divider.is-dragging::after {
+        background: var(--accent);
+      }
+
+      .preview-divider.is-dragging {
+        cursor: col-resize;
       }
 
       .center {
@@ -318,6 +379,27 @@
         gap: 10px;
         min-height: 0;
         min-width: 0;
+      }
+
+      /* Terminal focus mode keeps the Electron toolbar and status bar visible
+         while giving the terminal the complete available workbench area. */
+      .center.terminal-fullscreen {
+        position: fixed;
+        inset: var(--toolbar-h) 0 var(--status-h);
+        z-index: 20;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+        gap: 0;
+        padding: 12px;
+        background: var(--bg);
+      }
+
+      .center.terminal-fullscreen > section[aria-label="Code editor"] {
+        display: none;
+      }
+
+      .center.terminal-fullscreen > section[aria-label^="Terminal"] {
+        min-height: 0;
       }
 
       .panel {
@@ -648,6 +730,23 @@
       }
 
       .git-push-note--err {
+        color: var(--danger);
+      }
+
+      .git-pull-note {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+
+      .git-pull-note--ok {
+        color: var(--success);
+      }
+
+      .git-pull-note--err {
         color: var(--danger);
       }
 
@@ -1054,6 +1153,175 @@
 
       .notice--ok .notice-dot {
         background: var(--success);
+      }
+
+      /* ------------------------------------------------------ AI review */
+      .review-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(0, 0, 0, 0.62);
+      }
+
+      .review-backdrop[hidden] {
+        display: none;
+      }
+
+      .review-dialog {
+        display: flex;
+        flex-direction: column;
+        width: min(1180px, 100%);
+        max-height: min(860px, 100%);
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+      }
+
+      .review-head,
+      .review-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 0 0 auto;
+        padding: 12px 16px;
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .review-head h2 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .review-path {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--accent-text);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .review-head .spacer,
+      .review-foot .spacer {
+        flex: 1;
+      }
+
+      .review-body {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        padding: 16px;
+        overflow: auto;
+      }
+
+      .review-error {
+        padding: 9px 11px;
+        border: 1px solid rgba(255, 107, 107, 0.35);
+        border-radius: var(--r-xs);
+        background: rgba(255, 107, 107, 0.1);
+        color: var(--danger);
+        font-size: 12px;
+      }
+
+      .review-error[hidden] {
+        display: none;
+      }
+
+      .review-columns {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        min-height: 180px;
+      }
+
+      .review-pane {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 180px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.16);
+      }
+
+      .review-pane h3,
+      .review-diff-head {
+        margin: 0;
+        padding: 8px 10px;
+        background: var(--surface-2);
+        border-bottom: 1px solid var(--line);
+        color: var(--text-2);
+        font-size: 10.5px;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+      }
+
+      .review-code {
+        flex: 1;
+        min-height: 140px;
+        margin: 0;
+        padding: 10px;
+        overflow: auto;
+        color: var(--text-2);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.55;
+        user-select: text;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .review-diff {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: rgba(0, 0, 0, 0.2);
+      }
+
+      .review-diff-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
+      .diff-line {
+        display: block;
+        min-height: 18px;
+        padding: 1px 10px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .diff-line--added {
+        background: rgba(63, 182, 139, 0.14);
+        color: #9de0c3;
+      }
+
+      .diff-line--removed {
+        background: rgba(255, 107, 107, 0.14);
+        color: #ffb0b0;
+      }
+
+      .diff-line--same {
+        color: var(--muted);
+      }
+
+      @media (max-width: 700px) {
+        .review-backdrop { padding: 10px; }
+        .review-columns { grid-template-columns: 1fr; }
+        .review-dialog { max-height: 100%; }
       }
 
       .editor-empty {
@@ -1848,7 +2116,7 @@
          every size; the workbench scrolls internally once stacked. */
       @media (max-width: 1360px) {
         .workbench {
-          grid-template-columns: 224px minmax(0, 1fr) 288px;
+          grid-template-columns: 224px minmax(420px, 1fr) 10px minmax(288px, var(--preview-width));
         }
 
         .brand-sub {
@@ -1858,7 +2126,7 @@
 
       @media (max-width: 1120px) {
         .workbench {
-          grid-template-columns: 196px minmax(0, 1fr) 248px;
+          grid-template-columns: 196px minmax(380px, 1fr) 10px minmax(248px, var(--preview-width));
           gap: 8px;
           padding: 8px;
         }
@@ -1884,6 +2152,10 @@
         }
 
         .minimap {
+          display: none;
+        }
+
+        .preview-divider {
           display: none;
         }
       }
@@ -2068,7 +2340,7 @@
         </aside>
 
         <!-- -------------------------------------------- editor + console --->
-        <div class="center">
+        <div class="center" id="centerWorkspace">
           <section class="panel" aria-label="Code editor">
             <div class="tabs" id="tabs" role="tablist" aria-label="Open buffers"></div>
 
@@ -2139,6 +2411,9 @@
               <button type="button" class="panel-tab" id="tabGitHub" role="tab" aria-selected="false" aria-controls="paneGitHub">GitHub</button>
               <span class="spacer"></span>
               <span class="panel-note" id="paneNote">local log · no shell attached</span>
+              <button type="button" class="btn btn-xs" id="terminalFullscreen" aria-pressed="false" title="Expand the terminal workspace">
+                ⛶ Full Screen
+              </button>
             </div>
 
             <div class="panel-body">
@@ -2178,10 +2453,15 @@
                   </span>
                   <span class="chip" id="gitStateChip"><span class="dot"></span><span id="gitStateText">Loading</span></span>
                   <span class="panel-note" id="gitMeta">local commit · push upstream</span>
+                  <span class="git-pull-note" id="gitPullNote" role="status"></span>
                   <span class="spacer"></span>
                   <button type="button" class="btn btn-xs" id="gitPush" title="Push the current branch to its configured upstream">
                     <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-upload" /></svg>
                     <span id="gitPushText">Push</span>
+                  </button>
+                  <button type="button" class="btn btn-xs" id="gitPull" title="Check origin/main for a safe fast-forward update">
+                    <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-download" /></svg>
+                    <span id="gitPullText">Pull from GitHub</span>
                   </button>
                   <button type="button" class="btn btn-xs" id="gitRefresh" title="Re-read the Git status">
                     <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-refresh" /></svg>
@@ -2223,10 +2503,12 @@
         </div>
 
         <!-- -------------------------------------------------- preview --->
+        <div class="preview-divider" id="previewDivider" role="separator" aria-label="Resize editor and preview" aria-orientation="vertical" tabindex="0"></div>
         <aside class="panel" aria-label="Live preview">
           <div class="panel-head">
             <span class="panel-title">Live Preview</span>
             <span class="spacer"></span>
+            <button type="button" class="btn btn-xs" id="previewExpand" title="Expand to full preview" aria-pressed="false">Expand</button>
             <button type="button" class="btn btn-xs" id="previewToggle" title="Start or stop the local preview server">
               <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
               <span id="previewToggleText">Start</span>
@@ -2294,6 +2576,39 @@
         <span class="item" id="statusFile">no file open</span>
         <span class="item" id="statusBridge">fs bridge: checking…</span>
       </footer>
+    </div>
+
+    <div class="review-backdrop" id="aiReview" hidden>
+      <section class="review-dialog" role="dialog" aria-modal="true" aria-labelledby="aiReviewTitle">
+        <header class="review-head">
+          <h2 id="aiReviewTitle">Review AI change</h2>
+          <span class="review-path" id="aiReviewPath"></span>
+          <span class="spacer"></span>
+          <span class="chip">Awaiting approval</span>
+        </header>
+        <div class="review-body">
+          <div class="review-error" id="aiReviewError" role="alert" hidden></div>
+          <div class="review-columns">
+            <section class="review-pane" aria-labelledby="aiReviewOriginalTitle">
+              <h3 id="aiReviewOriginalTitle">Original content</h3>
+              <pre class="review-code" id="aiReviewOriginal"></pre>
+            </section>
+            <section class="review-pane" aria-labelledby="aiReviewProposedTitle">
+              <h3 id="aiReviewProposedTitle">Proposed content</h3>
+              <pre class="review-code" id="aiReviewProposed"></pre>
+            </section>
+          </div>
+          <section class="review-diff" aria-labelledby="aiReviewDiffTitle">
+            <h3 class="review-diff-head" id="aiReviewDiffTitle">Readable diff</h3>
+            <div id="aiReviewDiff"></div>
+          </section>
+        </div>
+        <footer class="review-foot">
+          <span class="spacer"></span>
+          <button type="button" class="btn" id="aiReviewCancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="aiReviewApply">Apply Changes</button>
+        </footer>
+      </section>
     </div>
 
     <script>
@@ -2364,14 +2679,23 @@
         var previewToggleBtn = byId('previewToggle')
         var previewToggleText = byId('previewToggleText')
         var previewReloadBtn = byId('previewReload')
+        var previewExpandBtn = byId('previewExpand')
+        var previewDivider = byId('previewDivider')
+        var workbenchEl = document.querySelector('.workbench')
+        var previewFull = false
+        var previewDeviceWidth = 0
+        var dividerDrag = null
         var gitBodyEl = byId('gitBody')
         var gitBranchTextEl = byId('gitBranchText')
         var gitStateChip = byId('gitStateChip')
         var gitStateText = byId('gitStateText')
         var gitMetaEl = byId('gitMeta')
+        var gitPullNote = byId('gitPullNote')
         var gitRefreshBtn = byId('gitRefresh')
         var gitPushBtn = byId('gitPush')
         var gitPushTextEl = byId('gitPushText')
+        var gitPullBtn = byId('gitPull')
+        var gitPullTextEl = byId('gitPullText')
         var gitCommitBox = byId('gitCommitBox')
         var gitMessageEl = byId('gitMessage')
         var gitCommitBtn = byId('gitCommitBtn')
@@ -2380,10 +2704,21 @@
         var gitSelectAllBtn = byId('gitSelectAll')
         var gitCommitNoteEl = byId('gitCommitNote')
         var paneNoteEl = byId('paneNote')
+        var centerWorkspaceEl = byId('centerWorkspace')
+        var terminalFullscreenBtn = byId('terminalFullscreen')
         var termEl = byId('paneTerminal')
         var consoleEl = byId('paneConsole')
         var cmdInput = byId('cmdInput')
         var runBtn = byId('runBtn')
+        var aiReviewEl = byId('aiReview')
+        var aiReviewPathEl = byId('aiReviewPath')
+        var aiReviewOriginalEl = byId('aiReviewOriginal')
+        var aiReviewProposedEl = byId('aiReviewProposed')
+        var aiReviewDiffEl = byId('aiReviewDiff')
+        var aiReviewErrorEl = byId('aiReviewError')
+        var aiReviewCancelBtn = byId('aiReviewCancel')
+        var aiReviewApplyBtn = byId('aiReviewApply')
+        var aiProposal = null
 
         /* The preload bridge. Absent in a plain browser (e.g. when this file is
            opened from a static server), in which case the editor falls back to
@@ -2404,6 +2739,117 @@
           typeof bridge.previewStatus === 'function'
             ? bridge
             : null
+
+        function renderAiDiff(original, proposed) {
+          while (aiReviewDiffEl.firstChild) aiReviewDiffEl.removeChild(aiReviewDiffEl.firstChild)
+          var before = String(original).split('\n')
+          var after = String(proposed).split('\n')
+          var i = 0
+          var j = 0
+
+          function addLine(kind, prefix, text) {
+            var row = document.createElement('div')
+            row.className = 'diff-line diff-line--' + kind
+            row.textContent = prefix + text
+            aiReviewDiffEl.appendChild(row)
+          }
+
+          while (i < before.length || j < after.length) {
+            if (i < before.length && j < after.length && before[i] === after[j]) {
+              addLine('same', '  ', before[i])
+              i += 1
+              j += 1
+            } else if (i + 1 < before.length && before[i + 1] === after[j]) {
+              addLine('removed', '- ', before[i])
+              i += 1
+            } else if (j + 1 < after.length && before[i] === after[j + 1]) {
+              addLine('added', '+ ', after[j])
+              j += 1
+            } else {
+              if (i < before.length) {
+                addLine('removed', '- ', before[i])
+                i += 1
+              }
+              if (j < after.length) {
+                addLine('added', '+ ', after[j])
+                j += 1
+              }
+            }
+          }
+        }
+
+        function setAiReviewError(message) {
+          aiReviewErrorEl.textContent = message || ''
+          if (message) aiReviewErrorEl.removeAttribute('hidden')
+          else aiReviewErrorEl.setAttribute('hidden', '')
+        }
+
+        function closeAiReview() {
+          aiProposal = null
+          setAiReviewError('')
+          aiReviewEl.setAttribute('hidden', '')
+          aiReviewApplyBtn.disabled = false
+          aiReviewCancelBtn.disabled = false
+          aiReviewApplyBtn.textContent = 'Apply Changes'
+        }
+
+        function reviewAiEdit(name, original, proposed) {
+          if (typeof name !== 'string' || !name || typeof original !== 'string' || typeof proposed !== 'string') {
+            return { ok: false, error: 'An AI edit review requires a file path, original content, and proposed content.' }
+          }
+          aiProposal = { name: name, original: original, proposed: proposed }
+          aiReviewPathEl.textContent = name
+          aiReviewPathEl.setAttribute('title', name)
+          aiReviewOriginalEl.textContent = original
+          aiReviewProposedEl.textContent = proposed
+          renderAiDiff(original, proposed)
+          setAiReviewError('')
+          aiReviewEl.removeAttribute('hidden')
+          aiReviewCancelBtn.focus()
+          return { ok: true }
+        }
+
+        function applyAiReview() {
+          if (!aiProposal || aiReviewApplyBtn.disabled) return Promise.resolve()
+          if (!bridge || typeof bridge.aiEditFile !== 'function') {
+            setAiReviewError('The secure AI edit bridge is unavailable. No changes were applied.')
+            return Promise.resolve()
+          }
+
+          aiReviewApplyBtn.disabled = true
+          aiReviewCancelBtn.disabled = true
+          aiReviewApplyBtn.textContent = 'Applying…'
+          setAiReviewError('')
+
+          return bridge.aiEditFile(aiProposal.name, aiProposal.proposed).then(
+            function (result) {
+              if (!result || !result.ok) {
+                aiReviewApplyBtn.disabled = false
+                aiReviewCancelBtn.disabled = false
+                aiReviewApplyBtn.textContent = 'Apply Changes'
+                setAiReviewError((result && result.error) || 'The AI edit was rejected. No changes were applied.')
+                return
+              }
+              logLine(consoleEl, 'ok', '[ai] applied reviewed change to ' + (result.relative || aiProposal.name))
+              closeAiReview()
+              if (typeof refreshExplorer === 'function') refreshExplorer()
+            },
+            function (err) {
+              aiReviewApplyBtn.disabled = false
+              aiReviewCancelBtn.disabled = false
+              aiReviewApplyBtn.textContent = 'Apply Changes'
+              setAiReviewError('The AI edit failed: ' + (err && err.message ? err.message : String(err)))
+            }
+          )
+        }
+
+        /* Future AI/LM code submits a proposal here; rendering never writes. */
+        window.hposCodeArena = window.hposCodeArena || {}
+        window.hposCodeArena.reviewEdit = reviewAiEdit
+        window.addEventListener('hpos:ai-edit-proposal', function (event) {
+          var detail = event && event.detail ? event.detail : {}
+          reviewAiEdit(detail.name || detail.path, detail.original, detail.proposed === undefined ? detail.content : detail.proposed)
+        })
 
         /* ================================================================
            Syntax highlighting
@@ -3461,6 +3907,7 @@
         }
 
         function setDeviceWidth(width) {
+          previewDeviceWidth = width
           var ids = ['deviceDesktop', 'deviceTablet', 'deviceMobile']
           ids.forEach(function (id) {
             var el = byId(id)
@@ -3471,7 +3918,48 @@
           if (!previewFrame) return
           previewFrame.className = 'preview-frame' + (width ? (width >= 700 ? ' preview-frame--tablet' : ' preview-frame--mobile') : '')
           previewFrame.style.width = width ? width + 'px' : '100%'
-          previewFrame.style.maxWidth = '100%'
+          previewFrame.style.maxWidth = width ? 'none' : '100%'
+          previewFrame.style.height = width ? '100%' : '100%'
+        }
+
+        function setFullPreview(on) {
+          previewFull = !!on
+          if (!workbenchEl || !previewExpandBtn) return
+          workbenchEl.classList.toggle('preview-full', previewFull)
+          previewExpandBtn.textContent = previewFull ? 'Exit Full Preview' : 'Expand'
+          previewExpandBtn.title = previewFull ? 'Return to the editor layout' : 'Expand to full preview'
+          previewExpandBtn.setAttribute('aria-pressed', previewFull ? 'true' : 'false')
+          document.body.classList.toggle('preview-is-full', previewFull)
+          window.requestAnimationFrame(function () {
+            setDeviceWidth(previewDeviceWidth)
+          })
+        }
+
+        function beginDividerDrag(event) {
+          if (!workbenchEl || window.innerWidth <= 980) return
+          dividerDrag = { pointerId: event.pointerId }
+          previewDivider.classList.add('is-dragging')
+          previewDivider.setPointerCapture(event.pointerId)
+          event.preventDefault()
+        }
+
+        function moveDividerDrag(event) {
+          if (!dividerDrag || !workbenchEl) return
+          var rect = workbenchEl.getBoundingClientRect()
+          var minPreview = 300
+          var minCenter = 380
+          var dividerGap = 20
+          var maxPreview = Math.max(minPreview, rect.width - 248 - minCenter - dividerGap)
+          var previewWidth = Math.max(minPreview, Math.min(maxPreview, rect.right - event.clientX - 10))
+          workbenchEl.style.setProperty('--preview-width', Math.round(previewWidth) + 'px')
+          setDeviceWidth(previewDeviceWidth)
+        }
+
+        function endDividerDrag(event) {
+          if (!dividerDrag) return
+          dividerDrag = null
+          previewDivider.classList.remove('is-dragging')
+          if (event && previewDivider.hasPointerCapture(event.pointerId)) previewDivider.releasePointerCapture(event.pointerId)
         }
 
         /* ================================================================
@@ -3605,6 +4093,8 @@
              the current repository and paints whatever comes back. It never
              sees, holds or sends a credential, a remote URL or a refspec. */
           push: { running: false, error: null, detail: null, message: null },
+           /* pull state: check/apply are both argument-free fixed IPC calls. */
+           pull: { state: 'idle', running: false, error: null, detail: null, message: null, plan: null },
         }
 
         var GIT_BADGE_CLASS = {
@@ -3741,6 +4231,7 @@
           paintGit()
           renderGitCommit()
           renderGitPush()
+          renderGitPull()
         }
 
         function paintGit() {
@@ -4249,6 +4740,165 @@
           )
         }
 
+        function pullBlocked() {
+          return !gitPullBtn || git.pull.running || git.loading || git.committing || git.push.running ||
+            !bridge || typeof bridge.checkGitPull !== 'function' || typeof bridge.applyGitPull !== 'function'
+        }
+
+        function renderGitPull() {
+          if (!gitPullBtn) return
+          var state = git.pull.state
+          var text = state === 'checking' ? 'Checking…'
+            : state === 'pulling' ? 'Pulling…'
+              : state === 'up-to-date' ? 'Up to date'
+                : state === 'local-changes' ? 'Local changes'
+                  : state === 'available' ? 'Update available'
+                    : state === 'updated' ? 'Updated'
+                      : state === 'error' ? 'Pull failed'
+                        : 'Pull from GitHub'
+          if (gitPullTextEl) gitPullTextEl.textContent = text
+          if (git.pull.running) gitPullBtn.classList.add('icon-btn--busy')
+          else gitPullBtn.classList.remove('icon-btn--busy')
+          if (pullBlocked()) gitPullBtn.setAttribute('disabled', '')
+          else gitPullBtn.removeAttribute('disabled')
+          if (state === 'local-changes') gitPullBtn.setAttribute('title', 'Local changes detected — commit or resolve them before pulling')
+          else if (state === 'available') gitPullBtn.setAttribute('title', 'Review the available origin/main update')
+          else if (state === 'up-to-date' || state === 'updated') gitPullBtn.setAttribute('title', 'Check origin/main again')
+          else gitPullBtn.setAttribute('title', 'Check origin/main for a safe fast-forward update')
+
+          if (gitPullNote) {
+            gitPullNote.className = 'git-pull-note'
+            var note = git.pull.error || git.pull.message || ''
+            if (git.pull.error) gitPullNote.classList.add('git-pull-note--err')
+            else if (state === 'up-to-date' || state === 'updated') gitPullNote.classList.add('git-pull-note--ok')
+            gitPullNote.textContent = note
+            gitPullNote.setAttribute('title', note)
+          }
+        }
+
+        function shortCommit(value) {
+          return String(value || '').slice(0, 12) || '(unknown)'
+        }
+
+        function pullConfirmation(plan) {
+          var files = Array.isArray(plan.changedFiles) ? plan.changedFiles.length : 0
+          return [
+            'Update local main from GitHub?',
+            '',
+            'Current commit: ' + shortCommit(plan.localCommit),
+            'New commit: ' + shortCommit(plan.remoteCommit),
+            'Commit: ' + (plan.commitMessage || '(no commit message)'),
+            'Changed files: ' + files + (plan.changedFilesTruncated ? '+' : ''),
+            '',
+            'Only a fast-forward update will be applied. Local changes are never discarded.',
+          ].join('\n')
+        }
+
+        function pullPostUpdateNotice(result) {
+          var files = Array.isArray(result.changedFiles) ? result.changedFiles : []
+          var dependencyChanged = result.packageFilesChanged === true
+          var processChanged = files.some(function (file) {
+            return file === 'HPOS-Desktop/main.js' || file === 'HPOS-Desktop/preload.js' || file === 'HPOS-Desktop/package.json'
+          })
+          if (dependencyChanged && processChanged) {
+            return 'Dependencies changed. Run npm install before starting the updated project. Restart HPOS to load updated Electron code.'
+          }
+          if (dependencyChanged) return 'Dependencies changed. Run npm install before starting the updated project.'
+          if (processChanged) return 'Updated Electron files are on disk. Restart HPOS to load the new main process.'
+          return ''
+        }
+
+        function refreshAfterPull(result) {
+          if (result && result.status) {
+            git.data = result.status
+            pruneGitSelection()
+          }
+          renderGit()
+          return refreshExplorer().then(function () {
+            refreshGit({ quiet: true })
+            var notice = pullPostUpdateNotice(result)
+            if (notice) showNotice('info', notice)
+          })
+        }
+
+        function pullFromGitHub() {
+          if (pullBlocked()) return Promise.resolve()
+          git.pull.running = true
+          git.pull.state = 'checking'
+          git.pull.error = null
+          git.pull.detail = null
+          git.pull.message = null
+          git.pull.plan = null
+          renderGit()
+
+          return bridge.checkGitPull().then(function (plan) {
+            git.pull.running = false
+            if (!plan || !plan.ok) {
+              git.pull.state = plan && plan.state === 'local-changes' ? 'local-changes' : 'error'
+              git.pull.error = (plan && plan.message) || 'Could not check GitHub for updates.'
+              git.pull.detail = (plan && plan.detail) || null
+              if (plan && plan.status) git.data = plan.status
+              renderGit()
+              logLine(consoleEl, 'err', '[git] pull check FAILED — ' + git.pull.error)
+              return
+            }
+            git.pull.plan = plan
+            if (plan.state === 'up-to-date') {
+              git.pull.state = 'up-to-date'
+              git.pull.message = 'Already up to date.'
+              if (plan.status) git.data = plan.status
+              renderGit()
+              return
+            }
+            if (plan.state !== 'available') {
+              git.pull.state = 'error'
+              git.pull.error = plan.message || 'Pull is not safe to apply.'
+              if (plan.status) git.data = plan.status
+              renderGit()
+              return
+            }
+
+            git.pull.state = 'available'
+            git.pull.message = 'Update available.'
+            renderGit()
+            if (typeof window.confirm !== 'function' || !window.confirm(pullConfirmation(plan))) {
+              git.pull.message = 'Update available; pull cancelled.'
+              renderGit()
+              return
+            }
+
+            git.pull.running = true
+            git.pull.state = 'pulling'
+            git.pull.error = null
+            git.pull.message = null
+            renderGit()
+            return bridge.applyGitPull(plan.remoteCommit).then(function (result) {
+              git.pull.running = false
+              if (!result || !result.ok) {
+                git.pull.state = result && result.state === 'local-changes' ? 'local-changes' : 'error'
+                git.pull.error = (result && result.message) || 'Pull failed.'
+                git.pull.detail = (result && result.detail) || null
+                if (result && result.status) git.data = result.status
+                renderGit()
+                logLine(consoleEl, 'err', '[git] pull FAILED — ' + git.pull.error)
+                return
+              }
+              git.pull.state = result.state === 'updated' ? 'updated' : 'up-to-date'
+              git.pull.message = result.message || 'Pull complete.'
+              return refreshAfterPull(result).then(function () {
+                logLine(consoleEl, 'ok', '[git] ' + git.pull.message)
+                logLine(termEl, 'ok', '$ hpos pull → ' + shortCommit(result.remoteCommit))
+              })
+            })
+          }, function (err) {
+            git.pull.running = false
+            git.pull.state = 'error'
+            git.pull.error = err && err.message ? err.message : String(err)
+            renderGit()
+            logLine(consoleEl, 'err', '[git] pull FAILED — ' + git.pull.error)
+          })
+        }
+
         function refreshGit(options) {
           /* An explicit refresh is also how a user clears a stale push note: the
              note belongs to the attempt, not to the status that replaces it. The
@@ -4339,6 +4989,16 @@
           })
         }
 
+        function setTerminalFullscreen(enabled) {
+          if (!centerWorkspaceEl || !terminalFullscreenBtn) return
+          var active = enabled === true
+          centerWorkspaceEl.classList.toggle('terminal-fullscreen', active)
+          terminalFullscreenBtn.setAttribute('aria-pressed', active ? 'true' : 'false')
+          terminalFullscreenBtn.textContent = active ? '⛶ Exit Full Screen' : '⛶ Full Screen'
+          terminalFullscreenBtn.setAttribute('title', active ? 'Return the terminal to its normal size' : 'Expand the terminal workspace')
+          if (active) showPane('terminal')
+        }
+
         /* ================================================================
            Wiring
            ================================================================ */
@@ -4418,6 +5078,14 @@
           renderCaret()
         })
 
+        aiReviewCancelBtn.addEventListener('click', closeAiReview)
+        aiReviewApplyBtn.addEventListener('click', function () {
+          applyAiReview()
+        })
+        aiReviewEl.addEventListener('click', function (event) {
+          if (event.target === aiReviewEl) closeAiReview()
+        })
+
         /* Explorer filter (the toolbar search box) + tree interactions.
            Filtering only hides rows that are already listed, so it never
            triggers a filesystem call. */
@@ -4482,6 +5150,24 @@
           })
         }
 
+        if (gitPullBtn) {
+          gitPullBtn.addEventListener('click', function () {
+            pullFromGitHub()
+          })
+        }
+
+        if (terminalFullscreenBtn) {
+          terminalFullscreenBtn.addEventListener('click', function () {
+            setTerminalFullscreen(!centerWorkspaceEl.classList.contains('terminal-fullscreen'))
+          })
+        }
+
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && centerWorkspaceEl.classList.contains('terminal-fullscreen')) {
+            setTerminalFullscreen(false)
+          }
+        })
+
         /* Commit box: a message, a file selection and one button. */
         if (gitCommitBtn) {
           gitCommitBtn.addEventListener('click', function () {
@@ -4510,6 +5196,20 @@
           previewToggleBtn.addEventListener('click', function () {
             if (preview.running) stopPreview()
             else startPreview()
+          })
+        }
+        if (previewExpandBtn) previewExpandBtn.addEventListener('click', function () { setFullPreview(!previewFull) })
+        if (previewDivider) {
+          previewDivider.addEventListener('pointerdown', beginDividerDrag)
+          previewDivider.addEventListener('pointermove', moveDividerDrag)
+          previewDivider.addEventListener('pointerup', endDividerDrag)
+          previewDivider.addEventListener('pointercancel', endDividerDrag)
+          previewDivider.addEventListener('keydown', function (event) {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            var current = parseInt(getComputedStyle(workbenchEl).getPropertyValue('--preview-width'), 10) || 360
+            var next = current + (event.key === 'ArrowLeft' ? 24 : -24)
+            workbenchEl.style.setProperty('--preview-width', Math.max(300, next) + 'px')
           })
         }
         if (previewReloadBtn) previewReloadBtn.addEventListener('click', function () { reloadPreview('manual') })

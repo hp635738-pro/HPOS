@@ -3,10 +3,13 @@
  *
  * This is the only thing that stands between the renderer and the main
  * process. It runs with contextIsolation on and nodeIntegration off, and it
- * exposes exactly these ten functions — nothing else:
+ * exposes these functions — nothing else:
  *
  *   window.hpos.listDirectory(dir)      -> { ok, path, relative, entries[], truncated }
  *   window.hpos.readFile(name)          -> { ok, name, path, relative, bytes, lines, content }
+ *   window.hpos.aiReadFile(name)       -> { ok, name, path, relative, bytes, lines, content }
+ *   window.hpos.aiEditFile(name, content) -> { ok, name, path, relative, bytes, lines }
+ *   window.hpos.sendAiEditProposal(proposal) -> { ok, name, reviewed }
  *   window.hpos.saveFile(name, content) -> { ok, name, path, relative, bytes, lines }
  *   window.hpos.startPreview(port?)     -> { ok, running, url, port, host, root }
  *   window.hpos.stopPreview()           -> { ok, running: false, url: null, port: null }
@@ -14,6 +17,8 @@
  *   window.hpos.gitStatus()             -> structured read-only Git state
  *   window.hpos.gitCommit(msg, files[]) -> { committed, commit, status, … }
  *   window.hpos.gitPush()               -> { pushed, ahead, behind, status, … }
+ *   window.hpos.checkGitPull()          -> structured origin/main update plan
+ *   window.hpos.applyGitPull(commit)   -> structured fast-forward result
  *   window.hpos.openCodeArena()         -> opens Code Arena
  *
  * gitStatus() takes no arguments at all — there is nothing for the renderer
@@ -42,6 +47,9 @@ const { contextBridge, ipcRenderer } = require('electron')
 /* Channel names are duplicated in main.js; the strings must stay in sync. */
 const CHANNEL_LIST = 'hpos:fs:list'
 const CHANNEL_READ = 'hpos:fs:read'
+const CHANNEL_AI_READ = 'hpos:ai:read-file'
+const CHANNEL_AI_EDIT = 'hpos:ai:edit-file'
+const CHANNEL_AI_PROPOSAL = 'hpos:ai:proposal'
 const CHANNEL_SAVE = 'hpos:fs:save'
 const CHANNEL_PREVIEW_START = 'hpos:preview:start'
 const CHANNEL_PREVIEW_STOP = 'hpos:preview:stop'
@@ -49,6 +57,8 @@ const CHANNEL_PREVIEW_STATUS = 'hpos:preview:status'
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
+const CHANNEL_GIT_PULL_CHECK = 'hpos:git:pull-check'
+const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -65,6 +75,30 @@ contextBridge.exposeInMainWorld('hpos', {
    */
   readFile(name) {
     return ipcRenderer.invoke(CHANNEL_READ, name)
+  },
+
+  /**
+   * Read a project file for the future AI tool layer.
+   * The main process applies the project-root and size checks.
+   */
+  aiReadFile(name) {
+    return ipcRenderer.invoke(CHANNEL_AI_READ, name)
+  },
+
+  /**
+   * Replace a project file for the future AI tool layer.
+   * The main process applies the project-root, symlink, and size checks.
+   */
+  aiEditFile(name, content) {
+    return ipcRenderer.invoke(CHANNEL_AI_EDIT, name, content)
+  },
+
+  /**
+   * Send a complete, read-backed AI edit proposal to the Code Arena review UI.
+   * This never writes a file; Apply Changes in Code Arena does that explicitly.
+   */
+  sendAiEditProposal(proposal) {
+    return ipcRenderer.invoke(CHANNEL_AI_PROPOSAL, proposal)
   },
 
   /**
@@ -115,6 +149,16 @@ contextBridge.exposeInMainWorld('hpos', {
    */
   gitPush() {
     return ipcRenderer.invoke(CHANNEL_GIT_PUSH)
+  },
+
+  /** Check origin/main and return a pull plan without changing project files. */
+  checkGitPull() {
+    return ipcRenderer.invoke(CHANNEL_GIT_PULL_CHECK)
+  },
+
+  /** Re-check safety and apply only the explicitly reviewed commit. */
+  applyGitPull(commit) {
+    return ipcRenderer.invoke(CHANNEL_GIT_PULL_APPLY, commit)
   },
 
   /**

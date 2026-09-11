@@ -20,6 +20,63 @@ import { loadChatUiPrefs, saveChatUiPrefs } from '../lib/chat/chatUiPrefs.js'
 import { startNewChat } from '../lib/chat/history.js'
 import { sendFailureText } from '../lib/chat/sendFailure.js'
 
+const EDIT_RESPONSE_RE = /<hpos-file-edit>\s*([\s\S]*?)\s*<\/hpos-file-edit>/i
+
+function parseEditResponse(text) {
+  const match = typeof text === 'string' ? text.match(EDIT_RESPONSE_RE) : null
+  if (!match) return null
+
+  let payload
+  try {
+    payload = JSON.parse(match[1])
+  } catch {
+    return { error: 'The AI edit proposal was not valid JSON.' }
+  }
+  const name = typeof payload?.name === 'string' ? payload.name : payload?.path
+  const proposed = typeof payload?.proposed === 'string' ? payload.proposed : payload?.content
+  if (payload?.type !== 'file_edit' || typeof name !== 'string' || !name || typeof proposed !== 'string') {
+    return { error: 'The AI edit proposal is missing a file path or complete replacement content.' }
+  }
+  return { name, proposed }
+}
+
+function isEditRequest(text) {
+  return /\b(edit|modify|change|update|rewrite|refactor|fix|replace)\b/i.test(text)
+}
+
+function promptForAi(content) {
+  if (!isEditRequest(content)) return content
+  return `${content}\n\nIf this request requires a project-file change, respond with exactly one proposal in this format and no other edit format:\n<hpos-file-edit>{"type":"file_edit","name":"project-relative/path","content":"complete replacement file content"}</hpos-file-edit>\nDo not apply the change yourself. For normal questions, respond conversationally as usual.`
+}
+
+async function prepareEditProposal(response) {
+  const parsed = parseEditResponse(response)
+  if (!parsed) return { ok: true, proposal: false }
+  if (parsed.error) return parsed
+  if (!window.hpos || typeof window.hpos.aiReadFile !== 'function') {
+    return { error: 'The secure AI file-read bridge is unavailable; no edit proposal was sent.' }
+  }
+
+  try {
+    const original = await window.hpos.aiReadFile(parsed.name)
+    if (!original || !original.ok || typeof original.content !== 'string') {
+      return { error: original?.error || `Could not read ${parsed.name}; no edit proposal was sent.` }
+    }
+    if (typeof window.hpos.sendAiEditProposal !== 'function') {
+      return { error: 'The Code Arena proposal bridge is unavailable; no edit proposal was sent.' }
+    }
+    const sent = await window.hpos.sendAiEditProposal({
+      name: parsed.name,
+      original: original.content,
+      proposed: parsed.proposed,
+    })
+    if (!sent || !sent.ok) return { error: sent?.error || 'Code Arena could not receive the edit proposal.' }
+    return { ok: true, proposal: true, name: sent.name || parsed.name }
+  } catch (error) {
+    return { error: error?.message || 'Could not prepare the AI edit proposal.' }
+  }
+}
+
 /**
  * AI Chat → local runtime → supervised browser.deepseek task.
  *
@@ -128,6 +185,7 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
       if (inflight.current?.messageId === pending.id) inflight.current = null
     }
 
+    content = promptForAi(content)
     getDeepSeekRuntimeClient().send(content, {
       correlationId: pending.id,
       conversationId: convId,
@@ -161,14 +219,23 @@ export default function ChatPage({ historyOpen = true, onCloseHistory, detailsOp
         }, { persist: 'flush' })
         clearIfCurrent()
       },
-    }).then((text) => {
+    }).then(async (text) => {
+      const edit = await prepareEditProposal(text || '')
       patchMessage(convId, pending.id, {
         content: text || '',
         status: 'sent',
         stoppable: false,
         notice: null,
-        meta: { provider: 'deepseek', executor: 'runtime-browser' },
+        meta: {
+          provider: 'deepseek',
+          executor: 'runtime-browser',
+          ...(edit.proposal ? { editProposal: { name: edit.name, reviewed: true } } : {}),
+          ...(edit.error ? { editProposalError: edit.error } : {}),
+        },
       }, { persist: 'flush' })
+      if (edit.error) {
+        patchMessage(convId, pending.id, { notice: edit.error }, { persist: 'flush' })
+      }
       clearIfCurrent()
     }).catch((err) => {
       const cancelled = err?.code === DEEPSEEK_RUNTIME_ERROR.CANCELLED || err?.cancelled === true

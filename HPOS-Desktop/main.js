@@ -1,27 +1,44 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { classifyGitPullState, packageFilesChanged: hasPullPackageFiles } = require('./gitPullPlan')
+const { WORKSPACE_ENV, resolveWorkspaceRoot } = require('./workspaceRoot')
+const { resolveFrontendEntry } = require('./frontendEntry')
 
 const DEV_URL = process.env.HPOS_DEV_URL || null
+const workspaceResolution = resolveWorkspaceRoot({
+  developmentRoot: path.resolve(__dirname, '..'),
+  isPackaged: app.isPackaged,
+  envRoot: process.env[WORKSPACE_ENV],
+  appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
+})
 
 /* --------------------------------------------------------------- fs bridge
    The renderer cannot touch the filesystem directly. It asks through the
    preload bridge, and every request lands in the two handlers at the bottom
-   of this file, which resolve the path inside PROJECT_ROOT first and refuse
+  of this file, which resolve the path inside WORKSPACE_ROOT first and refuse
    anything that escapes it (../ traversal, absolute paths, symlinks, name
    tricks). Reads and writes are size-capped and never throw across IPC —
    failures come back as { ok: false, code, error } so the UI can show them. */
-const PROJECT_ROOT = path.resolve(__dirname, '..')
+const WORKSPACE_ROOT = workspaceResolution.root
 const MAX_FILE_BYTES = 4 * 1024 * 1024
 const MAX_DIR_ENTRIES = 400
 /* Hidden entries are skipped so the explorer stays clean and a save's
    temporary file never flashes up as a folder entry. */
 const CHANNEL_SAVE = 'hpos:fs:save'
 const CHANNEL_READ = 'hpos:fs:read'
+const CHANNEL_AI_READ = 'hpos:ai:read-file'
+const CHANNEL_AI_EDIT = 'hpos:ai:edit-file'
+const CHANNEL_AI_PROPOSAL = 'hpos:ai:proposal'
 const CHANNEL_LIST = 'hpos:fs:list'
+const MAX_AI_FILE_BYTES = 1 * 1024 * 1024
 
 /** webContents created by this app — anything else is refused. */
 const trustedContents = new Set()
+let codeArenaWindow = null
+let codeArenaReady = false
+const pendingAiProposals = []
 
 function fail(code, error) {
   return { ok: false, code: code, error: error }
@@ -31,9 +48,32 @@ function isTrusted(event) {
   return !!(event && trustedContents.has(event.sender))
 }
 
+function validateAiProposal(proposal) {
+  if (!proposal || typeof proposal !== 'object') {
+    return fail('EINVALID', 'An AI edit proposal is required')
+  }
+  const resolved = resolveInProject(proposal.name)
+  if (!resolved.ok) return resolved
+  if (typeof proposal.original !== 'string' || typeof proposal.proposed !== 'string') {
+    return fail('EINVALID', 'An AI edit proposal needs original and proposed content')
+  }
+  if (Buffer.byteLength(proposal.original, 'utf8') > MAX_AI_FILE_BYTES) {
+    return fail('ETOOLARGE', 'The original AI proposal content exceeds the 1 MB limit')
+  }
+  if (Buffer.byteLength(proposal.proposed, 'utf8') > MAX_AI_FILE_BYTES) {
+    return fail('ETOOLARGE', 'The proposed AI content exceeds the 1 MB limit')
+  }
+  return {
+    ok: true,
+    name: resolved.relative,
+    original: proposal.original,
+    proposed: proposal.proposed,
+  }
+}
+
 /**
  * Turn a renderer-supplied file name into an absolute path that is guaranteed
- * to stay inside PROJECT_ROOT, or explain why the request is refused.
+ * to stay inside WORKSPACE_ROOT, or explain why the request is refused.
  * `options.allowRoot` permits the project directory itself (listing only);
  * file reads and writes always require a path below the root.
  */
@@ -56,8 +96,8 @@ function resolveInProject(name, options) {
     return fail('EESCAPE', 'Parent-directory segments are not allowed: ' + name)
   }
 
-  const target = path.resolve(PROJECT_ROOT, name)
-  const relative = path.relative(PROJECT_ROOT, target)
+  const target = path.resolve(WORKSPACE_ROOT, name)
+  const relative = path.relative(WORKSPACE_ROOT, target)
   if (relative === '') {
     if (!allowRoot) {
       return fail('EESCAPE', 'The HPOS-Desktop directory itself is not a file: ' + name)
@@ -69,15 +109,15 @@ function resolveInProject(name, options) {
   // Last gate: follow symlinks, so a link planted inside the project cannot
   // redirect a read, a listing or a write somewhere else.
   const withinRoot = (candidate) => {
-    const rel = path.relative(PROJECT_ROOT, candidate)
+    const rel = path.relative(WORKSPACE_ROOT, candidate)
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
   }
-  const realRoot = fs.realpathSync(PROJECT_ROOT)
+  const realRoot = fs.realpathSync(WORKSPACE_ROOT)
 
   // (a) the deepest existing ancestor. Never walk above the project root, or
   // the root's own parent would look like an escape.
   let dir = path.dirname(target)
-  if (!withinRoot(dir)) dir = PROJECT_ROOT
+  if (!withinRoot(dir)) dir = WORKSPACE_ROOT
   while (!fs.existsSync(dir)) {
     const parent = path.dirname(dir)
     if (parent === dir) break
@@ -113,7 +153,7 @@ function resolveInProject(name, options) {
 }
 
 /**
- * List one directory level inside PROJECT_ROOT. `dirName` may be '' or '.' for
+ * List one directory level inside WORKSPACE_ROOT. `dirName` may be '' or '.' for
  * the project root; every other value goes through the same escape checks as a
  * file request, so listing cannot be used to probe outside the project either.
  */
@@ -196,7 +236,8 @@ async function listProjectDirectory(dirName) {
   }
 }
 
-async function readProjectFile(name) {
+async function readProjectFile(name, maxBytes) {
+  const byteLimit = maxBytes || MAX_FILE_BYTES
   const resolved = resolveInProject(name)
   if (!resolved.ok) return resolved
 
@@ -209,8 +250,8 @@ async function readProjectFile(name) {
   if (!stats.isFile()) {
     return fail('ENOTFILE', resolved.relative + ' is not a file')
   }
-  if (stats.size > MAX_FILE_BYTES) {
-    return fail('ETOOLARGE', resolved.relative + ' is larger than the 4 MB editor limit')
+  if (stats.size > byteLimit) {
+    return fail('ETOOLARGE', resolved.relative + ' is larger than the ' + Math.round(byteLimit / (1024 * 1024)) + ' MB read limit')
   }
 
   try {
@@ -229,7 +270,12 @@ async function readProjectFile(name) {
   }
 }
 
-async function saveProjectFile(name, content) {
+async function readAiProjectFile(name) {
+  return readProjectFile(name, MAX_AI_FILE_BYTES)
+}
+
+async function saveProjectFile(name, content, maxBytes) {
+  const byteLimit = maxBytes || MAX_FILE_BYTES
   const resolved = resolveInProject(name)
   if (!resolved.ok) return resolved
 
@@ -237,8 +283,8 @@ async function saveProjectFile(name, content) {
     return fail('EINVALID', 'Content must be a string')
   }
   const bytes = Buffer.byteLength(content, 'utf8')
-  if (bytes > MAX_FILE_BYTES) {
-    return fail('ETOOLARGE', 'Refusing to write more than 4 MB in one save')
+  if (bytes > byteLimit) {
+    return fail('ETOOLARGE', 'Refusing to write more than ' + Math.round(byteLimit / (1024 * 1024)) + ' MB in one save')
   }
 
   const target = resolved.path
@@ -290,6 +336,10 @@ async function saveProjectFile(name, content) {
   }
 }
 
+async function editAiProjectFile(name, content) {
+  return saveProjectFile(name, content, MAX_AI_FILE_BYTES)
+}
+
 /* ---------------------------------------------------------------- preview
    A tiny static server for the HPOS-Desktop project, owned entirely by the
    main process. The renderer can only ask it to start/stop and read its
@@ -305,6 +355,8 @@ const http = require('http')
 const CHANNEL_PREVIEW_START = 'hpos:preview:start'
 const CHANNEL_PREVIEW_STOP = 'hpos:preview:stop'
 const CHANNEL_PREVIEW_STATUS = 'hpos:preview:status'
+const VITE_PREVIEW_PORT = 5173
+const VITE_PREVIEW_URL = 'http://localhost:' + VITE_PREVIEW_PORT + '/'
 
 const PREVIEW_MIME = {
   html: 'text/html; charset=utf-8',
@@ -331,11 +383,14 @@ const PREVIEW_MIME = {
 
 let previewServer = null
 let previewInfo = null
+let previewProcess = null
+let previewProcessOwned = false
+let previewStartPromise = null
 const previewSockets = new Set()
 
 function previewStatusPayload() {
   if (!previewInfo) {
-    return { ok: true, running: false, url: null, port: null, root: PROJECT_ROOT }
+    return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
   }
   return {
     ok: true,
@@ -343,10 +398,62 @@ function previewStatusPayload() {
     url: previewInfo.url,
     port: previewInfo.port,
     host: '127.0.0.1',
-    root: PROJECT_ROOT,
+    root: WORKSPACE_ROOT,
     startedAt: previewInfo.startedAt,
     requests: previewInfo.requests,
   }
+}
+
+function probeVitePreview() {
+  return new Promise((resolve) => {
+    const request = http.get(
+      { hostname: '127.0.0.1', port: VITE_PREVIEW_PORT, path: '/', timeout: 750 },
+      (response) => {
+        let body = ''
+        response.setEncoding('utf8')
+        response.on('data', (chunk) => {
+          if (body.length < 128 * 1024) body += chunk
+        })
+        response.on('end', () => {
+          const isVite =
+            response.statusCode === 200 &&
+            /text\/html/i.test(String(response.headers['content-type'] || '')) &&
+            body.indexOf('/@vite/client') !== -1
+          resolve(isVite)
+        })
+      }
+    )
+    request.on('error', () => resolve(false))
+    request.on('timeout', () => request.destroy())
+  })
+}
+
+function waitForVitePreview(child) {
+  return new Promise((resolve) => {
+    let finished = false
+    let childError = null
+    const finish = (ready) => {
+      if (finished) return
+      finished = true
+      clearInterval(timer)
+      clearTimeout(timeout)
+      resolve({ ready: ready, error: childError })
+    }
+    const timer = setInterval(() => {
+      if (childError || child.exitCode !== null) return finish(false)
+      probeVitePreview().then((ready) => {
+        if (ready) finish(true)
+      })
+    }, 150)
+    const timeout = setTimeout(() => finish(false), 20000)
+    child.once('error', (err) => {
+      childError = err
+      finish(false)
+    })
+    child.once('exit', (code) => {
+      if (code !== null && code !== 0) finish(false)
+    })
+  })
 }
 
 function previewSend(res, status, body) {
@@ -455,68 +562,64 @@ function previewListen(port) {
 }
 
 async function startPreviewServer(requestedPort) {
-  if (previewServer) return previewStatusPayload()
+  if (previewInfo) return previewStatusPayload()
+  if (previewStartPromise) return previewStartPromise
 
-  const wanted =
-    Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort < 65536 ? requestedPort : 0
+  previewStartPromise = (async () => {
+    if (await probeVitePreview()) {
+      previewInfo = { port: VITE_PREVIEW_PORT, url: VITE_PREVIEW_URL, startedAt: Date.now(), requests: 0 }
+      return previewStatusPayload()
+    }
 
-  let attempt = await previewListen(wanted)
-  if (!attempt.ok && wanted !== 0 && ['EADDRINUSE', 'EACCES'].indexOf(attempt.error.code) !== -1) {
-    // The requested port is taken: take an OS-assigned one instead of failing.
-    attempt = await previewListen(0)
+    const command = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+    const child = require('child_process').spawn(
+      command,
+      ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(VITE_PREVIEW_PORT)],
+      { cwd: WORKSPACE_ROOT, windowsHide: true, stdio: 'ignore' }
+    )
+    previewProcess = child
+    previewProcessOwned = true
+
+    const result = await waitForVitePreview(child)
+    if (!result.ready) {
+      try { child.kill() } catch (err) { /* Already stopped. */ }
+      previewProcess = null
+      previewProcessOwned = false
+      return fail('EVITE', 'Could not start the Vite preview server')
+    }
+
+    previewInfo = { port: VITE_PREVIEW_PORT, url: VITE_PREVIEW_URL, startedAt: Date.now(), requests: 0 }
+    child.once('exit', () => {
+      if (previewProcess === child) {
+        previewProcess = null
+        previewProcessOwned = false
+        previewInfo = null
+      }
+    })
+    return previewStatusPayload()
+  })()
+
+  try {
+    return await previewStartPromise
+  } finally {
+    previewStartPromise = null
   }
-  if (!attempt.ok) {
-    return fail(attempt.error.code || 'ELISTEN', 'Could not start the preview server: ' + attempt.error.message)
-  }
-
-  previewServer = attempt.server
-  previewInfo = {
-    port: attempt.address.port,
-    url: 'http://127.0.0.1:' + attempt.address.port + '/',
-    startedAt: Date.now(),
-    requests: 0,
-  }
-  previewServer.on('close', () => {
-    previewServer = null
-  })
-
-  return previewStatusPayload()
 }
 
 function stopPreviewServer() {
   return new Promise((resolve) => {
-    const server = previewServer
-    if (!server) {
+    if (!previewInfo && !previewProcess) {
       previewInfo = null
-      return resolve({ ok: true, running: false, url: null, port: null, root: PROJECT_ROOT })
+      return resolve({ ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT })
     }
 
-    previewSockets.forEach((socket) => {
-      try {
-        socket.destroy()
-      } catch (err) {
-        // Already gone.
-      }
-    })
-    previewSockets.clear()
-
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      previewServer = null
-      previewInfo = null
-      resolve({ ok: true, running: false, url: null, port: null, root: PROJECT_ROOT })
+    if (previewProcess && previewProcessOwned) {
+      try { previewProcess.kill() } catch (err) { /* Already stopped. */ }
     }
-
-    try {
-      server.close(finish)
-    } catch (err) {
-      return finish()
-    }
-    // Keep-alive sockets are destroyed above, so this is only a safety net.
-    const timer = setTimeout(finish, 1500)
-    if (typeof timer.unref === 'function') timer.unref()
+    previewProcess = null
+    previewProcessOwned = false
+    previewInfo = null
+    resolve({ ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT })
   })
 }
 
@@ -529,6 +632,15 @@ function shutdownPreview() {
     }
   })
   previewSockets.clear()
+  if (previewProcess && previewProcessOwned) {
+    try {
+      previewProcess.kill()
+    } catch (err) {
+      // Already stopped.
+    }
+  }
+  previewProcess = null
+  previewProcessOwned = false
   if (previewServer) {
     try {
       previewServer.close()
@@ -548,10 +660,10 @@ function shutdownPreview() {
        string ever crosses the boundary, so nothing here is injectable;
      · every command is execFile() in argv form with shell:false, so no shell
        is involved and no string is ever interpreted;
-     · cwd is hard-wired to PROJECT_ROOT — the renderer cannot choose a
+    · cwd is hard-wired to WORKSPACE_ROOT — the renderer cannot choose a
        working directory;
      · output is scoped with a '.' pathspec (only HPOS-Desktop changes) and
-       any path that still resolves outside PROJECT_ROOT is dropped;
+      any path that still resolves outside WORKSPACE_ROOT is dropped;
      · prompts, system config and optional locks are disabled, output is
        size-capped and every call is time-limited.
 
@@ -559,22 +671,28 @@ function shutdownPreview() {
    `rev-parse`, `status`, `log`, `remote` and `rev-list` (history counting for
    ahead/behind). Writing has its own, equally narrow paths below: the commit
    path can only run `add` and `commit` on validated paths inside
-   HPOS-Desktop, and the push path can only run `push` to the current branch's
-   configured upstream. Pull and fetch do not exist here at all. */
+  HPOS-Desktop, the push path can only run `push` to the current branch's
+  configured upstream, and the pull path can only fetch origin/main followed
+  by a fast-forward-only merge. No reset, checkout, clean, stash or rebase is
+  reachable from this bridge. */
 const { execFile } = require('child_process')
 const os = require('os')
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
+const CHANNEL_GIT_PULL_CHECK = 'hpos:git:pull-check'
+const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
 
 const GIT_TIMEOUT_MS = 8000
 const GIT_COMMIT_TIMEOUT_MS = 20000
 /* A push talks to the network, so it gets a longer leash than a local command
    — but still a leash: a hung remote must never hang the app. */
 const GIT_PUSH_TIMEOUT_MS = 60000
+const GIT_FETCH_TIMEOUT_MS = 60000
+const GIT_PULL_TIMEOUT_MS = 60000
 const GIT_MAX_BUFFER = 4 * 1024 * 1024
 const GIT_MAX_ENTRIES = 200
-const GIT_READONLY_COMMANDS = ['rev-parse', 'status', 'log', 'remote', 'rev-list']
+const GIT_READONLY_COMMANDS = ['rev-parse', 'status', 'log', 'remote', 'rev-list', 'diff']
 /* The only commands in this file that may change repository state. `add`
    stages exactly the paths the renderer selected (always behind `--`), and
    `commit` is only ever reached with a validated message and pathspecs.
@@ -584,6 +702,8 @@ const GIT_WRITE_COMMANDS = ['add', 'commit']
 /* Push lives in its own one-entry allowlist: the commit path can never push,
    and the push path can never run anything but `push`. */
 const GIT_PUSH_COMMANDS = ['push']
+const GIT_FETCH_COMMANDS = ['fetch']
+const GIT_PULL_COMMANDS = ['merge']
 const GIT_MAX_MESSAGE = 2000
 const GIT_MAX_COMMIT_FILES = 200
 /* Neutralise repo config that could run other programs as a side effect. */
@@ -681,7 +801,7 @@ function execGit(args, allowedCommands, options) {
         'git',
         (opts.config || GIT_SAFE_CONFIG).concat(args),
         {
-          cwd: PROJECT_ROOT, // never taken from the renderer
+          cwd: WORKSPACE_ROOT, // never taken from the renderer
           env: opts.env || gitEnvironment(),
           shell: false,
           windowsHide: true,
@@ -707,7 +827,7 @@ function execGit(args, allowedCommands, options) {
   })
 }
 
-/** Read-only git. The allowlist here is exactly rev-parse/status/log/remote. */
+/** Read-only git. The allowlist contains only status and comparison commands. */
 function runGit(args, timeoutMs) {
   return execGit(args, GIT_READONLY_COMMANDS, { timeout: timeoutMs || GIT_TIMEOUT_MS })
 }
@@ -730,11 +850,28 @@ function runGitPush(args) {
   })
 }
 
+/** Fetch only the fixed origin/main target used by Code Arena Pull. */
+function runGitFetch(args) {
+  return execGit(args, GIT_FETCH_COMMANDS, {
+    env: gitPushEnvironment(),
+    timeout: GIT_FETCH_TIMEOUT_MS,
+  })
+}
+
+/** Apply only a fast-forward update; no merge commit or conflict resolution. */
+function runGitPull(args) {
+  return execGit(args, GIT_PULL_COMMANDS, {
+    config: GIT_WRITE_CONFIG,
+    env: gitPushEnvironment(),
+    timeout: GIT_PULL_TIMEOUT_MS,
+  })
+}
+
 /** Map a repo-root-relative path onto HPOS-Desktop, refusing anything outside it. */
 function toProjectPath(repoRoot, reportedPath) {
   if (!reportedPath) return null
   const absolute = path.resolve(repoRoot, reportedPath)
-  const relative = path.relative(PROJECT_ROOT, absolute)
+  const relative = path.relative(WORKSPACE_ROOT, absolute)
   if (relative.startsWith('..') || path.isAbsolute(relative)) return null
   return relative.split(path.sep).join('/')
 }
@@ -858,7 +995,7 @@ async function readGitStatus() {
         ok: true,
         available: false,
         isRepo: false,
-        projectRoot: PROJECT_ROOT,
+        projectRoot: WORKSPACE_ROOT,
         message: 'Git is not installed or not on PATH',
         checkedAt: Date.now(),
       }
@@ -867,7 +1004,7 @@ async function readGitStatus() {
       ok: true,
       available: true,
       isRepo: false,
-      projectRoot: PROJECT_ROOT,
+      projectRoot: WORKSPACE_ROOT,
       message: 'HPOS-Desktop is not inside a Git repository',
       detail: probe.message,
       checkedAt: Date.now(),
@@ -875,7 +1012,7 @@ async function readGitStatus() {
   }
 
   const topLevel = await runGit(['rev-parse', '--show-toplevel'])
-  const repoRoot = topLevel.ok ? topLevel.stdout.trim() : PROJECT_ROOT
+  const repoRoot = topLevel.ok ? topLevel.stdout.trim() : WORKSPACE_ROOT
 
   const statusResult = await runGit([
     'status',
@@ -892,7 +1029,7 @@ async function readGitStatus() {
       available: true,
       isRepo: true,
       repoRoot: repoRoot,
-      projectRoot: PROJECT_ROOT,
+      projectRoot: WORKSPACE_ROOT,
       message: 'Could not read the Git status',
       detail: statusResult.message,
       error: true,
@@ -943,9 +1080,9 @@ async function readGitStatus() {
     ok: true,
     available: true,
     isRepo: true,
-    projectRoot: PROJECT_ROOT,
+    projectRoot: WORKSPACE_ROOT,
     repoRoot: repoRoot,
-    projectIsRepoRoot: path.resolve(repoRoot) === path.resolve(PROJECT_ROOT),
+    projectIsRepoRoot: path.resolve(repoRoot) === path.resolve(WORKSPACE_ROOT),
     branch: info.head,
     detached: !!info.detached,
     head: info.oid,
@@ -986,7 +1123,7 @@ async function readGitStatus() {
      · '.git' itself never becomes a pathspec;
      · pathspecs are passed in argv behind '--' with GIT_LITERAL_PATHSPECS=1,
        so a selected path matches itself and nothing else;
-     · only `add` and `commit` may run, always with cwd = PROJECT_ROOT.
+    · only `add` and `commit` may run, always with cwd = WORKSPACE_ROOT.
 
    Nothing that was not selected is committed: `git commit -- <paths>` is a
    partial commit, so files that were already staged, or are simply dirty,
@@ -1149,7 +1286,7 @@ async function commitGitChanges(rawMessage, rawFiles) {
     /* Only selected files that really changed: this stops a no-op selection
        before anything is staged, and pins down what the commit will contain. */
     const repoRootResult = await runGit(['rev-parse', '--show-toplevel'])
-    const repoRoot = repoRootResult.ok ? repoRootResult.stdout.trim() : PROJECT_ROOT
+    const repoRoot = repoRootResult.ok ? repoRootResult.stdout.trim() : WORKSPACE_ROOT
     const dirty = await runGit(
       ['status', '--porcelain=v2', '-z', '--untracked-files=all', '--'].concat(selected)
     )
@@ -1235,7 +1372,7 @@ async function commitGitChanges(rawMessage, rawFiles) {
        than forced, and "nothing to send" is reported without touching the
        network;
      · only the one allowlisted command (`push`) can run, with cwd pinned to
-       PROJECT_ROOT, hooks disabled and no credential on the command line —
+      WORKSPACE_ROOT, hooks disabled and no credential on the command line —
        authentication is whatever the user's own Git credential helper or SSH
        key provides, and every string that comes back out is scrubbed. */
 const GIT_UPSTREAM_SEPARATOR = '/'
@@ -1465,6 +1602,202 @@ async function pushGitBranchOnce() {
     )
   }
 }
+
+/* -------------------------------------------------------------- git pull
+   Code Arena Pull is intentionally a two-phase operation. The check phase
+   fetches only origin/main and returns a plan; the apply phase repeats every
+   safety check before running the one permitted fast-forward command. */
+const GIT_PULL_TARGET = 'origin/main'
+let gitPullInFlight = false
+
+function pullFailure(code, message, status, extra) {
+  return Object.assign(fail(code, message), {
+    state: 'error',
+    status: status || null,
+  }, extra || {})
+}
+
+async function readPullCommit(ref) {
+  const result = await runGit([
+    'log',
+    '-1',
+    '--no-show-signature',
+    '--format=%H%x1f%h%x1f%s',
+    ref,
+  ])
+  if (!result.ok || !result.stdout.trim()) return null
+  const parts = result.stdout.trim().split('\x1f')
+  if (parts.length < 3) return null
+  return { hash: parts[0], short: parts[1], subject: parts[2] }
+}
+
+async function readPullChangedFiles() {
+  const result = await runGit(['diff', '--name-only', '-z', 'HEAD', GIT_PULL_TARGET, '--'])
+  if (!result.ok) return { ok: false, error: sanitizeGitText(result.message) || 'Could not list files in the GitHub update' }
+  const files = String(result.stdout || '')
+    .split('\0')
+    .filter(Boolean)
+    .map((entry) => entry.replace(/\\/g, '/'))
+    .filter((entry) => entry && entry !== '.git' && entry.indexOf('.git/') !== 0)
+  return { ok: true, files: files.slice(0, GIT_MAX_ENTRIES), truncated: files.length > GIT_MAX_ENTRIES }
+}
+
+function pullPackageFilesChanged(files) {
+  return hasPullPackageFiles(files)
+}
+
+async function inspectGitPull() {
+  const status = await readGitStatus()
+  if (!status || !status.available) {
+    return pullFailure('ENOENT', status?.message || 'Git is not installed or not on PATH', status)
+  }
+  if (!status.isRepo || !status.projectIsRepoRoot) {
+    return pullFailure('ENOREPO', 'The HPOS repository root could not be verified', status)
+  }
+  if (status.detached || status.branch !== 'main') {
+    return pullFailure('EBRANCH', 'Pull from GitHub is only allowed while the local main branch is checked out', status, {
+      localCommit: status.head || null,
+      remoteCommit: null,
+      commitMessage: null,
+      changedFiles: [],
+      packageFilesChanged: false,
+    })
+  }
+
+  const counts = status.counts || {}
+  const dirty = (counts.staged || 0) + (counts.modified || 0) + (counts.untracked || 0) + (counts.conflicted || 0)
+  if (dirty > 0) {
+    return Object.assign(fail('ELOCALCHANGES', 'Local changes detected. Commit or otherwise resolve them before pulling.'), {
+      state: 'local-changes',
+      localCommit: status.head || null,
+      remoteCommit: null,
+      commitMessage: null,
+      changedFiles: [],
+      packageFilesChanged: false,
+      status: status,
+    })
+  }
+
+  const fetched = await runGitFetch(['fetch', '--no-prune', 'origin', 'main'])
+  if (!fetched.ok) {
+    const detail = sanitizeGitText(fetched.message) || 'Git fetch failed'
+    return pullFailure('EFETCH', 'Could not fetch origin/main.', await readGitStatus(), { detail })
+  }
+
+  const localResult = await runGit(['rev-parse', 'HEAD'])
+  const remoteResult = await runGit(['rev-parse', GIT_PULL_TARGET])
+  if (!localResult.ok || !remoteResult.ok) {
+    return pullFailure('EREF', 'Could not compare local main with origin/main.', await readGitStatus())
+  }
+
+  const localCommit = localResult.stdout.trim()
+  const remoteCommit = remoteResult.stdout.trim()
+  const countResult = await runGit(['rev-list', '--left-right', '--count', 'HEAD...' + GIT_PULL_TARGET])
+  if (!countResult.ok) {
+    return pullFailure('ECOMPARE', 'Could not compare local main with origin/main.', await readGitStatus())
+  }
+  const countParts = countResult.stdout.trim().split(/\s+/)
+  const localAhead = Number(countParts[0]) || 0
+  const remoteAhead = Number(countParts[1]) || 0
+  const remoteCommitInfo = await readPullCommit(GIT_PULL_TARGET)
+  const base = {
+    localCommit: localCommit,
+    remoteCommit: remoteCommit,
+    commitMessage: remoteCommitInfo ? remoteCommitInfo.subject : null,
+    changedFiles: [],
+    packageFilesChanged: false,
+    status: await readGitStatus(),
+  }
+
+  const comparisonState = classifyGitPullState({
+    branch: status.branch,
+    detached: status.detached,
+    dirty: false,
+    localAhead: localAhead,
+    remoteAhead: remoteAhead,
+  })
+  if (comparisonState === 'diverged') {
+    return Object.assign({
+      ok: false,
+      state: 'diverged',
+      message: 'Local main and origin/main have diverged. Manual Git resolution is required.',
+    }, base)
+  }
+  if (comparisonState === 'up-to-date') {
+    return Object.assign({
+      ok: true,
+      state: 'up-to-date',
+      message: 'Already up to date with origin/main.',
+    }, base)
+  }
+
+  const changed = await readPullChangedFiles()
+  if (!changed.ok) return pullFailure('EDIFFER', changed.error, base.status, base)
+  return Object.assign({
+    ok: true,
+    state: 'available',
+    requiresConfirmation: true,
+    message: 'An origin/main update is available.',
+    changedFiles: changed.files,
+    changedFilesTruncated: changed.truncated,
+    packageFilesChanged: pullPackageFilesChanged(changed.files),
+  }, base)
+}
+
+async function checkGitPull() {
+  if (gitPullInFlight) return fail('EBUSY', 'A GitHub pull check is already in progress — wait for it to finish')
+  gitPullInFlight = true
+  try {
+    return await inspectGitPull()
+  } finally {
+    gitPullInFlight = false
+  }
+}
+
+async function applyGitPull(expectedRemoteCommit) {
+  if (gitPullInFlight) return fail('EBUSY', 'A GitHub pull is already in progress — wait for it to finish')
+  gitPullInFlight = true
+  try {
+    if (typeof expectedRemoteCommit !== 'string' || !/^[0-9a-f]{40}$/i.test(expectedRemoteCommit)) {
+      return fail('EINVALID', 'The reviewed GitHub commit is invalid')
+    }
+    const plan = await inspectGitPull()
+    if (!plan.ok || plan.state !== 'available') return plan
+    if (plan.remoteCommit.toLowerCase() !== expectedRemoteCommit.toLowerCase()) {
+      return Object.assign(plan, {
+        state: 'available',
+        requiresConfirmation: true,
+        message: 'origin/main changed after the confirmation. Review the newer update before applying it.',
+      })
+    }
+
+    const merged = await runGitPull(['merge', '--ff-only', GIT_PULL_TARGET])
+    if (!merged.ok) {
+      return pullFailure(
+        'EFASTFORWARD',
+        'The fast-forward update failed. No automatic merge or overwrite was attempted.',
+        await readGitStatus(),
+        { localCommit: plan.localCommit, remoteCommit: plan.remoteCommit, commitMessage: plan.commitMessage, changedFiles: plan.changedFiles, packageFilesChanged: plan.packageFilesChanged, detail: sanitizeGitText(merged.message) }
+      )
+    }
+
+    const status = await readGitStatus()
+    return {
+      ok: true,
+      state: 'updated',
+      message: 'Local main was fast-forwarded to origin/main.',
+      localCommit: plan.localCommit,
+      remoteCommit: plan.remoteCommit,
+      commitMessage: plan.commitMessage,
+      changedFiles: plan.changedFiles,
+      packageFilesChanged: plan.packageFilesChanged,
+      status: status,
+    }
+  } finally {
+    gitPullInFlight = false
+  }
+}
+
 function registerFsBridge() {
   ipcMain.handle(CHANNEL_LIST, (event, dir) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
@@ -1479,6 +1812,36 @@ function registerFsBridge() {
   ipcMain.handle(CHANNEL_READ, (event, name) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return readProjectFile(name)
+  })
+
+  ipcMain.handle(CHANNEL_AI_READ, (event, name) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return readAiProjectFile(name)
+  })
+
+  ipcMain.handle(CHANNEL_AI_EDIT, (event, name, content) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return editAiProjectFile(name, content)
+  })
+
+  ipcMain.handle(CHANNEL_AI_PROPOSAL, (event, proposal) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    const checked = validateAiProposal(proposal)
+    if (!checked.ok) return checked
+    if (!codeArenaWindow || codeArenaWindow.isDestroyed()) {
+      return fail('ENOARENA', 'Open Code Arena before sending an AI edit proposal')
+    }
+    const message = {
+      name: checked.name,
+      original: checked.original,
+      proposed: checked.proposed,
+    }
+    if (codeArenaReady) codeArenaWindow.webContents.send('hpos:ai-edit-proposal', message)
+    else {
+      if (pendingAiProposals.length >= 4) pendingAiProposals.shift()
+      pendingAiProposals.push(message)
+    }
+    return { ok: true, name: checked.name, reviewed: true, queued: !codeArenaReady }
   })
 
   ipcMain.handle(CHANNEL_PREVIEW_START, (event, port) => {
@@ -1511,6 +1874,16 @@ function registerFsBridge() {
     return pushGitBranch()
   })
 
+  ipcMain.handle(CHANNEL_GIT_PULL_CHECK, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return checkGitPull()
+  })
+
+  ipcMain.handle(CHANNEL_GIT_PULL_APPLY, (event, expectedRemoteCommit) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return applyGitPull(expectedRemoteCommit)
+  })
+
   ipcMain.handle('hpos:open-code-arena', (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
 
@@ -1530,14 +1903,29 @@ function registerFsBridge() {
         sandbox: true,
       },
     })
+    codeArenaWindow = arena
+    codeArenaReady = false
 
     trustedContents.add(arena.webContents)
 
-    arena.on('closed', () => {
-      trustedContents.delete(arena.webContents)
+    arena.webContents.once('did-finish-load', () => {
+      if (codeArenaWindow !== arena || arena.isDestroyed()) return
+      codeArenaReady = true
+      while (pendingAiProposals.length) {
+        arena.webContents.send('hpos:ai-edit-proposal', pendingAiProposals.shift())
+      }
     })
 
-    arena.loadFile(path.join(__dirname, 'index.html'))
+    arena.on('closed', () => {
+      trustedContents.delete(arena.webContents)
+      if (codeArenaWindow === arena) {
+        codeArenaWindow = null
+        codeArenaReady = false
+        pendingAiProposals.length = 0
+      }
+    })
+
+    arena.loadFile(path.join(__dirname, '..', 'src', 'pages', 'CodeArena.html'))
 
     return { ok: true }
   })
@@ -1571,11 +1959,21 @@ function loadContent(win) {
     // Dev mode: show the running Vite dev server of the main HPOS project.
     win.loadURL(DEV_URL)
   } else {
-    win.loadFile(path.join(__dirname, 'index.html'))
+    win.loadFile(resolveFrontendEntry({
+      isPackaged: app.isPackaged,
+      desktopDir: __dirname,
+      appPath: app.getAppPath(),
+    }))
   }
 }
 
 app.whenReady().then(() => {
+  if (!workspaceResolution.ok) {
+    dialog.showErrorBox('HPOS workspace required', workspaceResolution.message)
+    app.quit()
+    return
+  }
+
   registerFsBridge()
 
   const win = createWindow()

@@ -6,6 +6,12 @@ export default function CodeArena() {
 
   const openCodeArena = async () => {
     setError('')
+
+    if (!window.hpos || typeof window.hpos.openCodeArena !== 'function') {
+      setError('Code Arena is available from the Electron desktop app.')
+      return
+    }
+
     setOpening(true)
 
     try {
