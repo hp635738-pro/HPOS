@@ -58,10 +58,23 @@ const runtimeManager = createRuntimeManager({
   resourcesPath: process.resourcesPath,
 })
 
+function getDefaultPackagedWorkspacePath() {
+  try {
+    const userData = app.getPath('userData')
+    if (typeof userData === 'string' && userData.trim() !== '') {
+      return path.join(userData, 'workspace')
+    }
+  } catch {
+    // app.getPath may not be available very early – fallback handled by resolver error
+  }
+  return null
+}
+
 const workspaceResolution = resolveWorkspaceRoot({
   developmentRoot: path.resolve(__dirname, '..'),
   isPackaged: app.isPackaged,
   envRoot: process.env[WORKSPACE_ENV],
+  defaultRoot: getDefaultPackagedWorkspacePath(),
   appPath: app.getAppPath(),
   resourcesPath: process.resourcesPath,
 })
