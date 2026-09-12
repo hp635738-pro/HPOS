@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>HPOS Code Arena TEST</title>
+    <title>HPOS Code Arena</title>
     <!--
       HPOS Code Arena — desktop IDE shell + functional in-memory code editor.
 
@@ -13,11 +13,10 @@
       layered under a syntax-highlight overlay, so typing, selecting, copying
       and pasting are native browser behaviour.
 
-      Deliberately NOT implemented yet (next steps):
-        · filesystem reads/writes          — Ctrl+S only flips UI state
-        · Electron IPC / preload bridge    — main.js and package.json untouched
-        · GitHub integration               — panel is a UI placeholder
-        · Live preview rendering           — panel is a UI placeholder
+      The filesystem, Git and terminal features run over the Electron
+      preload bridge (window.hpos): the renderer never receives direct
+      Node.js access, and the terminal's working directory is locked to the
+      Code Arena workspace root by the main process.
 
       Palette mirrors HPOS DARK_TOKENS (src/theme/tokens.js) so the desktop
       shell and the web app stay visually consistent.
@@ -302,75 +301,14 @@
       }
 
       /* -------------------------------------------------------- workbench
-         Floating panels: explorer | (editor + console) | live preview. */
+         Floating panels: explorer | (editor + bottom panels). */
       .workbench {
-        --preview-width: 26%;
         display: grid;
-        grid-template-columns: 248px minmax(420px, 1fr) 10px minmax(300px, var(--preview-width));
+        grid-template-columns: 248px minmax(420px, 1fr);
         gap: 10px;
         padding: 10px;
         min-height: 0;
         overflow: hidden;
-      }
-
-      .workbench.preview-full {
-        position: fixed;
-        inset: var(--toolbar-h) 0 var(--status-h);
-        z-index: 15;
-        grid-template-columns: minmax(0, 1fr);
-        padding: 12px;
-        background: var(--bg);
-      }
-
-      .workbench.preview-full > aside[aria-label="Project explorer"],
-      .workbench.preview-full > .center,
-      .workbench.preview-full > .preview-divider {
-        display: none;
-      }
-
-      .workbench.preview-full > aside[aria-label="Live preview"] {
-        grid-column: 1;
-      }
-
-      .preview-divider {
-        position: relative;
-        width: 10px;
-        min-width: 10px;
-        cursor: col-resize;
-        touch-action: none;
-      }
-
-      .preview-divider::before,
-      .preview-divider::after {
-        position: absolute;
-        left: 4px;
-        content: '';
-        width: 2px;
-        border-radius: 2px;
-        background: var(--line);
-      }
-
-      .preview-divider::before {
-        top: 0;
-        bottom: 50%;
-        margin-bottom: 8px;
-      }
-
-      .preview-divider::after {
-        top: 50%;
-        bottom: 0;
-        margin-top: 8px;
-      }
-
-      .preview-divider:hover::before,
-      .preview-divider:hover::after,
-      .preview-divider.is-dragging::before,
-      .preview-divider.is-dragging::after {
-        background: var(--accent);
-      }
-
-      .preview-divider.is-dragging {
-        cursor: col-resize;
       }
 
       .center {
@@ -1830,6 +1768,56 @@
         }
       }
 
+      /* ----------------------------------------------------- terminal */
+      .terminal {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .term-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 10px 14px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.7;
+        color: var(--text-2);
+        overflow-y: auto;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+
+      .term-inputline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 0 0 auto;
+        padding: 8px 14px;
+        border-top: 1px solid var(--line);
+        background: var(--surface-2);
+        font-family: var(--font-mono);
+        font-size: 12px;
+      }
+
+      .term-inputline .prompt,
+      .term-inputline .path,
+      .term-inputline .cmd-char {
+        flex: 0 0 auto;
+      }
+
+      .term-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+      }
+
       .empty-state {
         display: flex;
         flex-direction: column;
@@ -1859,196 +1847,6 @@
         max-width: 330px;
         font-size: 11.5px;
         line-height: 1.6;
-      }
-
-      /* ----------------------------------------------------- live preview */
-      .urlbar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin: 10px;
-        padding: 0 10px;
-        height: 30px;
-        border: 1px solid var(--line);
-        border-radius: var(--r-sm);
-        background: rgba(0, 0, 0, 0.22);
-        color: var(--muted);
-        font-family: var(--font-mono);
-        font-size: 11.5px;
-      }
-
-      .urlbar svg {
-        flex: 0 0 auto;
-        width: 13px;
-        height: 13px;
-      }
-
-      .urlbar .url {
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-      }
-
-      .devices {
-        display: flex;
-        gap: 6px;
-        padding: 0 10px 10px;
-      }
-
-      .device {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 26px;
-        padding: 0 9px;
-        border: 1px solid var(--line);
-        border-radius: var(--r-xs);
-        background: var(--surface-2);
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 600;
-      }
-
-      .device svg {
-        width: 12px;
-        height: 12px;
-      }
-
-      .device--on {
-        border-color: rgba(35, 131, 226, 0.45);
-        background: var(--accent-soft);
-        color: var(--accent-text);
-      }
-
-      .preview-stage {
-        flex: 1 1 auto;
-        min-height: 0;
-        margin: 0 10px 10px;
-        padding: 12px;
-        border: 1px dashed var(--line);
-        border-radius: var(--r-sm);
-        background: rgba(0, 0, 0, 0.16);
-        overflow: auto;
-      }
-
-      /* The real thing: the local preview server's document. */
-      .preview-frame {
-        display: block;
-        width: 100%;
-        height: 100%;
-        min-height: 240px;
-        border: 1px solid var(--line);
-        border-radius: var(--r-sm);
-        background: #ffffff;
-      }
-
-      .preview-frame[hidden] {
-        display: none;
-      }
-
-      .preview-frame--tablet,
-      .preview-frame--mobile {
-        margin: 0 auto;
-      }
-
-      .preview-connecting {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        height: 100%;
-        min-height: 200px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .preview-connecting .spinner {
-        width: 12px;
-        height: 12px;
-        border: 2px solid var(--line);
-        border-top-color: var(--accent-text);
-        border-radius: 50%;
-        animation: spin 0.7s linear infinite;
-      }
-
-      /* Skeleton stands in for the rendered app until the bridge is wired. */
-      .skeleton {
-        border: 1px solid var(--line);
-        border-radius: var(--r-xs);
-        background: var(--surface);
-        overflow: hidden;
-        opacity: 0.7;
-      }
-
-      .skeleton-bar {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        height: 24px;
-        padding: 0 9px;
-        border-bottom: 1px solid var(--line);
-        background: var(--surface-2);
-      }
-
-      .skeleton-bar i {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: #3d3d3b;
-      }
-
-      .skeleton-grid {
-        display: grid;
-        grid-template-columns: 54px minmax(0, 1fr);
-        gap: 8px;
-        padding: 10px;
-      }
-
-      .skeleton-block {
-        border-radius: 4px;
-        background: #2b2b29;
-      }
-
-      .skeleton-block.tall {
-        height: 88px;
-      }
-
-      .skeleton-lines {
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
-      }
-
-      .skeleton-lines b {
-        height: 7px;
-        border-radius: 4px;
-        background: #2b2b29;
-      }
-
-      .skeleton-lines b:nth-child(2) {
-        width: 82%;
-      }
-
-      .skeleton-lines b:nth-child(3) {
-        width: 64%;
-      }
-
-      .skeleton-lines b:nth-child(4) {
-        width: 74%;
-      }
-
-      .stage-note {
-        margin: 12px 4px 2px;
-        color: var(--muted);
-        font-size: 11.5px;
-        text-align: center;
-      }
-
-      .stage-note strong {
-        display: block;
-        margin-bottom: 3px;
-        color: var(--text-2);
-        font-size: 12px;
       }
 
       /* ------------------------------------------------------- status bar */
@@ -2116,7 +1914,7 @@
          every size; the workbench scrolls internally once stacked. */
       @media (max-width: 1360px) {
         .workbench {
-          grid-template-columns: 224px minmax(420px, 1fr) 10px minmax(288px, var(--preview-width));
+          grid-template-columns: 224px minmax(420px, 1fr);
         }
 
         .brand-sub {
@@ -2126,7 +1924,7 @@
 
       @media (max-width: 1120px) {
         .workbench {
-          grid-template-columns: 196px minmax(380px, 1fr) 10px minmax(248px, var(--preview-width));
+          grid-template-columns: 196px minmax(380px, 1fr);
           gap: 8px;
           padding: 8px;
         }
@@ -2152,10 +1950,6 @@
         }
 
         .minimap {
-          display: none;
-        }
-
-        .preview-divider {
           display: none;
         }
       }
@@ -2206,16 +2000,9 @@
         <circle cx="7.1" cy="7.1" r="4.3" fill="none" stroke="currentColor" stroke-width="1.3" />
         <path d="M10.4 10.4 13.9 13.9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
       </symbol>
-      <symbol id="i-play" viewBox="0 0 16 16">
-        <path d="M4.8 3 12.4 8l-7.6 5z" fill="currentColor" />
-      </symbol>
       <symbol id="i-terminal" viewBox="0 0 16 16">
         <rect x="1.8" y="3" width="12.4" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
         <path d="M4.4 6.6 6.4 8.2 4.4 9.8M8 10h3.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
-      </symbol>
-      <symbol id="i-globe" viewBox="0 0 16 16">
-        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.2" />
-        <path d="M2.4 8h11.2M8 2.4c1.7 1.8 1.7 9.4 0 11.2M8 2.4c-1.7 1.8-1.7 9.4 0 11.2" fill="none" stroke="currentColor" stroke-width="1.2" />
       </symbol>
       <symbol id="i-upload" viewBox="0 0 16 16">
         <path d="M8 10.6V2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
@@ -2227,16 +2014,6 @@
         <circle cx="4.4" cy="12.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
         <circle cx="11.6" cy="6.4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
         <path d="M4.4 5.2v5.6M11.6 8c0 2.2-1.6 2.8-3.4 3.6" fill="none" stroke="currentColor" stroke-width="1.2" />
-      </symbol>
-      <symbol id="i-desktop" viewBox="0 0 16 16">
-        <rect x="1.8" y="3.2" width="12.4" height="8.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
-        <path d="M5.6 13.6h4.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-      </symbol>
-      <symbol id="i-tablet" viewBox="0 0 16 16">
-        <rect x="4.4" y="1.8" width="7.2" height="12.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
-      </symbol>
-      <symbol id="i-phone" viewBox="0 0 16 16">
-        <rect x="5.4" y="1.8" width="5.2" height="12.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
       </symbol>
       <symbol id="i-plus" viewBox="0 0 16 16">
         <path d="M8 3.6v8.8M3.6 8h8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
@@ -2299,10 +2076,6 @@
         <div class="toolbar-right">
           <span class="chip chip--warn chip--hide-sm"><span class="dot"></span>Runtime offline</span>
           <span class="chip chip--live chip--hide-sm"><span class="dot"></span>HPOS-Desktop</span>
-          <button type="button" class="btn btn-primary" id="runBtn">
-            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
-            Run
-          </button>
         </div>
       </header>
 
@@ -2417,21 +2190,23 @@
             </div>
 
             <div class="panel-body">
-              <div class="pane console-body" id="paneTerminal" role="tabpanel" aria-labelledby="tabTerminal">
-                <div class="term-line">
-                  <span class="prompt">hpos@arena</span>
-                  <span class="path">~/HPOS-Desktop</span>
-                  <span class="cmd-char">$ npm start</span>
+              <div class="pane terminal" id="paneTerminal" role="tabpanel" aria-labelledby="tabTerminal">
+                <div class="term-scroll" id="termOutput" role="log" aria-live="polite" aria-label="Terminal output">
+                  <div class="term-line term-line--info" id="bridgeLine">[bridge] waiting for the HPOS runtime to connect…</div>
                 </div>
-                <div class="term-line term-line--out">&gt; hpos-desktop@0.1.0 start</div>
-                <div class="term-line term-line--out">&gt; electron .</div>
-                <div class="term-line term-line--ok">[runtime] shell loaded index.html (file://)</div>
-                <div class="term-line term-line--info" id="bridgeLine">[bridge] waiting for the HPOS runtime to connect…</div>
-                <div class="term-line">
+                <div class="term-inputline">
                   <span class="prompt">hpos@arena</span>
-                  <span class="path">~/HPOS-Desktop</span>
-                  <span class="cmd-char">$ </span>
-                  <span class="caret" aria-hidden="true"></span>
+                  <span class="path" id="termPromptPath">~</span>
+                  <span class="cmd-char">$</span>
+                  <input
+                    id="termInput"
+                    class="term-input"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label="Terminal command input"
+                    placeholder="Type a command and press Enter · Ctrl+C interrupts"
+                  />
                 </div>
               </div>
 
@@ -2502,67 +2277,6 @@
           </section>
         </div>
 
-        <!-- -------------------------------------------------- preview --->
-        <div class="preview-divider" id="previewDivider" role="separator" aria-label="Resize editor and preview" aria-orientation="vertical" tabindex="0"></div>
-        <aside class="panel" aria-label="Live preview">
-          <div class="panel-head">
-            <span class="panel-title">Live Preview</span>
-            <span class="spacer"></span>
-            <button type="button" class="btn btn-xs" id="previewExpand" title="Expand to full preview" aria-pressed="false">Expand</button>
-            <button type="button" class="btn btn-xs" id="previewToggle" title="Start or stop the local preview server">
-              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
-              <span id="previewToggleText">Start</span>
-            </button>
-            <button type="button" class="icon-btn" id="previewReload" title="Reload the preview" aria-label="Reload preview">
-              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-refresh" /></svg>
-            </button>
-            <span class="chip" id="previewChip"><span class="dot"></span><span id="previewChipText">Stopped</span></span>
-          </div>
-
-          <div class="urlbar">
-            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-globe" /></svg>
-            <span class="url" id="previewUrl">not running</span>
-          </div>
-
-          <div class="devices">
-            <button type="button" class="device device--on" id="deviceDesktop" data-width="0" title="Fit the panel width">
-              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-desktop" /></svg>
-              Desktop
-            </button>
-            <button type="button" class="device" id="deviceTablet" data-width="768" title="768 px wide">
-              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-tablet" /></svg>
-              Tablet
-            </button>
-            <button type="button" class="device" id="deviceMobile" data-width="390" title="390 px wide">
-              <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-phone" /></svg>
-              Mobile
-            </button>
-          </div>
-
-          <div class="preview-stage" id="previewStage">
-            <div class="skeleton" id="previewPlaceholder">
-              <div class="skeleton-bar"><i></i><i></i><i></i></div>
-              <div class="skeleton-grid">
-                <div class="skeleton-block tall"></div>
-                <div class="skeleton-lines">
-                  <b></b><b></b><b></b><b></b>
-                </div>
-              </div>
-            </div>
-            <p class="stage-note" id="previewNote">
-              <strong>Preview stopped</strong>
-              Press Start to serve HPOS-Desktop on a free localhost port and render index.html here.
-            </p>
-            <iframe
-              id="previewFrame"
-              class="preview-frame"
-              title="Live preview of the HPOS-Desktop project"
-              sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-              referrerpolicy="no-referrer"
-              hidden
-            ></iframe>
-          </div>
-        </aside>
       </div>
 
       <!-- ==================================================== status bar -->
@@ -2669,22 +2383,9 @@
         var editorEmpty = byId('editorEmpty')
         var bufferKindEl = byId('bufferKind')
         var crumbRootEl = byId('crumbRoot')
-        var previewFrame = byId('previewFrame')
-        var previewStage = byId('previewStage')
-        var previewPlaceholder = byId('previewPlaceholder')
-        var previewNote = byId('previewNote')
-        var previewUrlEl = byId('previewUrl')
-        var previewChip = byId('previewChip')
-        var previewChipText = byId('previewChipText')
-        var previewToggleBtn = byId('previewToggle')
-        var previewToggleText = byId('previewToggleText')
-        var previewReloadBtn = byId('previewReload')
-        var previewExpandBtn = byId('previewExpand')
-        var previewDivider = byId('previewDivider')
-        var workbenchEl = document.querySelector('.workbench')
-        var previewFull = false
-        var previewDeviceWidth = 0
-        var dividerDrag = null
+        var termOutputEl = byId('termOutput')
+        var termInputEl = byId('termInput')
+        var termPromptPathEl = byId('termPromptPath')
         var gitBodyEl = byId('gitBody')
         var gitBranchTextEl = byId('gitBranchText')
         var gitStateChip = byId('gitStateChip')
@@ -2706,10 +2407,9 @@
         var paneNoteEl = byId('paneNote')
         var centerWorkspaceEl = byId('centerWorkspace')
         var terminalFullscreenBtn = byId('terminalFullscreen')
-        var termEl = byId('paneTerminal')
+        var termEl = byId('termOutput')
         var consoleEl = byId('paneConsole')
         var cmdInput = byId('cmdInput')
-        var runBtn = byId('runBtn')
         var aiReviewEl = byId('aiReview')
         var aiReviewPathEl = byId('aiReviewPath')
         var aiReviewOriginalEl = byId('aiReviewOriginal')
@@ -2723,21 +2423,13 @@
         /* The preload bridge. Absent in a plain browser (e.g. when this file is
            opened from a static server), in which case the editor falls back to
            in-memory only. listDirectory/readFile/saveFile drive the Explorer and
-           saving; the preview trio drives the Live Preview server. */
+           saving; the terminal bridge drives the interactive terminal. */
         var bridge =
           window.hpos &&
           typeof window.hpos.listDirectory === 'function' &&
           typeof window.hpos.readFile === 'function' &&
           typeof window.hpos.saveFile === 'function'
             ? window.hpos
-            : null
-
-        var previewBridge =
-          bridge &&
-          typeof bridge.startPreview === 'function' &&
-          typeof bridge.stopPreview === 'function' &&
-          typeof bridge.previewStatus === 'function'
-            ? bridge
             : null
 
         function renderAiDiff(original, proposed) {
@@ -3278,7 +2970,7 @@
         }
 
         /* ================================================================
-           Save (UI only) · Run (placeholder) · event log
+           Save · event log
            ================================================================ */
         function emit(type, detail) {
           var event
@@ -3397,7 +3089,6 @@
                 })
                 renderFileInfo()
                 loadDir(parentOf(fileName), { force: true })
-                maybeReloadPreview(fileName)
                 maybeRefreshGit()
                 return
               }
@@ -3414,21 +3105,6 @@
               emit('hpos:save', { name: fileName, lines: lines, bytes: bytes, persisted: false, error: reason })
               renderFileInfo()
             })
-        }
-
-        function runBuffer() {
-          var buffer = current()
-          logLine(termEl, 'out', '$ hpos run ' + (buffer ? buffer.name : '—'))
-          if (!previewBridge) {
-            logLine(termEl, 'info', '[runtime] no preview bridge in this window — run is a no-op')
-            return
-          }
-          if (preview.running) {
-            reloadPreview('run')
-            logLine(termEl, 'ok', '[runtime] preview is already serving ' + preview.url + ' — reloaded')
-            return
-          }
-          startPreview()
         }
 
         /* ================================================================
@@ -3756,210 +3432,211 @@
         }
 
         /* ================================================================
-           Live Preview
+           Interactive terminal
 
-           The main process owns the static server; this side only starts and
-           stops it, shows the URL it hands back, and points an iframe at it.
-           Reloading is a src reset with a cache-buster, because the iframe is
-           a different origin (http://127.0.0.1:PORT from file://) and cannot
-           be touched through the DOM.
+           The main process owns a workspace-locked shell; this side only
+           creates a session, echoes the prompt, submits commands and streams
+           stdout/stderr into the scroll area. No path, shell or cwd ever
+           crosses the boundary.
            ================================================================ */
-        var PREVIEW_EXTENSIONS = {
-          html: true, htm: true, css: true, js: true, mjs: true, cjs: true, jsx: true,
-          json: true, map: true, svg: true, png: true, jpg: true, jpeg: true, gif: true,
-          webp: true, ico: true, woff: true, woff2: true, ttf: true, txt: true,
+        var termBridge =
+          bridge &&
+          bridge.terminal &&
+          typeof bridge.terminal.create === 'function' &&
+          typeof bridge.terminal.run === 'function'
+            ? bridge.terminal
+            : null
+        var termSessionId = null
+        var termWorkspaceRoot = null
+        var termRunning = false
+        var termHistory = []
+        var termHistoryIndex = -1
+        var termDraft = ''
+        var termDataCallback = null
+
+        function termPromptPath() {
+          if (!termWorkspaceRoot) return '~'
+          var parts = termWorkspaceRoot.split(/[\\/]/).filter(function (p) { return p !== '' })
+          return '~/' + (parts[parts.length - 1] || 'workspace')
         }
 
-        var preview = { running: false, url: null, port: null, busy: false, loads: 0, fails: 0, reloads: 0 }
-
-        /** Only files the served page could actually use are worth a reload. */
-        function isPreviewRelevant(relPath) {
-          if (!relPath) return false
-          var name = relPath.split('/').pop()
-          if (!name || name.charAt(0) === '.') return false
-          var dot = name.lastIndexOf('.')
-          if (dot === -1) return false
-          return PREVIEW_EXTENSIONS[name.slice(dot + 1).toLowerCase()] === true
+        function termEcho(command) {
+          var row = document.createElement('div')
+          row.className = 'term-line'
+          var user = document.createElement('span')
+          user.className = 'prompt'
+          user.textContent = 'hpos@arena'
+          var dir = document.createElement('span')
+          dir.className = 'path'
+          dir.textContent = termPromptPath()
+          var dollar = document.createElement('span')
+          dollar.className = 'cmd-char'
+          dollar.textContent = '$ ' + command
+          row.appendChild(user)
+          row.appendChild(dir)
+          row.appendChild(dollar)
+          termOutputEl.appendChild(row)
+          termOutputEl.scrollTop = termOutputEl.scrollHeight
         }
 
-        function renderPreview() {
-          if (!previewFrame) return
-          var running = preview.running
+        function termSetNote(text) {
+          if (paneNoteEl) paneNoteEl.textContent = text
+        }
 
-          previewChip.className = 'chip' + (running ? ' chip--live' : '')
-          previewChipText.textContent = running ? 'Running :' + preview.port : 'Stopped'
-          previewUrlEl.textContent = running ? preview.url : 'not running'
-          previewUrlEl.setAttribute('title', running ? preview.url : 'The preview server is not running')
-          previewToggleText.textContent = preview.busy ? '…' : running ? 'Stop' : 'Start'
-          previewToggleBtn.setAttribute('title', running ? 'Stop the preview server' : 'Start the local preview server')
+        function termSetBusy(busy) {
+          termRunning = !!busy
+          termSetNote(termRunning ? 'running…' : 'interactive shell · workspace root')
+        }
 
-          if (running) {
-            previewPlaceholder.setAttribute('hidden', '')
-            previewNote.setAttribute('hidden', '')
-            previewFrame.removeAttribute('hidden')
-            if (previewFrame.getAttribute('src') !== preview.url) previewFrame.setAttribute('src', preview.url)
+        function termDispose() {
+          if (termDataCallback && termBridge && typeof termBridge.offTerminalData === 'function') {
+            termBridge.offTerminalData(termDataCallback)
+          }
+          termDataCallback = null
+          if (termSessionId && termBridge && typeof termBridge.dispose === 'function') {
+            termBridge.dispose(termSessionId).catch(function () {})
+          }
+          termSessionId = null
+        }
+
+        function termSubmit(command) {
+          var cmd = String(command || '').replace(/\s+$/g, '')
+          if (!cmd) return
+          if (termRunning) {
+            logLine(termEl, 'info', '[terminal] a command is still running — press Ctrl+C to interrupt, then try again')
+            return
+          }
+          if (termHistory[termHistory.length - 1] !== cmd) termHistory.push(cmd)
+          termHistoryIndex = -1
+          termDraft = ''
+          termEcho(cmd)
+
+          if (!termBridge) {
+            logLine(termEl, 'err', '[terminal] no preload bridge — the terminal cannot run commands in this window')
+            return
+          }
+          if (!termSessionId) {
+            logLine(termEl, 'err', '[terminal] no shell attached — creating a session')
+            termBoot()
+            return
+          }
+
+          termSetBusy(true)
+          termBridge
+            .run(termSessionId, cmd)
+            .then(
+              function (result) {
+                termSetBusy(false)
+                termRenderResult(result)
+              },
+              function (err) {
+                termSetBusy(false)
+                logLine(termEl, 'err', '[terminal] ' + (err && err.message ? err.message : String(err)))
+              }
+            )
+        }
+
+        function termRenderResult(result) {
+          if (!result) {
+            logLine(termEl, 'err', '[terminal] no result returned')
+            return
+          }
+          if (result.ok === false && typeof result.code === 'string') {
+            logLine(termEl, 'err', '[terminal] ' + result.code + ' — ' + (result.error || 'refused'))
+            return
+          }
+          if (result.code === 0) {
+            logLine(termEl, 'ok', '[exit 0]')
+          } else if (result.signal) {
+            logLine(termEl, 'err', '[terminated by signal ' + result.signal + ']')
+          } else if (typeof result.code === 'number') {
+            logLine(termEl, 'err', '[exit ' + result.code + ']')
           } else {
-            previewFrame.setAttribute('hidden', '')
-            previewFrame.removeAttribute('src')
-            previewPlaceholder.removeAttribute('hidden')
-            previewNote.removeAttribute('hidden')
+            logLine(termEl, 'err', '[failed — ' + (result.error || 'no exit code') + ']')
+          }
+          if (result.timedOut) logLine(termEl, 'err', '[command timed out]')
+          if (result.truncatedOut) logLine(termEl, 'info', '[output truncated — stdout exceeded the cap]')
+          if (result.truncatedErr) logLine(termEl, 'info', '[output truncated — stderr exceeded the cap]')
+        }
+
+        function termInputKeydown(event) {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            termSubmit(termInputEl.value)
+            termInputEl.value = ''
+            return
+          }
+          if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            if (termHistory.length === 0) return
+            if (termHistoryIndex === -1) termDraft = termInputEl.value
+            termHistoryIndex = Math.min(termHistory.length - 1, termHistoryIndex + 1)
+            termInputEl.value = termHistory[termHistory.length - 1 - termHistoryIndex]
+            return
+          }
+          if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            if (termHistoryIndex === -1) return
+            termHistoryIndex -= 1
+            termInputEl.value = termHistoryIndex === -1 ? termDraft : termHistory[termHistory.length - 1 - termHistoryIndex]
+            return
+          }
+          if ((event.ctrlKey || event.metaKey) && (event.key === 'c' || event.key === 'C')) {
+            event.preventDefault()
+            if (termRunning && termSessionId && termBridge && typeof termBridge.interrupt === 'function') {
+              termBridge.interrupt(termSessionId).catch(function () {})
+              logLine(termEl, 'out', '^C')
+            }
+            return
           }
         }
 
-        function applyPreviewStatus(result) {
-          preview.busy = false
-          if (!result) return
-          preview.running = !!result.running
-          preview.url = result.url || null
-          preview.port = result.port || null
-          renderPreview()
+        function termResize() {
+          if (!termSessionId || !termBridge || typeof termBridge.resize !== 'function' || !termOutputEl) return
+          var style = window.getComputedStyle(termOutputEl)
+          var match = /([\d.]+)px/.exec(style.font || '')
+          var charW = match ? parseFloat(match[1]) : 0
+          var charH = charW * 1.7
+          if (!charW || !termOutputEl.clientWidth || !termOutputEl.clientHeight) return
+          var cols = Math.max(20, Math.min(512, Math.floor(termOutputEl.clientWidth / charW)))
+          var rows = Math.max(1, Math.min(256, Math.floor(termOutputEl.clientHeight / charH)))
+          termBridge.resize(termSessionId, cols, rows).catch(function () {})
         }
 
-        function startPreview() {
-          if (!previewBridge) {
-            logLine(consoleEl, 'err', '[preview] no preload bridge — cannot start the local preview server')
-            showNotice('error', 'Live Preview needs the Electron preload bridge.')
-            return Promise.resolve()
+        function termBoot() {
+          if (!termBridge) {
+            termSetNote('no preload bridge · terminal disabled')
+            logLine(termEl, 'info', '[terminal] no preload bridge in this window — the terminal cannot run commands')
+            return
           }
-          if (preview.running || preview.busy) return Promise.resolve()
-
-          preview.busy = true
-          previewToggleText.textContent = '…'
-          logLine(consoleEl, 'out', '[preview] starting local preview server…')
-
-          return previewBridge.startPreview().then(
+          termBridge.create().then(
             function (result) {
               if (!result || !result.ok) {
-                preview.busy = false
-                renderPreview()
-                var reason = (result && result.error) || 'unknown error'
-                var code = result && result.code ? ' [' + result.code + ']' : ''
-                logLine(termEl, 'err', '$ hpos preview' + code + ' ' + reason)
-                logLine(consoleEl, 'err', '[preview] FAILED — ' + reason)
-                showNotice('error', 'Preview failed to start — ' + reason)
+                termSetNote('terminal unavailable')
+                logLine(termEl, 'err', '[terminal] ' + (result && result.error ? result.error : 'could not create a session'))
                 return
               }
-              applyPreviewStatus(result)
-              logLine(termEl, 'ok', '[preview] serving ' + result.root + ' at ' + result.url)
-              logLine(consoleEl, 'ok', '[preview] running on ' + result.url + ' (127.0.0.1 only, port ' + result.port + ')')
-              hideNotice()
+              termSessionId = result.sessionId
+              termWorkspaceRoot = result.workspaceRoot || null
+              if (termPromptPathEl) termPromptPathEl.textContent = termPromptPath()
+              termSetNote('interactive shell · workspace root')
+              logLine(termEl, 'ok', '[terminal] shell attached — working directory is ' + (termWorkspaceRoot || 'the workspace root'))
+              if (!termDataCallback) {
+                termDataCallback = function (payload) {
+                  if (!payload || payload.sessionId !== termSessionId) return
+                  if (payload.stream === 'stderr') logLine(termEl, 'err', payload.chunk)
+                  else logLine(termEl, 'out', payload.chunk)
+                }
+                termBridge.onTerminalData(termDataCallback)
+              }
+              termResize()
+              if (termInputEl && termInputEl.focus) termInputEl.focus()
             },
             function (err) {
-              preview.busy = false
-              renderPreview()
-              var message = err && err.message ? err.message : String(err)
-              logLine(consoleEl, 'err', '[preview] FAILED — ' + message)
-              showNotice('error', 'Preview failed to start — ' + message)
+              termSetNote('terminal unavailable')
+              logLine(termEl, 'err', '[terminal] ' + (err && err.message ? err.message : String(err)))
             }
           )
-        }
-
-        function stopPreview() {
-          if (!previewBridge) return Promise.resolve()
-          if (!preview.running && !preview.busy) return Promise.resolve()
-
-          preview.busy = true
-          previewToggleText.textContent = '…'
-          logLine(consoleEl, 'out', '[preview] stopping the preview server…')
-
-          return previewBridge.stopPreview().then(
-            function (result) {
-              applyPreviewStatus(result)
-              logLine(consoleEl, 'ok', '[preview] stopped — port released')
-              logLine(termEl, 'out', '[preview] server stopped')
-            },
-            function (err) {
-              preview.busy = false
-              renderPreview()
-              logLine(consoleEl, 'err', '[preview] stop failed — ' + (err && err.message ? err.message : String(err)))
-            }
-          )
-        }
-
-        function reloadPreview(reason) {
-          if (!previewFrame || !preview.running || !preview.url) return false
-          // The counter matters: two reloads inside the same millisecond would
-          // otherwise produce an identical URL and the iframe would not reload.
-          preview.reloads += 1
-          var url = preview.url + '?hpos-reload=' + Date.now() + '-' + preview.reloads
-          previewFrame.setAttribute('src', url)
-          preview.loads += 1
-          logLine(consoleEl, 'out', '[preview] reloaded (' + (reason || 'manual') + ')')
-          return true
-        }
-
-        /**
-         * Ctrl+S hook. Only files the served page can use trigger a reload, and
-         * only while the server is running — everything else is reported and
-         * left alone.
-         */
-        function maybeReloadPreview(relPath) {
-          if (!previewBridge) return
-          if (!isPreviewRelevant(relPath)) {
-            logLine(consoleEl, 'out', '[preview] no reload — ' + relPath + ' is not used by the preview')
-            return
-          }
-          if (!preview.running) {
-            logLine(consoleEl, 'out', '[preview] no reload — preview is stopped')
-            return
-          }
-          reloadPreview(relPath + ' saved')
-        }
-
-        function setDeviceWidth(width) {
-          previewDeviceWidth = width
-          var ids = ['deviceDesktop', 'deviceTablet', 'deviceMobile']
-          ids.forEach(function (id) {
-            var el = byId(id)
-            if (!el) return
-            var on = String(el.getAttribute('data-width')) === String(width)
-            el.className = 'device' + (on ? ' device--on' : '')
-          })
-          if (!previewFrame) return
-          previewFrame.className = 'preview-frame' + (width ? (width >= 700 ? ' preview-frame--tablet' : ' preview-frame--mobile') : '')
-          previewFrame.style.width = width ? width + 'px' : '100%'
-          previewFrame.style.maxWidth = width ? 'none' : '100%'
-          previewFrame.style.height = width ? '100%' : '100%'
-        }
-
-        function setFullPreview(on) {
-          previewFull = !!on
-          if (!workbenchEl || !previewExpandBtn) return
-          workbenchEl.classList.toggle('preview-full', previewFull)
-          previewExpandBtn.textContent = previewFull ? 'Exit Full Preview' : 'Expand'
-          previewExpandBtn.title = previewFull ? 'Return to the editor layout' : 'Expand to full preview'
-          previewExpandBtn.setAttribute('aria-pressed', previewFull ? 'true' : 'false')
-          document.body.classList.toggle('preview-is-full', previewFull)
-          window.requestAnimationFrame(function () {
-            setDeviceWidth(previewDeviceWidth)
-          })
-        }
-
-        function beginDividerDrag(event) {
-          if (!workbenchEl || window.innerWidth <= 980) return
-          dividerDrag = { pointerId: event.pointerId }
-          previewDivider.classList.add('is-dragging')
-          previewDivider.setPointerCapture(event.pointerId)
-          event.preventDefault()
-        }
-
-        function moveDividerDrag(event) {
-          if (!dividerDrag || !workbenchEl) return
-          var rect = workbenchEl.getBoundingClientRect()
-          var minPreview = 300
-          var minCenter = 380
-          var dividerGap = 20
-          var maxPreview = Math.max(minPreview, rect.width - 248 - minCenter - dividerGap)
-          var previewWidth = Math.max(minPreview, Math.min(maxPreview, rect.right - event.clientX - 10))
-          workbenchEl.style.setProperty('--preview-width', Math.round(previewWidth) + 'px')
-          setDeviceWidth(previewDeviceWidth)
-        }
-
-        function endDividerDrag(event) {
-          if (!dividerDrag) return
-          dividerDrag = null
-          previewDivider.classList.remove('is-dragging')
-          if (event && previewDivider.hasPointerCapture(event.pointerId)) previewDivider.releasePointerCapture(event.pointerId)
         }
 
         /* ================================================================
@@ -4966,7 +4643,7 @@
         ]
 
         var PANE_NOTES = {
-          terminal: 'static log · no shell attached',
+          terminal: 'interactive shell · workspace root',
           console: 'bridge activity',
           problems: 'UI placeholder · no diagnostics yet',
           github: 'local commit · push upstream',
@@ -5030,11 +4707,6 @@
           if (mod && (e.key === 's' || e.key === 'S')) {
             e.preventDefault()
             saveBuffer()
-            return
-          }
-          if (mod && e.key === 'Enter') {
-            e.preventDefault()
-            runBuffer()
             return
           }
           if (e.key === 'Escape') {
@@ -5192,41 +4864,22 @@
           })
         }
 
-        if (previewToggleBtn) {
-          previewToggleBtn.addEventListener('click', function () {
-            if (preview.running) stopPreview()
-            else startPreview()
+        if (termInputEl) {
+          termInputEl.addEventListener('keydown', termInputKeydown)
+        }
+        if (termOutputEl) {
+          termOutputEl.addEventListener('click', function () {
+            if (termInputEl && termInputEl.focus) termInputEl.focus()
           })
         }
-        if (previewExpandBtn) previewExpandBtn.addEventListener('click', function () { setFullPreview(!previewFull) })
-        if (previewDivider) {
-          previewDivider.addEventListener('pointerdown', beginDividerDrag)
-          previewDivider.addEventListener('pointermove', moveDividerDrag)
-          previewDivider.addEventListener('pointerup', endDividerDrag)
-          previewDivider.addEventListener('pointercancel', endDividerDrag)
-          previewDivider.addEventListener('keydown', function (event) {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-            event.preventDefault()
-            var current = parseInt(getComputedStyle(workbenchEl).getPropertyValue('--preview-width'), 10) || 360
-            var next = current + (event.key === 'ArrowLeft' ? 24 : -24)
-            workbenchEl.style.setProperty('--preview-width', Math.max(300, next) + 'px')
+        window.addEventListener('resize', termResize)
+        window.addEventListener('beforeunload', termDispose)
+        if (typeof ResizeObserver === 'function' && termOutputEl) {
+          var termObserver = new ResizeObserver(function () {
+            termResize()
           })
+          termObserver.observe(termOutputEl)
         }
-        if (previewReloadBtn) previewReloadBtn.addEventListener('click', function () { reloadPreview('manual') })
-        if (previewFrame) {
-          // A failed navigation (server stopped, bad port) shows an inline notice.
-          previewFrame.addEventListener('load', function () {
-            if (!preview.running) return
-            logLine(consoleEl, 'out', '[preview] frame loaded ' + preview.url)
-          })
-        }
-        ;['deviceDesktop', 'deviceTablet', 'deviceMobile'].forEach(function (id) {
-          var el = byId(id)
-          if (!el) return
-          el.addEventListener('click', function () {
-            setDeviceWidth(Number(el.getAttribute('data-width')) || 0)
-          })
-        })
 
         if (noticeActionEl) {
           noticeActionEl.addEventListener('click', function () {
@@ -5250,7 +4903,6 @@
           }
         })
 
-        runBtn.addEventListener('click', runBuffer)
 
         PANES.forEach(function (entry) {
           var button = byId(entry.button)
@@ -5275,26 +4927,13 @@
         setEditorVisible(false)
 
         logLine(consoleEl, 'out', '[console] HPOS Code Arena ready — Explorer, tabs and saves use the preload bridge')
-        logLine(consoleEl, 'out', '[console] Ctrl+S save · Ctrl+Enter run · Tab indent · Ctrl+K filter files')
+        logLine(consoleEl, 'out', '[console] Ctrl+S save · Tab indent · Ctrl+K filter files · Ctrl+C interrupts the terminal')
         bootFilesystem()
 
         renderGit()
         refreshGit({ quiet: true })
 
-        renderPreview()
-        if (previewBridge) {
-          previewBridge.previewStatus().then(
-            function (result) {
-              applyPreviewStatus(result)
-              if (preview.running) logLine(consoleEl, 'ok', '[preview] already running on ' + preview.url)
-            },
-            function (err) {
-              logLine(consoleEl, 'info', '[preview] status unavailable — ' + (err && err.message ? err.message : String(err)))
-            }
-          )
-        } else if (bridge) {
-          logLine(consoleEl, 'info', '[preview] this preload build has no preview methods — Live Preview disabled')
-        }
+        termBoot()
 
       })()
     </script>

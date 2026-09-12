@@ -5,7 +5,7 @@
  *
  * In development the Code Arena workspace root IS the HPOS repository
  * (main.js → `developmentRoot: path.resolve(__dirname, '..')`), so Explorer,
- * the editor, Git and Preview all operate on the real project. In a packaged
+ * the editor, Git and the terminal all operate on the real project. In a packaged
  * build the workspace is `<userData>/workspace` and starts out empty, so the
  * real project travels inside the installer and is seeded on first launch.
  *
@@ -13,7 +13,7 @@
  *   · `workspace-project`  — the REAL Code Arena project source, generated at
  *     package time from the repository tree by
  *     `scripts/build-workspace-project.mjs` (see that file for the exact
- *     include/exclude contract and the preview-entrypoint mapping). This is
+ *     include/exclude contract and the served-entrypoint mapping). This is
  *     what a production workspace is seeded from.
  *   · `workspace-template` — the small starter demo from PR #25. It is kept
  *     ONLY as a last-resort fallback for a build whose project payload is
@@ -45,7 +45,7 @@ const TEMPLATE_DIR_NAME = 'workspace-template'
 const PROJECT_SOURCE = 'workspace-project'
 const TEMPLATE_SOURCE = 'workspace-template'
 
-/** The file the static preview server serves for `/`. */
+/** The workspace entrypoint file served for `/`. */
 const WORKSPACE_ENTRYPOINT = 'index.html'
 
 /* ------------------------------------------------------- forbidden entries
@@ -173,7 +173,7 @@ function hasVisibleEntries(workspaceRoot) {
   }
 }
 
-/** The entrypoint Preview serves, when the workspace actually has one. */
+/** The workspace entrypoint, when the workspace actually has one. */
 function workspaceEntrypoint(workspaceRoot) {
   try {
     const entry = path.join(workspaceRoot, WORKSPACE_ENTRYPOINT)

@@ -5,21 +5,24 @@
  * process. It runs with contextIsolation on and nodeIntegration off, and it
  * exposes these functions — nothing else:
  *
- *   window.hpos.listDirectory(dir)      -> { ok, path, relative, entries[], truncated }
- *   window.hpos.readFile(name)          -> { ok, name, path, relative, bytes, lines, content }
- *   window.hpos.aiReadFile(name)       -> { ok, name, path, relative, bytes, lines, content }
- *   window.hpos.aiEditFile(name, content) -> { ok, name, path, relative, bytes, lines }
+ *   window.hpos.listDirectory(dir)         -> { ok, path, relative, entries[], truncated }
+ *   window.hpos.readFile(name)             -> { ok, name, path, relative, bytes, lines, content }
+ *   window.hpos.aiReadFile(name)           -> { ok, name, path, relative, bytes, lines, content }
+ *   window.hpos.aiEditFile(name, content)  -> { ok, name, path, relative, bytes, lines }
  *   window.hpos.sendAiEditProposal(proposal) -> { ok, name, reviewed }
- *   window.hpos.saveFile(name, content) -> { ok, name, path, relative, bytes, lines }
- *   window.hpos.startPreview(port?)     -> { ok, running, url, port, host, root }
- *   window.hpos.stopPreview()           -> { ok, running: false, url: null, port: null }
- *   window.hpos.previewStatus()         -> { ok, running, url, port, host, root }
- *   window.hpos.gitStatus()             -> structured read-only Git state
- *   window.hpos.gitCommit(msg, files[]) -> { committed, commit, status, … }
- *   window.hpos.gitPush()               -> { pushed, ahead, behind, status, … }
- *   window.hpos.checkGitPull()          -> structured origin/main update plan
- *   window.hpos.applyGitPull(commit)   -> structured fast-forward result
- *   window.hpos.openCodeArena()         -> opens Code Arena
+ *   window.hpos.saveFile(name, content)    -> { ok, name, path, relative, bytes, lines }
+ *   window.hpos.terminal.create()          -> { ok, sessionId, workspaceRoot }
+ *   window.hpos.terminal.run(sessionId, command) -> { ok, code, signal, truncatedOut, truncatedErr, timedOut, … } (output streams via onTerminalData)
+ *   window.hpos.terminal.resize(sessionId, cols, rows) -> { ok, cols, rows }
+ *   window.hpos.terminal.interrupt(sessionId) -> { ok }
+ *   window.hpos.terminal.dispose(sessionId) -> { ok }
+ *   window.hpos.terminal.onTerminalData(cb)  / offTerminalData(cb)
+ *   window.hpos.gitStatus()                -> structured read-only Git state
+ *   window.hpos.gitCommit(msg, files[])    -> { committed, commit, status, … }
+ *   window.hpos.gitPush()                  -> { pushed, ahead, behind, status, … }
+ *   window.hpos.checkGitPull()             -> structured origin/main update plan
+ *   window.hpos.applyGitPull(commit)       -> structured fast-forward result
+ *   window.hpos.openCodeArena()            -> opens Code Arena
  *
  * gitStatus() takes no arguments at all — there is nothing for the renderer
  * to inject.
@@ -30,8 +33,10 @@
  * gitPush() takes no arguments either — the renderer can only ask the main
  * process to push the repository.
  *
- * The preview methods take no path and no command: the renderer can start or
- * stop the main process's static server and read back its local URL.
+ * The terminal methods take no path, no command interpreter and no working directory: the
+ * renderer can only run a command inside a session that the main process has
+ * already pinned to the workspace root with a scrubbed environment. Output is
+ * delivered through onTerminalData, never as an arbitrary callback target.
  *
  * `dir` / `name` are always relative to the HPOS project root. The main
  * process resolves every request and rejects traversal, absolute paths and
@@ -51,14 +56,22 @@ const CHANNEL_AI_READ = 'hpos:ai:read-file'
 const CHANNEL_AI_EDIT = 'hpos:ai:edit-file'
 const CHANNEL_AI_PROPOSAL = 'hpos:ai:proposal'
 const CHANNEL_SAVE = 'hpos:fs:save'
-const CHANNEL_PREVIEW_START = 'hpos:preview:start'
-const CHANNEL_PREVIEW_STOP = 'hpos:preview:stop'
-const CHANNEL_PREVIEW_STATUS = 'hpos:preview:status'
+const CHANNEL_TERM_CREATE = 'hpos:term:create'
+const CHANNEL_TERM_RUN = 'hpos:term:run'
+const CHANNEL_TERM_RESIZE = 'hpos:term:resize'
+const CHANNEL_TERM_INTERRUPT = 'hpos:term:interrupt'
+const CHANNEL_TERM_DISPOSE = 'hpos:term:dispose'
+const CHANNEL_TERM_DATA = 'hpos:term:data'
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
 const CHANNEL_GIT_PULL_CHECK = 'hpos:git:pull-check'
 const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
+
+/* Terminal output subscriptions. The renderer hands us a callback; we keep a
+   stable listener per callback so offTerminalData can remove exactly the one
+   it added. */
+const terminalListeners = new Map()
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -111,21 +124,50 @@ contextBridge.exposeInMainWorld('hpos', {
   },
 
   /**
-   * Start the local Live Preview server.
-   * @param {number} [port] optional preferred port
+   * The interactive terminal, fixed to the workspace root by the main process.
+   * The renderer never supplies a cwd, a path, a command interpreter or an environment.
    */
-  startPreview(port) {
-    return ipcRenderer.invoke(CHANNEL_PREVIEW_START, port)
-  },
+  terminal: {
+    /** Create a session locked to the workspace root. */
+    create() {
+      return ipcRenderer.invoke(CHANNEL_TERM_CREATE)
+    },
 
-  /** Stop the preview server and release its port. */
-  stopPreview() {
-    return ipcRenderer.invoke(CHANNEL_PREVIEW_STOP)
-  },
+    /** Run one command in the session; resolves with code/signal/output. */
+    run(sessionId, command) {
+      return ipcRenderer.invoke(CHANNEL_TERM_RUN, sessionId, command)
+    },
 
-  /** Current preview state. */
-  previewStatus() {
-    return ipcRenderer.invoke(CHANNEL_PREVIEW_STATUS)
+    /** Resize the terminal grid (exported as COLUMNS/LINES to the next command). */
+    resize(sessionId, cols, rows) {
+      return ipcRenderer.invoke(CHANNEL_TERM_RESIZE, sessionId, cols, rows)
+    },
+
+    /** Interrupt (Ctrl+C equivalent) the in-flight command. */
+    interrupt(sessionId) {
+      return ipcRenderer.invoke(CHANNEL_TERM_INTERRUPT, sessionId)
+    },
+
+    /** Close a session and free its resources. */
+    dispose(sessionId) {
+      return ipcRenderer.invoke(CHANNEL_TERM_DISPOSE, sessionId)
+    },
+
+    /** Subscribe to streamed terminal output ({ sessionId, stream, chunk }). */
+    onTerminalData(callback) {
+      if (typeof callback !== 'function') return
+      const listener = (_event, data) => callback(data)
+      terminalListeners.set(callback, listener)
+      ipcRenderer.on(CHANNEL_TERM_DATA, listener)
+    },
+
+    /** Unsubscribe a previously registered output callback. */
+    offTerminalData(callback) {
+      const listener = terminalListeners.get(callback)
+      if (!listener) return
+      ipcRenderer.removeListener(CHANNEL_TERM_DATA, listener)
+      terminalListeners.delete(callback)
+    },
   },
 
   /**

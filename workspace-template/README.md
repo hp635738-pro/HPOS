@@ -1,6 +1,6 @@
 # HPOS Project
 
-This is your HPOS workspace. Edit files in Code Arena and use **Start Preview** to see them in the Live Preview panel.
+This is your HPOS workspace. Edit files in Code Arena — changes are saved straight to your workspace, and you can run commands in the built-in terminal.
 
 ## Files
 
@@ -12,5 +12,5 @@ This is your HPOS workspace. Edit files in Code Arena and use **Start Preview** 
 ## Tips
 
 - Save a file with **Ctrl+S** or the save button
-- Changes appear in Preview on reload
+- Changes are saved to your workspace as you edit
 - Use the Explorer to navigate and create files

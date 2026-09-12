@@ -1,7 +1,7 @@
 /**
  * Ensure the HPOS production frontend build (dist/index.html) exists.
  *
- * The workspace payload's served preview entrypoint IS the production
+ * The workspace payload's served entrypoint IS the production
  * frontend build — the same dist/index.html the packaged Electron shell
  * loads. The dist/dist:win/dist:dir npm scripts always chain
  * `npm run build:prod` before `workspace:project`, so packaging never needs

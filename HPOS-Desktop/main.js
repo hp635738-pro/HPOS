@@ -6,7 +6,7 @@ const { WORKSPACE_ENV, resolveWorkspaceRoot } = require('./workspaceRoot')
 const { resolveFrontendEntry, getFrontendMode } = require('./frontendEntry')
 const { createRuntimeManager, resolveRuntimeDir } = require('./runtimeManager')
 const { seedWorkspaceIfNeeded } = require('./workspaceSeed')
-const { createPreviewServer } = require('./previewServer')
+const { createTerminalManager } = require('./terminalSession')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -407,207 +407,31 @@ async function editAiProjectFile(name, content) {
   return saveProjectFile(name, content, MAX_AI_FILE_BYTES)
 }
 
-/* ---------------------------------------------------------------- preview
-   A tiny static server for the HPOS-Desktop project, owned entirely by the
-   main process. The renderer can only ask it to start/stop and read its
-   status — it never chooses a path, a port or a header. Every request goes
-   through the same resolveInProject() gate as the fs bridge, so the preview
-   cannot serve anything outside HPOS-Desktop.
+/* --------------------------------------------------------------- terminal
+   An interactive, workspace-locked terminal owned by the main process.
 
-   The server binds to 127.0.0.1 and lets the OS pick the port (listen on 0),
-   so nothing here assumes 5173, 8080 or any other port is free. If a caller
-   asks for a specific port and it is taken, we fall back to an OS-assigned
-   one instead of failing. */
-const http = require('http')
-const CHANNEL_PREVIEW_START = 'hpos:preview:start'
-const CHANNEL_PREVIEW_STOP = 'hpos:preview:stop'
-const CHANNEL_PREVIEW_STATUS = 'hpos:preview:status'
-const VITE_PREVIEW_PORT = 5173
-const VITE_PREVIEW_URL = 'http://localhost:' + VITE_PREVIEW_PORT + '/'
+   The renderer can only create a session, run a command inside it, resize it,
+   interrupt the in-flight command and dispose it. It never supplies a cwd, a
+   path, a shell or an environment: every child is spawned with cwd hard-wired
+   to WORKSPACE_ROOT and a scrubbed environment (see terminalSession.js).
+   Output is streamed back over a dedicated channel and never includes the
+   main process's own environment or credentials. */
+const CHANNEL_TERM_CREATE = 'hpos:term:create'
+const CHANNEL_TERM_RUN = 'hpos:term:run'
+const CHANNEL_TERM_RESIZE = 'hpos:term:resize'
+const CHANNEL_TERM_INTERRUPT = 'hpos:term:interrupt'
+const CHANNEL_TERM_DISPOSE = 'hpos:term:dispose'
+const CHANNEL_TERM_DATA = 'hpos:term:data'
 
-/* Static preview server — created lazily so that WORKSPACE_ROOT and
-   resolveInProject (both defined below) are available when the handler
-   is constructed.  In dev mode Vite may already be running on :5173
-   and we detect it; in packaged mode the built-in static server serves
-   the workspace directly, with no Vite or node_modules dependency. */
-let staticPreviewServer = null
-let previewProcess = null
-let previewProcessOwned = false
-let previewStartPromise = null
-
-function previewStatusPayload() {
-  if (staticPreviewServer) {
-    const status = staticPreviewServer.getStatus()
-    if (status.running) return status
-  }
-  if (previewProcess && previewProcessOwned) {
-    // Vite is running externally — synthesise a status payload.
-    return {
-      ok: true,
-      running: true,
-      url: VITE_PREVIEW_URL,
-      port: VITE_PREVIEW_PORT,
-      host: '127.0.0.1',
-      root: WORKSPACE_ROOT,
+const terminalManager = createTerminalManager({
+  workspaceRoot: WORKSPACE_ROOT,
+  env: process.env,
+  onOutput: function (payload) {
+    if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
+      codeArenaWindow.webContents.send(CHANNEL_TERM_DATA, payload)
     }
-  }
-  return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
-}
-
-function probeVitePreview() {
-  return new Promise((resolve) => {
-    const request = http.get(
-      { hostname: '127.0.0.1', port: VITE_PREVIEW_PORT, path: '/', timeout: 750 },
-      (response) => {
-        let body = ''
-        response.setEncoding('utf8')
-        response.on('data', (chunk) => {
-          if (body.length < 128 * 1024) body += chunk
-        })
-        response.on('end', () => {
-          const isVite =
-            response.statusCode === 200 &&
-            /text\/html/i.test(String(response.headers['content-type'] || '')) &&
-            body.indexOf('/@vite/client') !== -1
-          resolve(isVite)
-        })
-      }
-    )
-    request.on('error', () => resolve(false))
-    request.on('timeout', () => request.destroy())
-  })
-}
-
-function waitForVitePreview(child) {
-  return new Promise((resolve) => {
-    let finished = false
-    let childError = null
-    const finish = (ready) => {
-      if (finished) return
-      finished = true
-      clearInterval(timer)
-      clearTimeout(timeout)
-      resolve({ ready: ready, error: childError })
-    }
-    const timer = setInterval(() => {
-      if (childError || child.exitCode !== null) return finish(false)
-      probeVitePreview().then((ready) => {
-        if (ready) finish(true)
-      })
-    }, 150)
-    const timeout = setTimeout(() => finish(false), 20000)
-    child.once('error', (err) => {
-      childError = err
-      finish(false)
-    })
-    child.once('exit', (code) => {
-      if (code !== null && code !== 0) finish(false)
-    })
-  })
-}
-
-function startStaticPreview(requestedPort) {
-  if (!staticPreviewServer) {
-    staticPreviewServer = createPreviewServer({
-      workspaceRoot: WORKSPACE_ROOT,
-      resolveInProject: (name) => resolveInProject(name),
-    })
-  }
-  return staticPreviewServer.start(requestedPort)
-}
-
-async function startPreviewServer(requestedPort) {
-  // Already running via either path? Return current status.
-  if (staticPreviewServer) {
-    const current = staticPreviewServer.getStatus()
-    if (current.running) return current
-  }
-  if (previewProcess && previewProcessOwned) return previewStatusPayload()
-  if (previewStartPromise) return previewStartPromise
-
-  previewStartPromise = (async () => {
-    /* Packaged mode: no Vite, no node_modules in the workspace.
-       Use the built-in static preview server directly. */
-    if (app.isPackaged) {
-      return startStaticPreview(requestedPort)
-    }
-
-    /* Development mode: a Vite dev server may already be running. */
-    if (await probeVitePreview()) {
-      return {
-        ok: true,
-        running: true,
-        url: VITE_PREVIEW_URL,
-        port: VITE_PREVIEW_PORT,
-        host: '127.0.0.1',
-        root: WORKSPACE_ROOT,
-        startedAt: Date.now(),
-        requests: 0,
-      }
-    }
-
-    /* Development mode fallback: try starting Vite via npm.  If it
-       fails (e.g. no node_modules), fall back to the static server
-       rather than erroring out. */
-    const command = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-    const child = require('child_process').spawn(
-      command,
-      ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(VITE_PREVIEW_PORT)],
-      { cwd: WORKSPACE_ROOT, windowsHide: true, stdio: 'ignore' }
-    )
-    previewProcess = child
-    previewProcessOwned = true
-
-    const result = await waitForVitePreview(child)
-    if (result.ready) {
-      child.once('exit', () => {
-        if (previewProcess === child) {
-          previewProcess = null
-          previewProcessOwned = false
-        }
-      })
-      return previewStatusPayload()
-    }
-
-    /* Vite failed — fall back to the static server. */
-    try { child.kill() } catch { /* Already stopped. */ }
-    previewProcess = null
-    previewProcessOwned = false
-    return startStaticPreview(requestedPort)
-  })()
-
-  try {
-    return await previewStartPromise
-  } finally {
-    previewStartPromise = null
-  }
-}
-
-function stopPreviewServer() {
-  return (async () => {
-    if (previewProcess && previewProcessOwned) {
-      try { previewProcess.kill() } catch { /* Already stopped. */ }
-    }
-    previewProcess = null
-    previewProcessOwned = false
-    if (staticPreviewServer) {
-      await staticPreviewServer.stop()
-    }
-    return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
-  })()
-}
-
-function shutdownPreview() {
-  if (previewProcess && previewProcessOwned) {
-    try { previewProcess.kill() } catch { /* Already stopped. */ }
-  }
-  previewProcess = null
-  previewProcessOwned = false
-  if (staticPreviewServer) {
-    staticPreviewServer.stop().catch(() => {})
-    staticPreviewServer = null
-  }
-}
+  },
+})
 
 /* -------------------------------------------------------------------- git
    Read-only Git status for the HPOS-Desktop project.
@@ -1801,19 +1625,36 @@ function registerFsBridge() {
     return { ok: true, name: checked.name, reviewed: true, queued: !codeArenaReady }
   })
 
-  ipcMain.handle(CHANNEL_PREVIEW_START, (event, port) => {
+  ipcMain.handle(CHANNEL_TERM_CREATE, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
-    return startPreviewServer(port)
+    return terminalManager.create()
   })
 
-  ipcMain.handle(CHANNEL_PREVIEW_STOP, (event) => {
+  ipcMain.handle(CHANNEL_TERM_RUN, (event, sessionId, command) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
-    return stopPreviewServer()
+    return terminalManager.run(sessionId, command).then((result) => {
+      if (!result) return fail('ETERM', 'The terminal command returned no result')
+      // stdout/stderr were already streamed over CHANNEL_TERM_DATA; dropping
+      // them here avoids shipping a second, potentially multi-MB copy through
+      // the invoke reply.
+      const { stdout, stderr, ...rest } = result
+      return rest
+    })
   })
 
-  ipcMain.handle(CHANNEL_PREVIEW_STATUS, (event) => {
+  ipcMain.handle(CHANNEL_TERM_RESIZE, (event, sessionId, cols, rows) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
-    return previewStatusPayload()
+    return terminalManager.resize(sessionId, cols, rows)
+  })
+
+  ipcMain.handle(CHANNEL_TERM_INTERRUPT, (event, sessionId) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return terminalManager.interrupt(sessionId)
+  })
+
+  ipcMain.handle(CHANNEL_TERM_DISPOSE, (event, sessionId) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return terminalManager.dispose(sessionId)
   })
 
   ipcMain.handle(CHANNEL_GIT_STATUS, (event) => {
@@ -1879,6 +1720,8 @@ function registerFsBridge() {
         codeArenaWindow = null
         codeArenaReady = false
         pendingAiProposals.length = 0
+        // Terminal sessions are owned by the Code Arena window.
+        terminalManager.disposeAll()
       }
     })
 
@@ -1942,10 +1785,11 @@ app.whenReady().then(async () => {
   // Workspace seeding: in packaged mode the user workspace at <userData>/workspace
   // is created empty on first launch.  Seed it with the bundled REAL Code Arena
   // project payload (resources/workspace-project, generated at package time from
-  // the repository tree) so Explorer shows the actual project and Preview serves
-  // its real entrypoint.  The PR #25 starter demo (resources/workspace-template)
-  // is only a last-resort fallback when no project payload is bundled, and an
-  // untouched demo seed is upgraded to the real project.
+  // the repository tree) so Explorer shows the actual project and the workspace
+  // entrypoint is the real HPOS application.  The PR #25 starter demo
+  // (resources/workspace-template) is only a last-resort fallback when no
+  // project payload is bundled, and an untouched demo seed is upgraded to the
+  // real project.
   // Existing user content is never overwritten, and nothing outside the
   // workspace boundary is ever written.
   // Development mode uses the repo root as workspace, which is already populated.
@@ -2013,7 +1857,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Never leave preview or runtime bound after the app goes away.
+// Never leave terminal sessions or the runtime bound after the app goes away.
 // Runtime shutdown: graceful SIGTERM first, bounded fallback SIGKILL, Windows safe,
 // only kills owned child, not unrelated processes.
 let runtimeShuttingDown = false
@@ -2023,7 +1867,7 @@ app.on('before-quit', async (event) => {
     runtimeShuttingDown = true
     event.preventDefault()
     try {
-      shutdownPreview()
+      terminalManager.disposeAll()
       await runtimeManager.stop()
     } catch {
       // best effort
@@ -2033,5 +1877,5 @@ app.on('before-quit', async (event) => {
     }
     return
   }
-  shutdownPreview()
+  terminalManager.disposeAll()
 })
