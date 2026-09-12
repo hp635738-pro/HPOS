@@ -1,5 +1,5 @@
 import { useTheme } from '../theme/ThemeContext'
-import { Sun, Moon, History } from './Icons'
+import { Sun, Moon, History, Gear } from './Icons'
 import Notch, { TOOLS } from './Notch'
 import RuntimeStatus from './RuntimeStatus.jsx'
 
@@ -35,6 +35,22 @@ export default function Topbar({ title, active, onNavigate, historyOpen, onToggl
 
       <div style={{ ...S.right, gap: prefs.barGap }}>
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
+
+        <button
+          type="button"
+          onClick={() => onNavigate?.('settings')}
+          title="Settings"
+          aria-label="Settings"
+          data-testid="settings-button"
+          style={{
+            ...S.iconBtn,
+            width: prefs.barBtn,
+            height: prefs.barBtn,
+            ...(active === 'settings' ? S.historyOn : null),
+          }}
+        >
+          <Gear size={17} />
+        </button>
 
         <RuntimeStatus onOpenDetails={onOpenRuntimeDetails} triggerRef={runtimeStatusRef} />
 
