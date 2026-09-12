@@ -17,10 +17,74 @@ npm run dev     # http://localhost:5173
 Aur commands:
 
 ```bash
-npm run build   # production build -> dist/
-npm run preview # build ko locally serve karo
-npm run lint    # oxlint
+npm run build       # production build -> dist/
+npm run build:prod  # same as build, explicit prod naming for packaging
+npm run preview     # build ko locally serve karo
+npm run lint        # oxlint
+npm test            # all packaging/path + bridge + storage + chat tests
 ```
+
+### Production packaging (Step 3 – Windows)
+
+HPOS Desktop uses **electron-builder** with NSIS installer for Windows.
+
+**Prerequisites:**
+- Node 18+ (tested on 22)
+- `npm run build` must have generated `dist/` (Vite React build)
+- `runtime/` dependencies installed: `cd runtime && npm install` (playwright-core)
+
+**Build frontend + package:**
+
+```bash
+# 1. Production React build
+npm run build
+
+# 2. Windows installer (NSIS) – produces release/HPOS Setup 0.1.0.exe
+npm run dist:win
+
+# Alternative – unpacked dir only (no installer, faster for validation)
+npm run dist:dir
+```
+
+**Output:**
+- Installer: `release/HPOS Setup 0.1.0.exe` (or versioned name)
+- Unpacked app: `release/win-unpacked/HPOS.exe`
+- All artifacts are gitignored via `release/` in `.gitignore`
+
+**What is packaged:**
+- `HPOS-Desktop/` – Electron main (`main.js`), preload, runtimeManager, workspaceRoot, git logic
+- `dist/` – Vite-built React frontend (inside app.asar, loaded via `app.getAppPath()`)
+- `src/pages/CodeArena.html` – standalone Code Arena shell (secondary window, not main)
+- `runtime/` – read-only runtime via `extraResources` → `resources/runtime` + `asarUnpack` for spawn
+  - Includes `bin/hpos-runtime.js`, daemon, executors, browser provider, linux backend
+  - `node_modules/playwright-core` included from `runtime/node_modules`
+  - Writes only to `~/.hpos/runtime` (state dir), never to app resources
+
+**What is NOT packaged:**
+- `.git/`, `server/.env`, caches, test files (`*.test.mjs`, `tests/`), maps, `node_modules/.cache`
+
+**Workspace in packaged mode:**
+- Packaged app **requires** `HPOS_WORKSPACE_ROOT` env pointing to an absolute writable folder outside app resources
+- `workspaceRoot.js` validates: must exist, must be readable/writable, must NOT be inside `appPath` or `resourcesPath`, must NOT be inside `.asar`
+- Dev mode (`app.isPackaged===false`) keeps existing repo-root behavior (`developmentRoot: path.resolve(__dirname,'..')`)
+
+**Runtime in packaged mode:**
+- `runtimeManager.js` resolves runtime via:
+  1. `resourcesPath/runtime` (extraResources)
+  2. `appPath/runtime` (inside asar)
+  3. `app.asar.unpacked/runtime` (asarUnpack)
+  4. `desktopDir/../runtime` fallback (dev)
+- Spawn uses unpacked path (`app.asar` → `app.asar.unpacked`) for Windows compatibility
+- Duplicate prevention: if external runtime already running (manual `npm start` in runtime), packaged app detects healthy endpoint and does not spawn second
+- Graceful shutdown: SIGTERM → 5s wait → SIGKILL fallback, only owned child, Windows safe
+
+**Dev vs Packaged:**
+- Dev: `HPOS_DEV_URL=http://localhost:5173` → `npm run start:dev` loads Vite dev server, manual runtime allowed
+- Prod: `dist/index.html` via `app.getAppPath()`, runtime auto-started, no terminal required, no blank screen, Code Arena not main
+
+**Security preserved:**
+- `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`
+- No generic shell/process API, no arbitrary Git args, no credential logging, bounded sanitized diagnostics
 
 **Requirements:** Node 18+ (Step 6 verification Node 22 par chali hai)
 
