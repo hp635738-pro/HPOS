@@ -3,9 +3,61 @@ const path = require('path')
 const fs = require('fs')
 const { classifyGitPullState, packageFilesChanged: hasPullPackageFiles } = require('./gitPullPlan')
 const { WORKSPACE_ENV, resolveWorkspaceRoot } = require('./workspaceRoot')
-const { resolveFrontendEntry } = require('./frontendEntry')
+const { resolveFrontendEntry, getFrontendMode } = require('./frontendEntry')
+const { createRuntimeManager, resolveRuntimeDir } = require('./runtimeManager')
 
-const DEV_URL = process.env.HPOS_DEV_URL || null
+/* ------------------------------------------------ front-end mode detection
+   Clean separation of dev vs production:
+   - Development: HPOS_DEV_URL env set (e.g., http://localhost:5173) -> loadURL
+   - Production: dist/index.html via robust path resolution compatible with
+     packaged Electron (app.asar + Windows paths handled by path.resolve/join)
+   HPOS_DEV_URL remains the single source of truth for dev, preserving existing
+   start:dev behavior. */
+function getDevUrl() {
+  const raw = process.env.HPOS_DEV_URL
+  if (typeof raw === 'string' && raw.trim() !== '') return raw.trim()
+  return null
+}
+
+function getProductionEntryPath() {
+  return resolveFrontendEntry({
+    isPackaged: app.isPackaged,
+    desktopDir: __dirname,
+    appPath: app.getAppPath(),
+  })
+}
+
+function resolveFrontendTarget() {
+  const devUrl = getDevUrl()
+  const modeInfo = getFrontendMode({ isPackaged: app.isPackaged, devUrl })
+  if (modeInfo.mode === 'development') {
+    return { mode: 'development', url: modeInfo.url }
+  }
+  return { mode: 'production', file: getProductionEntryPath() }
+}
+
+/* ----------------------------------------------- runtime lifecycle (Step 2+3)
+   Electron is the lifecycle owner/orchestrator for the existing HPOS Runtime
+   daemon (runtime/bin/hpos-runtime.js). Fixed directory, existing entrypoint
+   reused, no renderer-controlled cwd/command, bounded diagnostics, health-based
+   readiness, graceful shutdown with fallback, duplicate prevention, dev workflow
+   preservation. Packaged mode resolves runtime from extraResources or asarUnpack
+   via app.getAppPath()/process.resourcesPath – no process.cwd() usage. */
+const runtimeManager = createRuntimeManager({
+  desktopDir: __dirname,
+  runtimeDir: resolveRuntimeDir({
+    desktopDir: __dirname,
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  }),
+  env: process.env,
+  logLevel: process.env.HPOS_RUNTIME_LOG_LEVEL || 'info',
+  isPackaged: app.isPackaged,
+  appPath: app.getAppPath(),
+  resourcesPath: process.resourcesPath,
+})
+
 const workspaceResolution = resolveWorkspaceRoot({
   developmentRoot: path.resolve(__dirname, '..'),
   isPackaged: app.isPackaged,
@@ -1925,7 +1977,13 @@ function registerFsBridge() {
       }
     })
 
-    arena.loadFile(path.join(__dirname, '..', 'src', 'pages', 'CodeArena.html'))
+    // Code Arena HTML: in dev, __dirname/../src/pages/CodeArena.html; in packaged,
+    // src/pages/CodeArena.html is bundled inside app.asar via files config.
+    // Use app.getAppPath() for packaged to ensure correct asar path.
+    const codeArenaPath = app.isPackaged
+      ? path.join(app.getAppPath(), 'src', 'pages', 'CodeArena.html')
+      : path.join(__dirname, '..', 'src', 'pages', 'CodeArena.html')
+    arena.loadFile(codeArenaPath)
 
     return { ok: true }
   })
@@ -1955,19 +2013,19 @@ function createWindow() {
 }
 
 function loadContent(win) {
-  if (DEV_URL) {
+  const target = resolveFrontendTarget()
+  if (target.mode === 'development') {
     // Dev mode: show the running Vite dev server of the main HPOS project.
-    win.loadURL(DEV_URL)
+    win.loadURL(target.url)
   } else {
-    win.loadFile(resolveFrontendEntry({
-      isPackaged: app.isPackaged,
-      desktopDir: __dirname,
-      appPath: app.getAppPath(),
-    }))
+    // Production: load the Vite-built React app from dist/index.html.
+    // getProductionEntryPath uses robust resolution compatible with packaged
+    // Electron (app.asar, Windows paths, absolute resolution).
+    win.loadFile(target.file)
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!workspaceResolution.ok) {
     dialog.showErrorBox('HPOS workspace required', workspaceResolution.message)
     app.quit()
@@ -1975,6 +2033,21 @@ app.whenReady().then(() => {
   }
 
   registerFsBridge()
+
+  // Runtime lifecycle: start owned runtime if no external one exists.
+  // Fixed dir, existing entrypoint, bounded diagnostics, health-based readiness.
+  // Dev workflow preserved: if manual runtime already running, we detect external
+  // and do not start duplicate.
+  try {
+    const rtResult = await runtimeManager.start()
+    if (!rtResult.ok) {
+      // eslint-disable-next-line no-console
+      console.warn('[hpos-runtime] failed to start:', rtResult.error, rtResult.code || '')
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[hpos-runtime] start exception:', err && err.message ? err.message : String(err))
+  }
 
   const win = createWindow()
   win.once('ready-to-show', () => win.show())
@@ -1993,7 +2066,25 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Never leave the preview port bound after the app goes away.
-app.on('before-quit', () => {
+// Never leave preview or runtime bound after the app goes away.
+// Runtime shutdown: graceful SIGTERM first, bounded fallback SIGKILL, Windows safe,
+// only kills owned child, not unrelated processes.
+let runtimeShuttingDown = false
+app.on('before-quit', async (event) => {
+  const rtStatus = runtimeManager.getStatus()
+  if (rtStatus.running && rtStatus.owned && !runtimeShuttingDown) {
+    runtimeShuttingDown = true
+    event.preventDefault()
+    try {
+      shutdownPreview()
+      await runtimeManager.stop()
+    } catch {
+      // best effort
+    } finally {
+      runtimeShuttingDown = false
+      app.quit()
+    }
+    return
+  }
   shutdownPreview()
 })
