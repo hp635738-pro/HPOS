@@ -6,6 +6,7 @@ const { resolveFrontendEntry, getFrontendMode } = require('./frontendEntry')
 const { createRuntimeManager, resolveRuntimeDir } = require('./runtimeManager')
 const { seedWorkspaceIfNeeded } = require('./workspaceSeed')
 const { createTerminalManager } = require('./terminalSession')
+const { createDevLauncher, DEV_WORKSPACE_FLAG } = require('./devLaunch')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -25,7 +26,15 @@ function getProductionEntryPath() {
     isPackaged: app.isPackaged,
     desktopDir: __dirname,
     appPath: app.getAppPath(),
+    devWorkspace: isDevWorkspaceInstance(),
   })
+}
+
+/* A "Launch HPOS" dev instance runs this same shell from the workspace
+   code with HPOS_DEV_WORKSPACE=1. It is marked in the title bar and loads
+   the workspace-layout entry (root index.html) instead of dist/. */
+function isDevWorkspaceInstance() {
+  return process.env[DEV_WORKSPACE_FLAG] === '1'
 }
 
 function resolveFrontendTarget() {
@@ -432,6 +441,28 @@ const terminalManager = createTerminalManager({
   },
 })
 
+/* ------------------------------------------------------------- dev launch
+   "Launch HPOS" runs a separate HPOS instance from the CURRENT workspace
+   code (no installer rebuild). Like the terminal, nothing crosses IPC:
+   the renderer calls launch/stop/status with no arguments, and the binary
+   (this Electron), the app directory (WORKSPACE_ROOT) and the env are
+   fixed in devLaunch.js. The child is marked HPOS_DEV_WORKSPACE=1 so the
+   launched instance labels itself and loads the workspace-layout entry. */
+const CHANNEL_DEV_LAUNCH = 'hpos:dev:launch'
+const CHANNEL_DEV_STOP = 'hpos:dev:stop'
+const CHANNEL_DEV_STATUS = 'hpos:dev:status'
+const CHANNEL_DEV_OUTPUT = 'hpos:dev:output'
+
+const devLauncher = createDevLauncher({
+  workspaceRoot: WORKSPACE_ROOT,
+  env: process.env,
+  onOutput: function (payload) {
+    if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
+      codeArenaWindow.webContents.send(CHANNEL_DEV_OUTPUT, payload)
+    }
+  },
+})
+
 /* -------------------------------------------------------------------- git
    All Git operations live in gitBridge.js. The renderer sends no
    arguments at all — no command string, no path, no remote, no refspec
@@ -549,6 +580,21 @@ function registerFsBridge() {
     return terminalManager.dispose(sessionId)
   })
 
+  ipcMain.handle(CHANNEL_DEV_LAUNCH, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return devLauncher.launch()
+  })
+
+  ipcMain.handle(CHANNEL_DEV_STOP, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return devLauncher.stop()
+  })
+
+  ipcMain.handle(CHANNEL_DEV_STATUS, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return devLauncher.status()
+  })
+
   ipcMain.handle(CHANNEL_GIT_STATUS, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return gitBridge.status()
@@ -617,8 +663,10 @@ function registerFsBridge() {
         codeArenaWindow = null
         codeArenaReady = false
         pendingAiProposals.length = 0
-        // Terminal sessions are owned by the Code Arena window.
+        // Terminal sessions and any launched workspace HPOS are owned by
+        // the Code Arena window — never left running behind a closed UI.
         terminalManager.disposeAll()
+        devLauncher.dispose()
       }
     })
 
@@ -635,12 +683,13 @@ function registerFsBridge() {
 }
 
 function createWindow() {
+  const devInstance = isDevWorkspaceInstance()
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'HPOS',
+    title: devInstance ? 'HPOS · development workspace' : 'HPOS',
     backgroundColor: '#0f1013',
     show: false,
     webPreferences: {
@@ -654,6 +703,16 @@ function createWindow() {
   const contents = win.webContents
   trustedContents.add(contents)
   contents.on('destroyed', () => trustedContents.delete(contents))
+  if (devInstance) {
+    // The document's <title> would erase the marker, so keep the suffix.
+    contents.on('page-title-updated', (event) => {
+      event.preventDefault()
+      const base = event.title || 'HPOS'
+      if (base.indexOf('development workspace') === -1) {
+        win.setTitle(base + ' · development workspace')
+      }
+    })
+  }
   return win
 }
 
@@ -765,6 +824,7 @@ app.on('before-quit', async (event) => {
     event.preventDefault()
     try {
       terminalManager.disposeAll()
+      devLauncher.dispose()
       await runtimeManager.stop()
     } catch {
       // best effort
@@ -775,4 +835,5 @@ app.on('before-quit', async (event) => {
     return
   }
   terminalManager.disposeAll()
+  devLauncher.dispose()
 })

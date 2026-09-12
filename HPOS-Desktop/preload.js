@@ -64,6 +64,10 @@ const CHANNEL_TERM_RESIZE = 'hpos:term:resize'
 const CHANNEL_TERM_INTERRUPT = 'hpos:term:interrupt'
 const CHANNEL_TERM_DISPOSE = 'hpos:term:dispose'
 const CHANNEL_TERM_DATA = 'hpos:term:data'
+const CHANNEL_DEV_LAUNCH = 'hpos:dev:launch'
+const CHANNEL_DEV_STOP = 'hpos:dev:stop'
+const CHANNEL_DEV_STATUS = 'hpos:dev:status'
+const CHANNEL_DEV_OUTPUT = 'hpos:dev:output'
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
@@ -75,6 +79,7 @@ const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
    stable listener per callback so offTerminalData can remove exactly the one
    it added. */
 const terminalListeners = new Map()
+const devLaunchListeners = new Map()
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -170,6 +175,45 @@ contextBridge.exposeInMainWorld('hpos', {
       if (!listener) return
       ipcRenderer.removeListener(CHANNEL_TERM_DATA, listener)
       terminalListeners.delete(callback)
+    },
+  },
+
+  /**
+   * "Launch HPOS" — run a separate HPOS instance from the current
+   * workspace code. Takes NO arguments: binary, app directory and env
+   * are fixed in the main process (devLaunch.js). No arbitrary
+   * executable can be launched through this surface.
+   */
+  devLaunch: {
+    /** Launch the workspace HPOS (refused while one is already running). */
+    launch() {
+      return ipcRenderer.invoke(CHANNEL_DEV_LAUNCH)
+    },
+
+    /** Stop the running workspace HPOS (SIGTERM, then SIGKILL). */
+    stop() {
+      return ipcRenderer.invoke(CHANNEL_DEV_STOP)
+    },
+
+    /** Current launch state, availability and the recent output log. */
+    status() {
+      return ipcRenderer.invoke(CHANNEL_DEV_STATUS)
+    },
+
+    /** Subscribe to streamed output ({ stream, data } / { event: 'exit' }). */
+    onOutput(callback) {
+      if (typeof callback !== 'function') return
+      const listener = (_event, data) => callback(data)
+      devLaunchListeners.set(callback, listener)
+      ipcRenderer.on(CHANNEL_DEV_OUTPUT, listener)
+    },
+
+    /** Unsubscribe a previously registered output callback. */
+    offOutput(callback) {
+      const listener = devLaunchListeners.get(callback)
+      if (!listener) return
+      ipcRenderer.removeListener(CHANNEL_DEV_OUTPUT, listener)
+      devLaunchListeners.delete(callback)
     },
   },
 

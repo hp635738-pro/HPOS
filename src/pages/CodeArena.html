@@ -266,6 +266,43 @@
         box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.16);
       }
 
+      .launch-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: var(--surface-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .launch-btn:hover:not(:disabled) {
+        background: var(--elevated);
+      }
+
+      .launch-btn:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .launch-btn svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .launch-btn--running {
+        border-color: rgba(63, 182, 139, 0.5);
+        background: rgba(63, 182, 139, 0.12);
+        color: var(--success);
+      }
+
       .btn {
         display: inline-flex;
         align-items: center;
@@ -2088,6 +2125,17 @@
         </div>
 
         <div class="toolbar-right">
+          <button
+            type="button"
+            class="launch-btn"
+            id="launchHpos"
+            disabled
+            aria-label="Launch HPOS from the workspace"
+            title="Launch is starting…"
+          >
+            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
+            <span id="launchLabel">Launch HPOS</span>
+          </button>
           <span class="chip chip--warn chip--hide-sm"><span class="dot"></span>Runtime offline</span>
           <span class="chip chip--live chip--hide-sm"><span class="dot"></span>HPOS-Desktop</span>
         </div>
@@ -3697,6 +3745,177 @@
         }
 
         /* ================================================================
+           Launch HPOS — run a separate HPOS instance from the CURRENT
+           workspace code (task §4). One fixed, argument-free action: the
+           binary (this Electron), the app directory (the workspace) and
+           the environment are all fixed in the main process
+           (devLaunch.js). No arbitrary executable can be launched. The
+           dev instance marks itself "development workspace" and its
+           output streams into this console pane.
+           ================================================================ */
+        var devBridge =
+          bridge &&
+          bridge.devLaunch &&
+          typeof bridge.devLaunch.launch === 'function' &&
+          typeof bridge.devLaunch.stop === 'function' &&
+          typeof bridge.devLaunch.status === 'function'
+            ? bridge.devLaunch
+            : null
+        var launchBtn = byId('launchHpos')
+        var launchLabelEl = byId('launchLabel')
+        var dev = { status: null, busy: false }
+
+        function devSetIcon(symbolId) {
+          if (!launchBtn) return
+          var use = launchBtn.querySelector('use')
+          if (use) use.setAttribute('href', '#' + symbolId)
+        }
+
+        function devSetButton() {
+          if (!launchBtn || !launchLabelEl) return
+          var s = dev.status
+          if (!devBridge) {
+            devSetIcon('i-play')
+            launchBtn.disabled = true
+            launchBtn.classList.remove('launch-btn--running')
+            launchLabelEl.textContent = 'Launch HPOS'
+            launchBtn.title = 'Launch is unavailable: this window has no preload bridge'
+            return
+          }
+          if (s && s.running) {
+            devSetIcon('i-stop')
+            launchBtn.disabled = dev.busy
+            launchBtn.classList.add('launch-btn--running')
+            launchLabelEl.textContent = 'Stop HPOS'
+            launchBtn.title = 'Stop the workspace HPOS instance (pid ' + (s.pid || '?') + ')'
+            return
+          }
+          devSetIcon('i-play')
+          launchBtn.classList.remove('launch-btn--running')
+          launchLabelEl.textContent = 'Launch HPOS'
+          if (!s) {
+            launchBtn.disabled = true
+            launchBtn.title = 'Checking the workspace…'
+            return
+          }
+          if (!s.available) {
+            launchBtn.disabled = true
+            launchBtn.title = 'Launch unavailable: ' + (s.reason || 'the workspace is not launchable')
+            return
+          }
+          launchBtn.disabled = dev.busy
+          launchBtn.title = 'Launch HPOS from the current workspace code — a separate development instance, no installer rebuild'
+        }
+
+        function devRefresh() {
+          if (!devBridge) {
+            devSetButton()
+            return
+          }
+          devBridge
+            .status()
+            .then(function (s) {
+              dev.status = s || null
+              devSetButton()
+            })
+            .catch(function () {
+              dev.status = null
+              devSetButton()
+            })
+        }
+
+        function devLaunchAction() {
+          if (!devBridge || dev.busy) return
+          dev.busy = true
+          devSetButton()
+          logLine(consoleEl, 'out', '[launch] starting HPOS from the workspace code…')
+          devBridge
+            .launch()
+            .then(function (result) {
+              dev.busy = false
+              if (!result || !result.ok) {
+                if (result && result.status) dev.status = result.status
+                devSetButton()
+                logLine(consoleEl, 'err', '[launch] FAILED — ' + ((result && result.error) || 'unknown error'))
+                emit('hpos:dev-launch', { launched: false, error: (result && result.error) || 'unknown error' })
+                return
+              }
+              logLine(
+                consoleEl,
+                'ok',
+                '[launch] HPOS is running from the workspace (pid ' + result.pid + ') — test it, then Stop it from here'
+              )
+              emit('hpos:dev-launch', { launched: true, pid: result.pid })
+              devRefresh()
+            })
+            .catch(function (err) {
+              dev.busy = false
+              devSetButton()
+              logLine(consoleEl, 'err', '[launch] FAILED — ' + (err && err.message ? err.message : String(err)))
+            })
+        }
+
+        function devStopAction() {
+          if (!devBridge || dev.busy) return
+          dev.busy = true
+          devSetButton()
+          logLine(consoleEl, 'out', '[launch] stopping the workspace HPOS…')
+          devBridge
+            .stop()
+            .then(function (result) {
+              dev.busy = false
+              if (!result || !result.ok) {
+                logLine(consoleEl, 'err', '[launch] stop FAILED — ' + ((result && result.error) || 'unknown error'))
+              } else {
+                logLine(consoleEl, 'ok', '[launch] the workspace HPOS has been stopped')
+              }
+              emit('hpos:dev-launch', { stopped: true })
+              devRefresh()
+            })
+            .catch(function (err) {
+              dev.busy = false
+              devSetButton()
+              logLine(consoleEl, 'err', '[launch] stop FAILED — ' + (err && err.message ? err.message : String(err)))
+            })
+        }
+
+        function devToggle() {
+          if (dev.status && dev.status.running) devStopAction()
+          else devLaunchAction()
+        }
+
+        function devDataCallback(payload) {
+          if (!payload) return
+          if (payload.event === 'exit') {
+            var code = payload.exitCode === null || payload.exitCode === undefined ? payload.signal || 'n/a' : payload.exitCode
+            if (payload.stopped) logLine(consoleEl, 'info', '[launch] workspace HPOS exited (stopped, code ' + code + ')')
+            else logLine(consoleEl, 'info', '[launch] workspace HPOS exited (code ' + code + ')')
+            devRefresh()
+            return
+          }
+          if (payload.event === 'error') {
+            logLine(consoleEl, 'err', '[launch] ' + payload.error)
+            return
+          }
+          if (payload.stream === 'err') logLine(consoleEl, 'err', '[dev] ' + payload.data)
+          else logLine(consoleEl, 'out', '[dev] ' + payload.data)
+        }
+
+        function devBoot() {
+          if (!devBridge) {
+            devSetButton()
+            logLine(consoleEl, 'info', '[launch] no preload bridge in this window — Launch HPOS is disabled')
+            return
+          }
+          devBridge.onOutput(devDataCallback)
+          devRefresh()
+        }
+
+        if (launchBtn) {
+          launchBtn.addEventListener('click', devToggle)
+        }
+
+        /* ================================================================
            Notice strip + File info panel
            ================================================================ */
         function showNotice(kind, text, retry) {
@@ -5073,6 +5292,8 @@
         refreshGit({ quiet: true })
 
         termBoot()
+
+        devBoot()
 
       })()
     </script>
