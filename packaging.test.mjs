@@ -120,7 +120,7 @@ console.log('packaging configuration tests...')
 /* --------------------------------------------------- runtime as a resource */
 {
   const extra = pkg.build.extraResources
-  assert.ok(Array.isArray(extra) && extra.length === 1, 'exactly one extraResources entry (runtime)')
+  assert.ok(Array.isArray(extra) && extra.length === 2, 'exactly two extraResources entries (runtime + workspace-template)')
   assert.equal(extra[0].from, 'runtime', 'runtime must be copied from runtime/')
   assert.equal(extra[0].to, 'runtime', 'runtime must land in resources/runtime')
   assert.ok(!extra[0].filter.includes('**/node_modules/*'), 'runtime node_modules must not be filtered out wholesale')
@@ -130,6 +130,36 @@ console.log('packaging configuration tests...')
     'runtime entrypoint runtime/bin/hpos-runtime.js must exist'
   )
   console.log('ok: runtime ships as extraResources with its entrypoint')
+}
+
+/* ------------------------------------------ workspace template as a resource */
+{
+  const extra = pkg.build.extraResources
+  const template = extra[1]
+  assert.ok(template, 'second extraResources entry must exist (workspace-template)')
+  assert.equal(template.from, 'workspace-template', 'workspace template must be copied from workspace-template/')
+  assert.equal(template.to, 'workspace-template', 'workspace template must land in resources/workspace-template')
+  assert.ok(Array.isArray(template.filter), 'workspace template must have a filter list')
+  assert.ok(template.filter.includes('**/*'), 'workspace template filter must include **/*')
+  assert.ok(template.filter.includes('!**/.git/**'), 'workspace template must exclude .git')
+  assert.ok(template.filter.includes('!**/node_modules/**'), 'workspace template must exclude node_modules')
+  assert.ok(template.filter.some((f) => f.includes('.env')), 'workspace template must exclude .env files')
+
+  // Template files must exist
+  const templateDir = path.join(root, 'workspace-template')
+  assert.ok(fs.existsSync(templateDir), 'workspace-template/ directory must exist')
+  assert.ok(fs.existsSync(path.join(templateDir, 'index.html')), 'workspace-template/index.html must exist')
+  assert.ok(fs.existsSync(path.join(templateDir, 'styles.css')), 'workspace-template/styles.css must exist')
+  assert.ok(fs.existsSync(path.join(templateDir, 'README.md')), 'workspace-template/README.md must exist')
+  assert.ok(fs.existsSync(path.join(templateDir, 'src', 'app.js')), 'workspace-template/src/app.js must exist')
+  assert.ok(fs.existsSync(path.join(templateDir, 'src', 'utils.js')), 'workspace-template/src/utils.js must exist')
+
+  // Template must NOT contain forbidden files
+  assert.ok(!fs.existsSync(path.join(templateDir, '.git')), 'template must not contain .git')
+  assert.ok(!fs.existsSync(path.join(templateDir, '.env')), 'template must not contain .env')
+  assert.ok(!fs.existsSync(path.join(templateDir, 'node_modules')), 'template must not contain node_modules')
+
+  console.log('ok: workspace template ships as extraResources with required files, no forbidden entries')
 }
 
 /* -------------------------------------------------------------- no runtime deps in asar */
