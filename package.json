@@ -4,24 +4,25 @@
   "version": "0.1.0",
   "description": "HPOS — a fully themeable desktop app shell",
   "author": "HPOS Team",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hp635738-pro/HPOS.git"
+  },
   "type": "module",
   "main": "HPOS-Desktop/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:prod": "vite build",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win nsis",
-    "dist:dir": "electron-builder --win --dir",
+    "dist": "npm run build:prod && electron-builder",
+    "dist:win": "npm run build:prod && electron-builder --win nsis",
+    "dist:dir": "npm run build:prod && electron-builder --win --dir",
     "lint": "oxlint",
     "preview": "vite preview",
     "bridge:check": "node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs",
-    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/linuxStatus.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node src/lib/bridge/deepseekRuntimeClient.test.mjs && node vite-runtime-proxy.test.mjs && node src/components/chat/ImageGeneration.test.mjs && node src/lib/chat/history.test.mjs && node src/lib/chat/chatUiPrefs.test.mjs && node src/components/chat/ChatRestructure.test.mjs && node src/lib/chat/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/lib/chat/sendFailure.test.mjs && node src/components/chat/ChatPolish.test.mjs && node src/lib/chat/attachments.test.mjs && node src/components/chat/ComposerUpgrade.test.mjs && node src/theme/tokens.test.mjs"
+    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node packaging.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/linuxStatus.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node src/lib/bridge/deepseekRuntimeClient.test.mjs && node vite-runtime-proxy.test.mjs && node src/components/chat/ImageGeneration.test.mjs && node src/lib/chat/history.test.mjs && node src/lib/chat/chatUiPrefs.test.mjs && node src/components/chat/ChatRestructure.test.mjs && node src/lib/chat/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/lib/chat/sendFailure.test.mjs && node src/components/chat/ChatPolish.test.mjs && node src/lib/chat/attachments.test.mjs && node src/components/chat/ComposerUpgrade.test.mjs && node src/theme/tokens.test.mjs"
   },
-  "dependencies": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -31,6 +32,8 @@
     "electron-builder": "^26.15.3",
     "oxlint": "^1.79.0",
     "postcss": "^8.5.28",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tailwindcss": "^3.4.19",
     "vite": "^8.2.2"
   },
@@ -45,6 +48,8 @@
     ],
     "files": [
       "HPOS-Desktop/**/*",
+      "!HPOS-Desktop/index.html",
+      "!HPOS-Desktop/package-lock.json",
       "dist/**/*",
       "src/pages/CodeArena.html",
       "!**/*.test.mjs",
@@ -72,6 +77,7 @@
       }
     ],
     "win": {
+      "icon": "public/icon.ico",
       "target": [
         {
           "target": "nsis",

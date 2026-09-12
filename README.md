@@ -24,66 +24,99 @@ npm run lint        # oxlint
 npm test            # all packaging/path + bridge + storage + chat tests
 ```
 
-### Production packaging (Step 3 – Windows)
+### Production packaging (Windows)
 
-HPOS Desktop uses **electron-builder** with NSIS installer for Windows.
+HPOS Desktop uses **electron-builder** with an NSIS installer for Windows x64.
 
 **Prerequisites:**
 - Node 18+ (tested on 22)
-- `npm run build` must have generated `dist/` (Vite React build)
-- `runtime/` dependencies installed: `cd runtime && npm install` (playwright-core)
+- `runtime/` dependencies installed: `cd runtime && npm install` (playwright-core) —
+  the runtime is packaged as an application resource
+- Network access to GitHub release assets on the first run (Electron binary +
+  NSIS tooling; cached under `~/.cache` afterwards)
 
-**Build frontend + package:**
+**Build frontend + package** — every `dist*` script chains the production React
+build first, so one command is enough:
 
 ```bash
-# 1. Production React build
-npm run build
-
-# 2. Windows installer (NSIS) – produces release/HPOS Setup 0.1.0.exe
+# Windows installer (NSIS) – produces release/HPOS Setup 0.1.0.exe
 npm run dist:win
 
-# Alternative – unpacked dir only (no installer, faster for validation)
+# Alternative – unpacked dir only (no installer, faster for smoke testing)
 npm run dist:dir
+
+# React production build only -> dist/
+npm run build:prod
 ```
 
-**Output:**
+**Output (gitignored via `release/` in `.gitignore`):**
 - Installer: `release/HPOS Setup 0.1.0.exe` (or versioned name)
 - Unpacked app: `release/win-unpacked/HPOS.exe`
-- All artifacts are gitignored via `release/` in `.gitignore`
+
+**Application icon:**
+- `public/icon.ico` — the Windows application/installer icon
+  (16/24/32/48/64/128/256 px), wired via `build.win.icon`
+- `public/icon.svg` — the icon source: the existing HPOS logo mark
+  (`favicon.svg`) on a rounded dark tile matching the app background.
+  Regenerate `icon.ico` from it if the logo ever changes.
 
 **What is packaged:**
 - `HPOS-Desktop/` – Electron main (`main.js`), preload, runtimeManager, workspaceRoot, git logic
+  (tests, the legacy static page and the nested lockfile are excluded)
 - `dist/` – Vite-built React frontend (inside app.asar, loaded via `app.getAppPath()`)
 - `src/pages/CodeArena.html` – standalone Code Arena shell (secondary window, not main)
-- `runtime/` – read-only runtime via `extraResources` → `resources/runtime` + `asarUnpack` for spawn
+- `runtime/` – read-only runtime via `extraResources` → `resources/runtime`
   - Includes `bin/hpos-runtime.js`, daemon, executors, browser provider, linux backend
-  - `node_modules/playwright-core` included from `runtime/node_modules`
-  - Writes only to `~/.hpos/runtime` (state dir), never to app resources
+  - `runtime/node_modules/playwright-core` is included once `cd runtime && npm install`
+    has run (tests inside `runtime/` are filtered out)
+  - Writes only to `~/.hpos/runtime` (state dir, `HPOS_RUNTIME_HOME`), never to app resources
+- No npm `dependencies` ride along in `app.asar` — React is bundled into `dist/`
+  by Vite, so `react`/`react-dom` live in `devDependencies`
 
 **What is NOT packaged:**
-- `.git/`, `server/.env`, caches, test files (`*.test.mjs`, `tests/`), maps, `node_modules/.cache`
+- `.git/`, `server/.env`, caches, test files (`*.test.mjs`, `tests/`), source maps,
+  and repository-only files (README, Vite configs, `src/*.jsx` sources, extension, server)
 
 **Workspace in packaged mode:**
-- Packaged app **requires** `HPOS_WORKSPACE_ROOT` env pointing to an absolute writable folder outside app resources
-- `workspaceRoot.js` validates: must exist, must be readable/writable, must NOT be inside `appPath` or `resourcesPath`, must NOT be inside `.asar`
-- Dev mode (`app.isPackaged===false`) keeps existing repo-root behavior (`developmentRoot: path.resolve(__dirname,'..')`)
+- Explicit `HPOS_WORKSPACE_ROOT` (absolute, existing, readable/writable) → used as-is
+- No `HPOS_WORKSPACE_ROOT` → safe default `<Electron userData>/workspace`
+  (created on first launch, e.g. `%APPDATA%/HPOS/workspace`)
+- Invalid explicit workspace → structured startup error, **no silent fallback**
+- Never inside `app.asar`, `appPath` or `resourcesPath`; no `process.cwd()` fallback
+- `workspaceRoot.js` enforces all of the above; dev mode (`app.isPackaged === false`)
+  keeps the existing repository-root behavior
 
 **Runtime in packaged mode:**
-- `runtimeManager.js` resolves runtime via:
-  1. `resourcesPath/runtime` (extraResources)
-  2. `appPath/runtime` (inside asar)
-  3. `app.asar.unpacked/runtime` (asarUnpack)
-  4. `desktopDir/../runtime` fallback (dev)
-- Spawn uses unpacked path (`app.asar` → `app.asar.unpacked`) for Windows compatibility
-- Duplicate prevention: if external runtime already running (manual `npm start` in runtime), packaged app detects healthy endpoint and does not spawn second
-- Graceful shutdown: SIGTERM → 5s wait → SIGKILL fallback, only owned child, Windows safe
+- `runtimeManager.js` resolves the runtime via `resourcesPath/runtime` (extraResources) first
+- The runtime is spawned with `ELECTRON_RUN_AS_NODE=1`: `process.execPath` is the
+  packaged `HPOS.exe`, and without the flag a packaged app would launch a second
+  HPOS instance instead of the Node runtime daemon. The flag is inherited by the
+  runtime's own task spawns.
+- Duplicate prevention: if an external runtime is already running (manual
+  `npm start` in runtime), a healthy endpoint is detected and no second one starts
+- Graceful shutdown: SIGTERM → 5s wait → SIGKILL fallback, only the owned child
 
 **Dev vs Packaged:**
 - Dev: `HPOS_DEV_URL=http://localhost:5173` → `npm run start:dev` loads Vite dev server, manual runtime allowed
 - Prod: `dist/index.html` via `app.getAppPath()`, runtime auto-started, no terminal required, no blank screen, Code Arena not main
 
+**Windows installer behavior / limitations:**
+- Assisted (non-one-click) NSIS installer, per-user by default (no admin required
+  unless an all-users location is chosen), custom install directory allowed
+- Desktop + Start Menu shortcuts named **HPOS**
+- Uninstalling does **not** delete user data — the default workspace under
+  `%APPDATA%/HPOS/workspace` and runtime state under `~/.hpos/runtime` are left alone
+- No auto-updater (yet); a new installer installs over the previous version
+- No WSL, Docker or VM requirement or support
+- Building the installer needs network access to GitHub release assets
+  (`release-assets.githubusercontent.com`). In sandboxes that block that host,
+  `npm install` / `npm run dist:win` fail exactly at the Electron binary
+  download — an environment limitation, not a project error.
+  `npm test` runs `packaging.test.mjs`, which validates the packaging contract
+  (icon, appId, NSIS options, payload excludes, scripts) without building.
+
 **Security preserved:**
-- `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`
+- `contextIsolation:true`, `sandbox:true`, `nodeIntegration:false`, restricted preload
 - No generic shell/process API, no arbitrary Git args, no credential logging, bounded sanitized diagnostics
 
 **Requirements:** Node 18+ (Step 6 verification Node 22 par chali hai)
