@@ -20,6 +20,9 @@ import { join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  APP_ASSETS_DIR,
+  APP_ASSETS_SOURCE,
+  CODE_ARENA_SHELL,
   DEFAULT_OUTPUT_DIR,
   EXCLUDED_DIR_NAMES,
   MANIFEST_NAME,
@@ -34,11 +37,16 @@ import {
   buildWorkspaceProject,
   collectProjectFiles,
 } from './build-workspace-project.mjs'
+import { ensureAppBuild } from './ensure-app-build.mjs'
 
 const repoRoot = REPO_ROOT
 const here = resolve(fileURLToPath(new URL('.', import.meta.url)))
 
 console.log('workspace project payload tests...')
+
+/* The served entrypoint is the production frontend build — make sure it
+   exists so the payload can be built from a fresh checkout. */
+ensureAppBuild({ repoRoot })
 
 /** Recursive listing of a directory as sorted POSIX-relative paths. */
 function walk(dir, prefix = '') {
@@ -134,21 +142,48 @@ let manifest
   console.log('ok: expected production project files present (' + expected.length + ' checked)')
 }
 
-/* -------------------------------------- 3. Preview entrypoint is the real one */
+/* --------------- 3. Preview entrypoint is the HPOS application, not Code Arena */
 {
   const served = readFileSync(join(payload, SERVED_ENTRYPOINT))
-  const realShell = readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))
-  assert.ok(served.equals(realShell), 'served index.html must be byte-identical to ' + SERVED_ENTRYPOINT_SOURCE)
+  const appBuild = readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))
+  const codeArenaShell = readFileSync(join(repoRoot, CODE_ARENA_SHELL))
+
+  // The entrypoint mapping selects the real HPOS application build — the
+  // exact same dist/index.html the packaged Electron shell loads.
+  assert.equal(SERVED_ENTRYPOINT_SOURCE.split('\\').join('/'), 'dist/index.html', 'the entrypoint source must be the HPOS application build')
+  assert.ok(served.equals(appBuild), 'served index.html must be byte-identical to ' + SERVED_ENTRYPOINT_SOURCE)
+
+  // REGRESSION (PR #26): `/` must never resolve to the Code Arena editor
+  // shell — that made LIVE PREVIEW render Code Arena inside Code Arena.
+  assert.ok(!served.equals(codeArenaShell), 'served index.html must NOT be src/pages/CodeArena.html (recursive preview)')
+  assert.notEqual(SERVED_ENTRYPOINT_SOURCE, CODE_ARENA_SHELL, 'the entrypoint mapping must not point at the Code Arena shell')
 
   const html = served.toString('utf8')
-  assert.ok(html.includes('HPOS Code Arena'), 'entrypoint must be the real Code Arena shell')
-  assert.ok(html.includes('id="previewFrame"'), 'entrypoint must be the real shell (live preview frame)')
+  assert.ok(html.includes('data-hpos-app="hpos"'), 'entrypoint must be the real HPOS application page')
+  assert.ok(html.includes('id="root"'), 'entrypoint must mount the real HPOS React application')
+  assert.ok(/\.\/assets\/index-[^"']+\.js/.test(html), 'entrypoint must reference the built app bundle relatively')
+  assert.ok(!html.includes('HPOS Code Arena'), 'entrypoint must NOT be the Code Arena editor shell')
+  assert.ok(!html.includes('id="previewFrame"'), 'entrypoint must NOT carry the Code Arena preview frame (recursion)')
   assert.ok(!html.includes('Welcome to HPOS'), 'entrypoint must NOT be the starter demo page')
   assert.ok(!html.includes('Edit files in Code Arena and click'), 'entrypoint must NOT be the starter demo page')
 
-  // The real shell is also present at its true repository path.
+  // The bundle the entrypoint references really ships under assets/.
+  const assetRefs = [...html.matchAll(/\.\/(assets\/[^"']+)/g)].map((m) => m[1])
+  assert.ok(assetRefs.length >= 2, 'the app entry must reference its JS and CSS bundle, got ' + assetRefs.length)
+  for (const ref of assetRefs) {
+    assert.ok(payloadFiles.includes(ref), 'referenced app asset must ship in the payload: ' + ref)
+    assert.ok(
+      readFileSync(join(payload, ref)).equals(readFileSync(join(repoRoot, 'dist', ref))),
+      ref + ' must be byte-identical to the built application asset'
+    )
+  }
+  assert.equal(APP_ASSETS_DIR, 'assets', 'app assets must ship under assets/')
+  assert.equal(APP_ASSETS_SOURCE.split('\\').join('/'), 'dist/assets', 'app assets must come from the real build output')
+
+  // The real Code Arena shell is still present at its true repository path —
+  // the source snapshot stays intact, it is just never served at `/`.
   assert.ok(
-    readFileSync(join(payload, 'src/pages/CodeArena.html')).equals(realShell),
+    readFileSync(join(payload, 'src/pages/CodeArena.html')).equals(codeArenaShell),
     'src/pages/CodeArena.html must stay at its real path, unchanged'
   )
 
@@ -158,7 +193,7 @@ let manifest
   assert.ok(preserved.equals(viteEntry), PRESERVED_VITE_ENTRY + ' must be byte-identical to the repository ' + VITE_ENTRY_SOURCE)
   assert.ok(preserved.toString('utf8').includes('/src/main.jsx'), 'preserved Vite entry must still reference /src/main.jsx')
 
-  console.log('ok: preview entrypoint is the real Code Arena shell, Vite entry preserved')
+  console.log('ok: preview entrypoint is the real HPOS application, never the Code Arena shell')
 }
 
 /* ------------------------------------------- 4. byte parity with the source */
@@ -169,7 +204,10 @@ let manifest
 
   for (const rel of payloadFiles) {
     if (mapped.has(rel)) continue
-    const source = join(repoRoot, rel)
+    // App assets ship under assets/ but come from the real build output dist/assets/.
+    const source = rel.startsWith(APP_ASSETS_DIR + '/')
+      ? join(repoRoot, 'dist', rel)
+      : join(repoRoot, rel)
     if (!existsSync(source)) {
       drifted.push(rel + ' (no repository source)')
       continue
@@ -289,6 +327,26 @@ let manifest
     mkdirSync(resolve(abs, '..'), { recursive: true })
     writeFileSync(abs, rel.endsWith('package.json') ? '{\n  "name": "hpos-fixture",\n  "version": "0.0.0"\n}\n' : '/* fixture */ ' + rel)
   }
+
+  // Without the application build there is no preview entrypoint: refused.
+  assert.throws(
+    () => buildWorkspaceProject({ repoRoot: notProject, outputDir: join(notProject, 'no-dist'), quiet: true }),
+    /application build is missing/,
+    'the builder must demand the real HPOS application build for the entrypoint'
+  )
+  mkdirSync(join(notProject, 'dist'), { recursive: true })
+
+  // REGRESSION (PR #26): an application "build" that is actually the Code
+  // Arena editor shell must be refused — Preview must never serve the shell.
+  writeFileSync(join(notProject, 'dist', 'index.html'), readFileSync(join(notProject, 'src', 'pages', 'CodeArena.html')))
+  assert.throws(
+    () => buildWorkspaceProject({ repoRoot: notProject, outputDir: join(notProject, 'recursive'), quiet: true }),
+    /refusing to build a recursive preview payload/,
+    'a Code Arena shell posing as the app build must be refused'
+  )
+  rmSync(join(notProject, 'recursive'), { recursive: true, force: true })
+  writeFileSync(join(notProject, 'dist', 'index.html'), '<html data-hpos-app="hpos"><body><div id="root"></div></body></html>')
+
   // The builder must reject a project whose package.json is not readable JSON.
   writeFileSync(join(notProject, 'package.json'), '/* not json */')
   assert.throws(

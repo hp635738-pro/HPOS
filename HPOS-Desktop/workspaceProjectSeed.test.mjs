@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 import {
+  CODE_ARENA_SHELL,
   MANIFEST_NAME,
   PRESERVED_VITE_ENTRY,
   RESOURCE_DIR_NAME,
@@ -34,6 +35,7 @@ import {
   STAGING_DIR_NAME,
   buildWorkspaceProject,
 } from '../scripts/build-workspace-project.mjs'
+import { ensureAppBuild } from '../scripts/ensure-app-build.mjs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -55,6 +57,10 @@ const {
 const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 console.log('workspace project seeding tests...')
+
+/* The served entrypoint is the production frontend build — make sure it
+   exists so the payload can be built from a fresh checkout. */
+ensureAppBuild({ repoRoot })
 
 /** Build the real payload once and reuse it: it is ~1.7 MB of real source. */
 const payloadDir = mkdtempSync(join(tmpdir(), 'hpos-wsp-payload-src-'))
@@ -151,18 +157,36 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   console.log('ok: first packaged launch seeds the real project (' + seeded.length + ' files)')
 }
 
-/* ------------------- 2. the seeded entrypoint is the real Code Arena shell */
+/* --------- 2. the seeded entrypoint is the HPOS application, not Code Arena */
 {
   const workspace = tempWorkspace()
   const result = seedWorkspaceFromSources({ workspaceRoot: workspace, projectDir: payloadDir, templateDir: join(repoRoot, TEMPLATE_DIR_NAME) })
   assert.equal(result.seeded, true)
 
   const entry = readFileSync(join(workspace, SERVED_ENTRYPOINT), 'utf8')
-  assert.ok(entry.includes('HPOS Code Arena'), 'entrypoint must be the real Code Arena shell')
+  assert.ok(entry.includes('data-hpos-app="hpos"'), 'entrypoint must be the real HPOS application page')
+  assert.ok(entry.includes('id="root"'), 'entrypoint must mount the HPOS React application')
+  // REGRESSION (PR #26): the seeded `/` page must never be the Code Arena
+  // editor shell — that made LIVE PREVIEW render Code Arena inside itself.
+  assert.ok(!entry.includes('HPOS Code Arena'), 'entrypoint must NOT be the Code Arena editor shell')
+  assert.ok(!entry.includes('id="previewFrame"'), 'entrypoint must NOT carry the Code Arena preview frame')
   assert.ok(!entry.includes('Welcome to HPOS'), 'entrypoint must not be the starter demo')
   assert.ok(
     readFileSync(join(workspace, SERVED_ENTRYPOINT)).equals(readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))),
     'entrypoint must be byte-identical to ' + SERVED_ENTRYPOINT_SOURCE
+  )
+  assert.ok(
+    !readFileSync(join(workspace, SERVED_ENTRYPOINT)).equals(readFileSync(join(repoRoot, CODE_ARENA_SHELL))),
+    'entrypoint must NOT be byte-identical to the Code Arena shell'
+  )
+  // The bundle the app entrypoint references is seeded too.
+  for (const ref of [...entry.matchAll(/\.\/(assets\/[^"']+)/g)].map((m) => m[1])) {
+    assert.ok(existsSync(join(workspace, ref)), 'the seeded workspace must carry the app asset ' + ref)
+  }
+  // The Code Arena shell still ships as source, at its own path only.
+  assert.ok(
+    readFileSync(join(workspace, 'src/pages/CodeArena.html')).equals(readFileSync(join(repoRoot, CODE_ARENA_SHELL))),
+    'the Code Arena shell must stay in the source snapshot at its real path'
   )
   assert.ok(
     readFileSync(join(workspace, PRESERVED_VITE_ENTRY), 'utf8').includes('/src/main.jsx'),
@@ -172,9 +196,10 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   const manifest = JSON.parse(readFileSync(join(workspace, MANIFEST_NAME), 'utf8'))
   assert.equal(manifest.project, 'hpos', 'the workspace must carry the real project manifest')
   assert.equal(manifest.entrypoint.served, SERVED_ENTRYPOINT)
+  assert.equal(manifest.entrypoint.servedFrom, 'dist/index.html', 'the manifest must record the app build as the source')
   assert.equal(manifest.entrypoint.servedFrom, SERVED_ENTRYPOINT_SOURCE.split('\\').join('/'))
 
-  console.log('ok: seeded preview entrypoint is the real Code Arena project, not the demo')
+  console.log('ok: seeded preview entrypoint is the real HPOS application, not the Code Arena shell or the demo')
 }
 
 /* --------------------- 3. no secret/dependency/artifact can ever be seeded */
@@ -297,7 +322,8 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   for (const demoOnly of ['src/app.js', 'src/utils.js', 'styles.css']) {
     assert.equal(existsSync(join(workspace, demoOnly)), false, demoOnly + ' (demo-only file) must be gone')
   }
-  assert.ok(readFileSync(join(workspace, SERVED_ENTRYPOINT), 'utf8').includes('HPOS Code Arena'), 'the real entrypoint replaced the demo')
+  assert.ok(readFileSync(join(workspace, SERVED_ENTRYPOINT), 'utf8').includes('data-hpos-app="hpos"'), 'the real HPOS app entrypoint replaced the demo')
+  assert.ok(!readFileSync(join(workspace, SERVED_ENTRYPOINT), 'utf8').includes('HPOS Code Arena'), 'the migrated entrypoint must not be the Code Arena shell')
   assert.ok(existsSync(join(workspace, 'src/App.jsx')), 'the real project source is present')
   assert.ok(existsSync(join(workspace, 'runtime/bin/hpos-runtime.js')), 'the runtime source is present')
   assert.ok(listFiles(workspace).length >= 150, 'the whole project must be present')
