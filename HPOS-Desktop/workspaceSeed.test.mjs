@@ -240,7 +240,10 @@ console.log('workspace seed tests...')
   console.log('ok: template directory resolution')
 }
 
-/* ---------------------------------------- 8. seedWorkspaceIfNeeded */
+/* ---------------------------------------- 8. seedWorkspaceIfNeeded
+   Preference order lives in workspaceProjectSeed.test.mjs: the real project
+   payload (workspace-project) wins, the starter demo is the fallback. Here we
+   only assert that dev-mode resolution seeds *something* real. */
 {
   const workspace = mkdtempSync(join(tmpdir(), 'hpos-seed-ifneeded-'))
   const template = mkdtempSync(join(tmpdir(), 'hpos-seed-ifneeded-tpl-'))
@@ -252,10 +255,13 @@ console.log('workspace seed tests...')
     desktopDir: join(repoRoot, 'HPOS-Desktop'), // dev mode uses repo template
   })
 
-  // This should use the actual repo template, which has real files
+  // Uses the bundled payload that exists in this checkout: the generated
+  // workspace-project when it has been built, otherwise workspace-template.
   assert.equal(result.ok, true, 'seedWorkspaceIfNeeded should succeed')
-  assert.equal(result.seeded, true, 'should seed from actual template')
-  assert.ok(result.copied.length > 0, 'should copy files from real template')
+  assert.equal(result.seeded, true, 'should seed from the bundled payload')
+  assert.ok(['workspace-project', 'workspace-template'].includes(result.source), 'the payload source must be reported, got ' + result.source)
+  assert.ok(result.copied.length > 0, 'should copy files from the bundled payload')
+  assert.equal(result.entrypoint, 'index.html', 'the seeded workspace must have a preview entrypoint')
 
   rmSync(workspace, { recursive: true, force: true })
   rmSync(template, { recursive: true, force: true })
@@ -314,7 +320,7 @@ console.log('workspace seed tests...')
   console.log('ok: workspace creation')
 }
 
-/* ---------------------------------------- 12. real workspace template exists */
+/* --------------------- 12. starter demo template (fallback only) exists */
 {
   const templateDir = join(repoRoot, 'workspace-template')
   assert.ok(existsSync(templateDir), 'workspace-template directory should exist in repo')

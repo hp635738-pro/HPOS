@@ -70,12 +70,36 @@ npm run build:prod
   - `runtime/node_modules/playwright-core` is included once `cd runtime && npm install`
     has run (tests inside `runtime/` are filtered out)
   - Writes only to `~/.hpos/runtime` (state dir, `HPOS_RUNTIME_HOME`), never to app resources
+- `workspace-project/` – the **real Code Arena project source**, via
+  `extraResources` → `resources/workspace-project`, generated at package time by
+  `scripts/build-workspace-project.mjs` (staging dir is gitignored, never committed)
+  - Seeded into the user workspace on first packaged launch — see
+    *Workspace seeding* below
+  - Carries the repository's visible, non-secret source and assets: `index.html`,
+    `src/**`, `public/**`, `HPOS-Desktop/**`, `runtime/**`, `extension/**`,
+    `server/**`, Vite/Tailwind/TS configs, the docs, and a `HPOS-WORKSPACE.json`
+    provenance manifest (project name/version, source commit, entrypoint mapping)
+  - Never carries `.git`, `.env*`, keys/certs (`.key`, `.pem`, `.p12`, `.pfx`,
+    `.crt`), `credentials`/`secrets`, `node_modules`, lockfiles, logs, caches,
+    build artifacts (`dist`, `build`, `out`, `target`, `release`), hidden
+    entries, tests (`*.test.mjs`, `tests/`) or source maps
+- `workspace-template/` – the PR #25 starter demo, kept **only** as a last-resort
+  fallback for a build that ships no project payload
 - No npm `dependencies` ride along in `app.asar` — React is bundled into `dist/`
   by Vite, so `react`/`react-dom` live in `devDependencies`
 
 **What is NOT packaged:**
-- `.git/`, `server/.env`, caches, test files (`*.test.mjs`, `tests/`), source maps,
-  and repository-only files (README, Vite configs, `src/*.jsx` sources, extension, server)
+- Into `app.asar`: `.git/`, `server/.env`, caches, test files (`*.test.mjs`,
+  `tests/`), source maps, the generated `workspace-project/` staging dir, and
+  repository-only files (README, Vite configs, `src/*.jsx` sources, extension,
+  server). Those repository files DO ship as the `workspace-project` **resource**
+  (outside the asar) so the production workspace is the real project.
+
+```bash
+# Regenerate the production workspace payload on its own (every dist* script
+# already runs it before electron-builder)
+npm run workspace:project
+```
 
 **Workspace in packaged mode:**
 - Explicit `HPOS_WORKSPACE_ROOT` (absolute, existing, readable/writable) → used as-is
@@ -85,6 +109,34 @@ npm run build:prod
 - Never inside `app.asar`, `appPath` or `resourcesPath`; no `process.cwd()` fallback
 - `workspaceRoot.js` enforces all of the above; dev mode (`app.isPackaged === false`)
   keeps the existing repository-root behavior
+
+**Workspace seeding (first packaged launch):**
+
+In development the Code Arena workspace root *is* this repository
+(`developmentRoot: path.resolve(__dirname, '..')`), so Explorer, the editor, Git
+and Preview all operate on the real HPOS project. A packaged build reproduces
+that instead of shipping a demo:
+
+- `workspaceSeed.js` seeds `resources/workspace-project` (the real project
+  payload) into `<userData>/workspace` when the workspace has no visible entries
+- Payload preference: `workspace-project` → `workspace-template` (PR #25 demo,
+  fallback only) → structured `ENO_TEMPLATE` failure, never a silent empty
+  workspace
+- **Preview entrypoint:** the packaged workspace has no Vite and no
+  `node_modules`, and Preview is the built-in static server, so the served
+  `index.html` is the real self-contained Code Arena shell
+  (`src/pages/CodeArena.html` — inline CSS/JS, no external or remote assets).
+  The repository's Vite/React entry is preserved byte-for-byte as
+  `vite-index.html`, and `src/pages/CodeArena.html` also stays at its real path
+- **Existing content is never blindly overwritten.** Seeding happens only on an
+  empty (or hidden-files-only) workspace, with one narrow, provable exception: a
+  workspace that is still a *byte-identical, untouched* copy of the bundled
+  starter demo — one extra file, one extra folder or one edited byte cancels it —
+  is upgraded to the real project (reported as `migratedFrom`)
+- Boundary: the payload must live outside the workspace (a self-copy is refused
+  with `ESELF`), and every destination path is re-checked to stay inside
+  `WORKSPACE_ROOT`; the forbidden-entry filter runs at build time *and* at seed
+  time, so secrets/deps/artifacts cannot be seeded even from a tampered payload
 
 **Runtime in packaged mode:**
 - `runtimeManager.js` resolves the runtime via `resourcesPath/runtime` (extraResources) first
@@ -98,6 +150,8 @@ npm run build:prod
 
 **Dev vs Packaged:**
 - Dev: `HPOS_DEV_URL=http://localhost:5173` → `npm run start:dev` loads Vite dev server, manual runtime allowed
+- Dev workspace = the repository itself, so nothing is seeded; run
+  `npm run workspace:project` to inspect the exact payload a packaged build ships
 - Prod: `dist/index.html` via `app.getAppPath()`, runtime auto-started, no terminal required, no blank screen, Code Arena not main
 
 **Windows installer behavior / limitations:**

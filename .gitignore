@@ -30,3 +30,7 @@ server/.env
 # Production packaging
 release/
 out/
+
+# Generated production workspace payload (scripts/build-workspace-project.mjs)
+# Staged here, shipped as extraResources -> resources/workspace-project.
+workspace-project/
