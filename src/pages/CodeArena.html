@@ -581,6 +581,10 @@
         font-size: 11.5px;
       }
 
+      .git-empty--err {
+        color: var(--danger);
+      }
+
       .git-file--pick {
         cursor: pointer;
       }
@@ -2423,6 +2427,19 @@
         var gitSelectionEl = byId('gitSelection')
         var gitSelectAllBtn = byId('gitSelectAll')
         var gitCommitNoteEl = byId('gitCommitNote')
+        /* The connect button is created here (it only exists when the
+           workspace is not yet a Git repository) and moved into the
+           status body by paintGit(). */
+        var gitConnectBtn = null
+        if (gitBodyEl) {
+          gitConnectBtn = document.createElement('button')
+          gitConnectBtn.type = 'button'
+          gitConnectBtn.className = 'btn btn-xs'
+          gitConnectBtn.id = 'gitConnect'
+          gitConnectBtn.setAttribute('hidden', '')
+          gitConnectBtn.setAttribute('aria-label', 'Connect workspace to HPOS Git')
+          gitConnectBtn.addEventListener('click', connectWorkspaceToGit)
+        }
         var paneNoteEl = byId('paneNote')
         var centerWorkspaceEl = byId('centerWorkspace')
         var terminalFullscreenBtn = byId('terminalFullscreen')
@@ -3801,6 +3818,10 @@
           loaded: false,
           data: null,
           error: null,
+          /* connect state: turning a non-repo workspace into the HPOS Git
+             working tree is one argument-free main-process call. */
+          connecting: false,
+          connectError: null,
           /* commit state */
           selected: {},      // project-relative path -> true
           committing: false,
@@ -4018,11 +4039,31 @@
             gitStateChip.className = 'chip chip--warn'
             gitStateText.textContent = 'Not a Git repository'
             gitBodyEl.appendChild(
-              gitEl('div', 'git-empty', data.message || 'HPOS-Desktop is not inside a Git repository')
+              gitEl('div', 'git-empty', data.message || 'The workspace is not inside a Git repository')
             )
-            gitBodyEl.appendChild(
-              gitEl('div', 'git-empty', 'git init inside HPOS-Desktop (or its parent) to track changes here.')
-            )
+            if (gitConnectBtn) {
+              if (git.connecting) {
+                gitConnectBtn.setAttribute('disabled', '')
+                gitConnectBtn.textContent = 'Connecting…'
+              } else if (git.connectError) {
+                gitConnectBtn.removeAttribute('disabled')
+                gitConnectBtn.textContent = 'Retry connect'
+                gitConnectBtn.setAttribute('title', git.connectError)
+              } else {
+                gitConnectBtn.removeAttribute('disabled')
+                gitConnectBtn.textContent = 'Connect workspace to HPOS Git'
+                gitConnectBtn.setAttribute('title', 'Initialise this workspace as a Git working tree on branch main, connected to the fixed HPOS repository (origin). No files or history are copied; nothing is fetched or pushed.')
+              }
+              gitConnectBtn.removeAttribute('hidden')
+              gitBodyEl.appendChild(gitConnectBtn)
+            }
+            if (git.connectError) {
+              gitBodyEl.appendChild(gitEl('div', 'git-empty git-empty--err', git.connectError))
+            } else {
+              gitBodyEl.appendChild(
+                gitEl('div', 'git-empty', 'This workspace snapshot ships without .git. Connect it to make status, commit and push work here — the connect only runs git init with the fixed HPOS remote.')
+              )
+            }
             return
           }
 
@@ -4614,6 +4655,60 @@
             renderGit()
             logLine(consoleEl, 'err', '[git] pull FAILED — ' + git.pull.error)
           })
+        }
+
+        /**
+         * Connect this workspace to the HPOS Git repository. The call
+         * carries no arguments: the remote URL, branch name and every
+         * command are fixed in the main process (git init + the fixed
+         * HPOS origin). Existing repositories are never touched.
+         */
+        function connectWorkspaceToGit() {
+          if (git.connecting) return Promise.resolve()
+          if (!bridge || typeof bridge.gitConnectWorkspace !== 'function') {
+            git.connectError = 'This preload build has no Git connect bridge.'
+            renderGit()
+            logLine(consoleEl, 'err', '[git] connect FAILED — no connect bridge in this window')
+            return Promise.resolve()
+          }
+
+          git.connecting = true
+          git.connectError = null
+          renderGit()
+          logLine(consoleEl, 'out', '[git] connecting the workspace to the HPOS Git repository…')
+
+          return bridge.gitConnectWorkspace().then(
+            function (result) {
+              git.connecting = false
+              if (!result || !result.ok) {
+                git.connectError = (result && result.error) || 'Could not connect the workspace to Git'
+                renderGit()
+                logLine(consoleEl, 'err', '[git] connect FAILED — ' + git.connectError)
+                return
+              }
+              if (result.status) {
+                git.data = result.status
+                pruneGitSelection()
+              }
+              git.connectError = null
+              renderGit()
+              logLine(consoleEl, 'ok', '[git] ' + (result.message || 'workspace connected to HPOS Git'))
+              logLine(termEl, 'ok', '$ hpos git connect → ' + (result.branch || 'main') + ' @ ' + (result.origin || 'origin'))
+              emit('hpos:git-connect', {
+                connected: !!result.connected,
+                reason: result.reason || null,
+                branch: result.branch || null,
+                origin: result.origin || null,
+              })
+              refreshGit({ quiet: true })
+            },
+            function (err) {
+              git.connecting = false
+              git.connectError = err && err.message ? err.message : String(err)
+              renderGit()
+              logLine(consoleEl, 'err', '[git] connect FAILED — ' + git.connectError)
+            }
+          )
         }
 
         function refreshGit(options) {

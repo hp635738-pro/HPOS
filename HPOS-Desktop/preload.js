@@ -22,6 +22,8 @@
  *   window.hpos.gitPush()                  -> { pushed, ahead, behind, status, … }
  *   window.hpos.checkGitPull()             -> structured origin/main update plan
  *   window.hpos.applyGitPull(commit)       -> structured fast-forward result
+ *   window.hpos.gitConnectWorkspace()      -> initialises a workspace repository
+ *                                             and connects the fixed HPOS origin
  *   window.hpos.openCodeArena()            -> opens Code Arena
  *
  * gitStatus() takes no arguments at all — there is nothing for the renderer
@@ -67,6 +69,7 @@ const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
 const CHANNEL_GIT_PULL_CHECK = 'hpos:git:pull-check'
 const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
+const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
 
 /* Terminal output subscriptions. The renderer hands us a callback; we keep a
    stable listener per callback so offTerminalData can remove exactly the one
@@ -201,6 +204,15 @@ contextBridge.exposeInMainWorld('hpos', {
   /** Re-check safety and apply only the explicitly reviewed commit. */
   applyGitPull(commit) {
     return ipcRenderer.invoke(CHANNEL_GIT_PULL_APPLY, commit)
+  },
+
+  /**
+   * Turn the workspace into a Git working tree connected to the fixed
+   * HPOS repository. Takes no arguments: the remote URL, the branch
+   * name and every Git command are decided by the main process.
+   */
+  gitConnectWorkspace() {
+    return ipcRenderer.invoke(CHANNEL_GIT_CONNECT)
   },
 
   /**
