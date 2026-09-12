@@ -35,16 +35,30 @@
  *   · this script's own output directory
  *
  * Entrypoint mapping (the one deliberate difference from the repo tree)
- *   · `index.html`            ← `src/pages/CodeArena.html`
- *     The packaged workspace has no Vite and no node_modules, and Preview is a
- *     plain static server, so the served entrypoint must be a real page that
- *     renders without a build step. `src/pages/CodeArena.html` is exactly
- *     that: the actual, self-contained HPOS Code Arena shell (inline CSS/JS,
- *     no external assets) that the packaged app itself loads.
+ *   · `index.html`            ← `dist/index.html`  (the HPOS application)
+ *     Preview must render the actual HPOS application, so the served
+ *     entrypoint is the production frontend build — the exact same
+ *     `dist/index.html` the packaged Electron shell loads
+ *     (HPOS-Desktop/frontendEntry.js). It is fully static (Vite `base: './'`),
+ *     renders under a plain static server with no Vite and no node_modules,
+ *     and degrades gracefully without the preload bridge.
+ *     It must NEVER be `src/pages/CodeArena.html`: serving the Code Arena
+ *     editor shell from Code Arena's own LIVE PREVIEW produced a recursive
+ *     editor-inside-preview (the PR #26 regression). The builder refuses to
+ *     map the shell as the entrypoint.
+ *   · `assets/`               ← `dist/assets/`
+ *     The hashed JS/CSS bundle the built app references, copied under a
+ *     plain `assets/` directory (a literal `dist/` directory is a forbidden
+ *     name and is never seeded).
  *   · `vite-index.html`       ← the repository's `index.html`
  *     The real Vite/React dev entry is preserved byte-for-byte under a
  *     non-colliding name, so nothing is lost or rewritten.
- *   · `src/pages/CodeArena.html` stays at its real path as well.
+ *   · `src/pages/CodeArena.html` stays at its real path as well — the source
+ *     snapshot is intact, the shell is just never served at `/`.
+ *
+ * The production frontend build must exist before this script runs
+ * (`npm run build:prod`); the `dist`/`dist:win`/`dist:dir` scripts already
+ * chain it in that order.
  *
  * Usage
  *   node scripts/build-workspace-project.mjs [--out DIR] [--force] [--quiet]
@@ -85,9 +99,19 @@ export const SEED_SOURCE_LABEL = 'workspace-project'
 export const MANIFEST_NAME = 'HPOS-WORKSPACE.json'
 export const MANIFEST_VERSION = 1
 
-/** The static-preview entrypoint and the real file it comes from. */
+/** The static-preview entrypoint and the real file it comes from: the HPOS
+ *  application's production build — the same entry the packaged Electron
+ *  shell loads (HPOS-Desktop/frontendEntry.js → dist/index.html). */
 export const SERVED_ENTRYPOINT = 'index.html'
-export const SERVED_ENTRYPOINT_SOURCE = join('src', 'pages', 'CodeArena.html')
+export const SERVED_ENTRYPOINT_SOURCE = join('dist', 'index.html')
+/** The built app's hashed asset bundle: shipped under `assets/` because a
+ *  literal `dist/` directory is a forbidden name that is never seeded. */
+export const APP_ASSETS_DIR = 'assets'
+export const APP_ASSETS_SOURCE = join('dist', 'assets')
+/** The Code Arena editor shell — real project source that ships at its own
+ *  path, but must NEVER be mapped to the served entrypoint (recursive
+ *  editor-inside-preview, the PR #26 regression). */
+export const CODE_ARENA_SHELL = join('src', 'pages', 'CodeArena.html')
 /** Where the repository's real Vite/React entry is preserved. */
 export const PRESERVED_VITE_ENTRY = 'vite-index.html'
 export const VITE_ENTRY_SOURCE = 'index.html'
@@ -311,6 +335,18 @@ export function buildWorkspaceProject({
     }
   }
 
+  /* The served entrypoint is the real HPOS application build, so the
+     production frontend must have been built first (`npm run build:prod` —
+     the dist/dist:win/dist:dir scripts already chain it before this script). */
+  const appEntryAbs = join(repoRoot, SERVED_ENTRYPOINT_SOURCE)
+  if (!existsSync(appEntryAbs) || !lstatSync(appEntryAbs).isFile()) {
+    throw new Error(
+      'The HPOS application build is missing: ' + SERVED_ENTRYPOINT_SOURCE.split(sep).join('/') +
+        ' not found in ' + repoRoot + '. Run `npm run build:prod` before building the workspace payload — ' +
+        'Preview serves the real HPOS application, never the Code Arena editor shell.'
+    )
+  }
+
   assertOutputIsSafe(outputDir, repoRoot, force)
 
   if (existsSync(outputDir)) {
@@ -339,22 +375,89 @@ export function buildWorkspaceProject({
   }
 
   /* ---------------------------------------------------- entrypoint mapping
-     Preview is a static server and the packaged workspace has no Vite, so the
-     served entrypoint is the real self-contained Code Arena shell. The repo's
-     own Vite entry is preserved verbatim next to it. */
-  const shellSource = join(outputDir, SERVED_ENTRYPOINT_SOURCE)
+     Preview must render the actual HPOS application, so the served
+     entrypoint is the production frontend build (dist/index.html — the same
+     entry the packaged Electron shell loads) plus its hashed asset bundle
+     under `assets/`. The repo's own Vite entry is preserved verbatim next to
+     it, and the Code Arena editor shell is NEVER mapped to `/`. */
+  if (SERVED_ENTRYPOINT_SOURCE === CODE_ARENA_SHELL) {
+    throw new Error(
+      'Refusing to map the Code Arena editor shell (' + CODE_ARENA_SHELL.split(sep).join('/') +
+        ') as the preview entrypoint: LIVE PREVIEW must render the HPOS application, not Code Arena itself.'
+    )
+  }
+  const appEntrySource = join(repoRoot, SERVED_ENTRYPOINT_SOURCE)
   const viteEntry = join(outputDir, VITE_ENTRY_SOURCE)
-  if (!existsSync(shellSource)) {
-    throw new Error('Payload is missing ' + SERVED_ENTRYPOINT_SOURCE + ' — cannot map the preview entrypoint')
+  if (!existsSync(appEntrySource)) {
+    throw new Error('The HPOS application build is missing ' + SERVED_ENTRYPOINT_SOURCE + ' — cannot map the preview entrypoint')
   }
   if (!existsSync(viteEntry)) {
     throw new Error('Payload is missing the project Vite entry ' + VITE_ENTRY_SOURCE)
   }
-  const shellBytes = readFileSync(shellSource)
+  const appEntryBytes = readFileSync(appEntrySource)
+  const shellGuard = join(repoRoot, CODE_ARENA_SHELL)
+  if (existsSync(shellGuard) && appEntryBytes.equals(readFileSync(shellGuard))) {
+    throw new Error(
+      'The served entrypoint content is the Code Arena editor shell — refusing to build a recursive preview payload.'
+    )
+  }
   const viteBytes = readFileSync(viteEntry)
   writeFileSync(join(outputDir, PRESERVED_VITE_ENTRY), viteBytes)
-  writeFileSync(join(outputDir, SERVED_ENTRYPOINT), shellBytes)
+  writeFileSync(join(outputDir, SERVED_ENTRYPOINT), appEntryBytes)
   if (!copied.includes(PRESERVED_VITE_ENTRY)) copied.push(PRESERVED_VITE_ENTRY)
+
+  /* The built app's asset bundle (hashed JS/CSS). It lives in dist/ in the
+     repository — a forbidden directory name that the walker rightly skips —
+     so it ships under a plain `assets/` directory that the seeder accepts.
+     dist/index.html references it relatively (`./assets/…`, Vite base './'),
+     so the layout works unchanged. Symlinks are never followed, and every
+     destination is re-checked to stay inside the payload directory. */
+  const assetsSource = join(repoRoot, APP_ASSETS_SOURCE)
+  if (existsSync(assetsSource) && lstatSync(assetsSource).isDirectory()) {
+    const assetsOut = join(outputDir, APP_ASSETS_DIR)
+    const copyAssets = (srcDir, destDir, relPrefix) => {
+      const dirents = readdirSync(srcDir, { withFileTypes: true })
+      dirents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      for (const dirent of dirents) {
+        const name = dirent.name
+        if (!name || name === '.' || name === '..') continue
+        const rel = relPrefix + '/' + name
+        if (dirent.isSymbolicLink()) {
+          skipped.push({ rel, reason: 'symlink' })
+          continue
+        }
+        if (isHiddenEntry(name) || isForbiddenEntry(name) || isExcludedFile(name)) {
+          skipped.push({ rel, reason: 'forbidden, hidden or excluded asset entry' })
+          continue
+        }
+        const src = join(srcDir, name)
+        const dest = resolve(destDir, name)
+        const destRelCheck = relative(outputResolved, dest)
+        if (destRelCheck === '' || destRelCheck.startsWith('..') || destRelCheck.startsWith(sep)) {
+          skipped.push({ rel, reason: 'refused: path escapes the payload directory' })
+          continue
+        }
+        if (dirent.isDirectory()) {
+          mkdirSync(dest, { recursive: true })
+          copyAssets(src, dest, rel)
+          continue
+        }
+        if (!dirent.isFile()) {
+          skipped.push({ rel, reason: 'not a regular file' })
+          continue
+        }
+        if (lstatSync(src).size > MAX_PAYLOAD_FILE_BYTES) {
+          skipped.push({ rel, reason: 'larger than the ' + MAX_PAYLOAD_FILE_BYTES + ' byte project-file ceiling' })
+          continue
+        }
+        mkdirSync(destDir, { recursive: true })
+        writeFileSync(dest, readFileSync(src))
+        if (!copied.includes(rel)) copied.push(rel)
+      }
+    }
+    copyAssets(assetsSource, assetsOut, APP_ASSETS_DIR)
+  }
+
   copied.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   bytes = copied.reduce((total, rel) => {
     try {
@@ -386,9 +489,12 @@ export function buildWorkspaceProject({
       servedFrom: SERVED_ENTRYPOINT_SOURCE.split(sep).join('/'),
       preservedViteEntry: PRESERVED_VITE_ENTRY,
       preservedViteEntryFrom: VITE_ENTRY_SOURCE,
+      appAssetsDir: APP_ASSETS_DIR,
+      appAssetsFrom: APP_ASSETS_SOURCE.split(sep).join('/'),
       reason:
-        'The packaged workspace has no Vite and no node_modules, so the static Preview server ' +
-        'serves the real self-contained Code Arena shell. The Vite/React dev entry is preserved unchanged.',
+        'LIVE PREVIEW renders the real HPOS application: the served entrypoint is the production ' +
+        'frontend build (the same dist/index.html the packaged Electron shell loads), never the ' +
+        'Code Arena editor shell. The Vite/React dev entry is preserved unchanged.',
     },
     /* Counts describe the project files themselves; the manifest is not
        counted inside its own numbers (that would be circular). */
@@ -417,7 +523,8 @@ export function buildWorkspaceProject({
       '[workspace-project] ' + copied.length + ' files (' + (bytes / 1024).toFixed(0) + ' KB) → ' +
         relative(process.cwd(), outputDir)
     )
-    console.log('[workspace-project] entrypoint: ' + SERVED_ENTRYPOINT + ' ← ' + SERVED_ENTRYPOINT_SOURCE.split(sep).join('/'))
+    console.log('[workspace-project] entrypoint: ' + SERVED_ENTRYPOINT + ' ← ' + SERVED_ENTRYPOINT_SOURCE.split(sep).join('/') + ' (the HPOS application build)')
+    console.log('[workspace-project] assets:     ' + APP_ASSETS_DIR + '/ ← ' + APP_ASSETS_SOURCE.split(sep).join('/'))
     console.log('[workspace-project] preserved:  ' + PRESERVED_VITE_ENTRY + ' ← ' + VITE_ENTRY_SOURCE)
     for (const [reason, count] of [...byReason.entries()].sort()) {
       console.log('[workspace-project] skipped ' + count + ' — ' + reason)

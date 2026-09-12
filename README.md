@@ -122,12 +122,15 @@ that instead of shipping a demo:
 - Payload preference: `workspace-project` → `workspace-template` (PR #25 demo,
   fallback only) → structured `ENO_TEMPLATE` failure, never a silent empty
   workspace
-- **Preview entrypoint:** the packaged workspace has no Vite and no
-  `node_modules`, and Preview is the built-in static server, so the served
-  `index.html` is the real self-contained Code Arena shell
-  (`src/pages/CodeArena.html` — inline CSS/JS, no external or remote assets).
-  The repository's Vite/React entry is preserved byte-for-byte as
-  `vite-index.html`, and `src/pages/CodeArena.html` also stays at its real path
+- **Preview entrypoint:** LIVE PREVIEW renders the actual HPOS application —
+  the served `index.html` is the production frontend build (`dist/index.html`,
+  the same entry the packaged Electron shell loads), with its hashed bundle
+  shipped under `assets/`. It is **never** `src/pages/CodeArena.html`: serving
+  the Code Arena editor shell from Code Arena's own preview produced a
+  recursive editor-inside-preview, and the payload builder now refuses that
+  mapping outright. The repository's Vite/React entry is preserved
+  byte-for-byte as `vite-index.html`, and `src/pages/CodeArena.html` stays at
+  its real path as part of the source snapshot
 - **Existing content is never blindly overwritten.** Seeding happens only on an
   empty (or hidden-files-only) workspace, with one narrow, provable exception: a
   workspace that is still a *byte-identical, untouched* copy of the bundled

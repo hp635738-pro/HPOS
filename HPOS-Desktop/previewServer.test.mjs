@@ -7,12 +7,14 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 import {
+  CODE_ARENA_SHELL,
   MANIFEST_NAME,
   PRESERVED_VITE_ENTRY,
   SERVED_ENTRYPOINT,
   SERVED_ENTRYPOINT_SOURCE,
   buildWorkspaceProject,
 } from '../scripts/build-workspace-project.mjs'
+import { ensureAppBuild } from '../scripts/ensure-app-build.mjs'
 
 const require = createRequire(import.meta.url)
 const { createPreviewServer, createPreviewHandler, PREVIEW_MIME } = require('./previewServer.js')
@@ -261,12 +263,14 @@ function httpGet(url) {
   console.log('ok: createPreviewHandler')
 }
 
-/* -------- 9. Preview serves the REAL Code Arena project entrypoint --------
+/* ------ 9. LIVE PREVIEW serves the HPOS application, never Code Arena ------
    End-to-end for the packaged flow: build the production payload from the real
    repository, seed a first-launch workspace with the real seeder, then serve it
    with this static server (unchanged from PR #25) and prove `/` renders the
-   actual project — not the starter demo. */
+   actual HPOS application — not the Code Arena editor shell (the PR #26
+   recursive-preview regression) and not the starter demo. */
 {
+  ensureAppBuild({ repoRoot })
   const payloadDir = mkdtempSync(join(tmpdir(), 'hpos-preview-payload-'))
   rmSync(payloadDir, { recursive: true, force: true })
   buildWorkspaceProject({ repoRoot, outputDir: payloadDir, quiet: true })
@@ -290,19 +294,41 @@ function httpGet(url) {
   const status = await server.start()
   assert.equal(status.running, true, 'the static preview server must start')
 
-  // `/` is the real Code Arena shell, byte-for-byte.
+  // `/` is the real HPOS application build, byte-for-byte.
   const rootRes = await httpGet(status.url)
   const entryOnDisk = readFileSync(join(workspace, SERVED_ENTRYPOINT))
   assert.equal(rootRes.status, 200, 'the entrypoint must be served')
   assert.ok(rootRes.headers['content-type'].includes('text/html'), 'the entrypoint must be HTML')
   assert.equal(rootRes.body.length, entryOnDisk.toString('utf8').length, 'the whole entrypoint must be served')
-  assert.ok(entryOnDisk.equals(readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))), 'the workspace entrypoint is the real shell')
-  assert.ok(rootRes.body.includes('HPOS Code Arena'), 'Preview must render the actual Code Arena project')
-  assert.ok(rootRes.body.includes('id="previewFrame"'), 'Preview must serve the real shell markup')
-  assert.ok(!rootRes.body.includes('Welcome to HPOS'), 'Preview must not serve the starter demo')
+  assert.ok(entryOnDisk.equals(readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))), 'the workspace entrypoint is the real HPOS app build')
+  assert.ok(rootRes.body.includes('data-hpos-app="hpos"'), 'Preview must render the actual HPOS application')
+  assert.ok(rootRes.body.includes('id="root"'), 'Preview must serve the HPOS app mount point')
 
+  // REGRESSION (PR #26): `/` must NOT resolve to the Code Arena editor shell.
+  // Serving the shell made LIVE PREVIEW render Code Arena inside Code Arena.
+  const codeArenaShell = readFileSync(join(repoRoot, CODE_ARENA_SHELL))
+  assert.ok(!entryOnDisk.equals(codeArenaShell), 'REGRESSION: `/` must not be byte-identical to src/pages/CodeArena.html')
+  assert.ok(!rootRes.body.includes('HPOS Code Arena'), 'REGRESSION: Preview must not render the Code Arena editor shell')
+  assert.ok(!rootRes.body.includes('id="previewFrame"'), 'REGRESSION: Preview must not nest another preview frame')
+
+  assert.ok(!rootRes.body.includes('Welcome to HPOS'), 'Preview must not serve the starter demo')
   const demoPage = readFileSync(join(repoRoot, 'workspace-template', 'index.html'), 'utf8')
   assert.notEqual(rootRes.body, demoPage, 'the served page must differ from the PR #25 demo page')
+
+  // The app bundle the entrypoint references is served with the right types.
+  const assetRefs = [...rootRes.body.matchAll(/\.\/(assets\/[^"']+)/g)].map((m) => m[1])
+  assert.ok(assetRefs.length >= 2, 'the app entry must reference its built JS and CSS, got ' + assetRefs.length)
+  for (const ref of assetRefs) {
+    const assetRes = await httpGet(status.url + ref)
+    assert.equal(assetRes.status, 200, 'Preview must serve the app asset ' + ref)
+    assert.ok(assetRes.body.length > 0, ref + ' must not be empty')
+  }
+
+  // The Code Arena shell remains available as SOURCE at its own path — the
+  // snapshot is intact, it is just never the page served at `/`.
+  const shellRes = await httpGet(status.url + 'src/pages/CodeArena.html')
+  assert.equal(shellRes.status, 200, 'the Code Arena source file still exists in the workspace')
+  assert.ok(shellRes.body.includes('HPOS Code Arena'), 'the source snapshot keeps the real shell')
 
   // The real project files behind it are served too.
   const pkgRes = await httpGet(status.url + 'package.json')
@@ -352,7 +378,7 @@ function httpGet(url) {
   await server.stop()
   rmSync(previewRoot, { recursive: true, force: true })
   rmSync(payloadDir, { recursive: true, force: true })
-  console.log('ok: Preview serves the real Code Arena project entrypoint')
+  console.log('ok: LIVE PREVIEW serves the real HPOS application, never the Code Arena shell')
 }
 
 console.log('preview server tests: all passed')

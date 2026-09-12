@@ -265,18 +265,44 @@ console.log('packaging configuration tests...')
     assert.ok(fs.existsSync(path.join(root, rel)), 'the real project must provide ' + rel + ' for the workspace payload')
   }
 
-  // Preview entrypoint contract: a real, self-contained page that renders with
-  // no Vite, no node_modules and no build step in the packaged workspace.
+  // Preview entrypoint contract: LIVE PREVIEW serves the real HPOS
+  // application build — the same dist/index.html the packaged Electron shell
+  // loads (HPOS-Desktop/frontendEntry.js) — and NEVER the Code Arena editor
+  // shell (the PR #26 recursive-preview regression).
   assert.equal(SERVED_ENTRYPOINT, 'index.html', 'the served entrypoint must be the workspace index.html')
-  const shellPath = path.join(root, SERVED_ENTRYPOINT_SOURCE)
-  assert.ok(fs.existsSync(shellPath), SERVED_ENTRYPOINT_SOURCE + ' must exist (it becomes the workspace entrypoint)')
-  const shell = fs.readFileSync(shellPath, 'utf8')
-  assert.ok(shell.includes('HPOS Code Arena'), 'the served entrypoint must be the real Code Arena shell')
-  assert.ok(!/<script[^>]+\ssrc=/i.test(shell), 'the served entrypoint must not depend on an external script')
-  assert.ok(!/<link[^>]+rel=["']?stylesheet/i.test(shell), 'the served entrypoint must not depend on an external stylesheet')
-  const remoteUrls = shell.match(/https?:\/\/[^"'\s)>]*/g) || []
-  const nonLocal = remoteUrls.filter((url) => !/^https?:\/\/(www\.w3\.org|127\.0\.0\.1|localhost)/i.test(url))
-  assert.deepEqual(nonLocal, [], 'the served entrypoint must not reference remote assets')
+  assert.equal(
+    SERVED_ENTRYPOINT_SOURCE.split(path.sep).join('/'),
+    'dist/index.html',
+    'the served entrypoint must come from the HPOS application production build'
+  )
+  assert.notEqual(
+    SERVED_ENTRYPOINT_SOURCE.split(path.sep).join('/'),
+    'src/pages/CodeArena.html',
+    'REGRESSION: the served entrypoint must never be the Code Arena editor shell'
+  )
+  // The frontendEntry module and the payload builder agree on what the
+  // application entrypoint is.
+  const frontendEntry = fs.readFileSync(path.join(root, 'HPOS-Desktop', 'frontendEntry.js'), 'utf8')
+  assert.ok(
+    /['"]dist['"],\s*['"]index\.html['"]/.test(frontendEntry),
+    'HPOS-Desktop/frontendEntry.js must resolve dist/index.html — the same entry the preview payload serves'
+  )
+  // The packaging scripts guarantee the app build exists before the payload
+  // builder runs, so the entrypoint mapping can never silently miss.
+  for (const script of ['dist', 'dist:win', 'dist:dir']) {
+    const value = pkg.scripts[script]
+    assert.ok(
+      value.indexOf('npm run build:prod') < value.indexOf('npm run workspace:project'),
+      `${script} must build the application BEFORE the workspace payload`
+    )
+  }
+  // The Code Arena shell stays part of the real project source snapshot.
+  const shellPath = path.join(root, 'src', 'pages', 'CodeArena.html')
+  assert.ok(fs.existsSync(shellPath), 'src/pages/CodeArena.html must remain in the project source')
+  assert.ok(
+    fs.readFileSync(shellPath, 'utf8').includes('HPOS Code Arena'),
+    'the Code Arena shell must remain the real editor shell (at its own path, never at /)'
+  )
   assert.ok(fs.existsSync(path.join(root, VITE_ENTRY_SOURCE)), 'the repository Vite entry must exist')
   assert.ok(
     fs.readFileSync(path.join(root, VITE_ENTRY_SOURCE), 'utf8').includes('/src/main.jsx'),
@@ -284,7 +310,7 @@ console.log('packaging configuration tests...')
   )
   assert.ok(!EXCLUDED_FILE_PATTERNS.some((p) => p.test(MANIFEST_NAME)), 'the payload manifest must survive the seed filters')
 
-  console.log('ok: real Code Arena project payload ships as extraResources, generated before packaging')
+  console.log('ok: real project payload ships as extraResources; preview entrypoint is the HPOS app, never the Code Arena shell')
 }
 
 console.log('packaging configuration tests: all passed')
