@@ -357,4 +357,46 @@ function tempWorkspace() {
   console.log('ok: preload/main security surface is narrow and fixed')
 }
 
+/* ------------------------- 18. Code Arena shell: real terminal, no fakes -- */
+{
+  const arena = readFileSync(join(repoRoot, 'src', 'pages', 'CodeArena.html'), 'utf8')
+  const main = readFileSync(join(desktopDir, 'main.js'), 'utf8')
+
+  // The terminal is driven by the preload bridge — no static/fake log.
+  assert.ok(!/static log/.test(arena), 'the "static log" fake label must be gone')
+  assert.ok(!/no shell attached/.test(arena), 'the "no shell attached" fake label must be gone')
+  assert.match(arena, /id="paneNote">starting workspace shell…</, 'the panel note starts as a boot state, not a fake static log')
+  assert.ok(arena.includes('termBoot'), 'Code Arena boots a real terminal session')
+  assert.ok(arena.includes('termSubmit'), 'Code Arena submits typed commands')
+  assert.match(arena, /\.run\(termSessionId,\s*cmd\)/, 'commands go through bridge.terminal.run')
+  assert.match(arena, /onTerminalData\(termDataCallback\)/, 'streamed output is subscribed')
+  assert.ok(arena.includes('offTerminalData'), 'output subscription is torn down')
+
+  // stdout/stderr land in the scroll area; exit codes are rendered.
+  assert.match(arena, /payload\.stream === 'stderr'/, 'stderr chunks are routed as errors')
+  assert.match(arena, /\[exit 0\]/, 'a zero exit code is displayed')
+  assert.match(arena, /\[exit ' \+ result\.code/, 'non-zero exit codes are displayed')
+  assert.match(arena, /terminated by signal/, 'signal termination is displayed')
+  assert.match(arena, /command timed out/, 'timeouts are displayed')
+
+  // Lifecycle: cwd locked by main, resize, interrupt, dispose on close.
+  assert.match(arena, /termBridge\.resize\(termSessionId, cols, rows\)/, 'terminal resize is forwarded')
+  assert.match(arena, /termBridge\.interrupt\(termSessionId\)/, 'Ctrl+C interrupts the in-flight command')
+  assert.match(arena, /termBridge\.dispose\(termSessionId\)/, 'the session is disposed on window close')
+  assert.match(arena, /window\.addEventListener\('beforeunload', termDispose\)/, 'beforeunload disposes the session')
+  assert.match(main, /terminalManager\.disposeAll\(\)/, 'closing Code Arena disposes every session in main')
+
+  // Clear/reset is a real display reset (Ctrl+L or the clear button); the
+  // workspace session itself keeps running.
+  assert.ok(arena.includes('termClear'), 'the shell implements termClear()')
+  assert.match(arena, /'l' \|\| event\.key === 'L'/, 'Ctrl+L clears the terminal display')
+  assert.ok(arena.includes('terminalClear'), 'a clear control exists in the panel head')
+  assert.match(arena, /addEventListener\('click', termClear\)/, 'the clear control is wired')
+
+  // The terminal workspace label reports the real workspace root, not a fake.
+  assert.match(arena, /shell attached — working directory is/, 'boot reports the real working directory')
+
+  console.log('ok: Code Arena terminal is real (run, streams, exit codes, resize, interrupt, clear, cleanup)')
+}
+
 console.log('terminal session tests: all passed')

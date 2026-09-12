@@ -86,8 +86,15 @@ console.log('packaging configuration tests...')
   assert.equal(pkg.version, desktopPkg.version, 'root and HPOS-Desktop versions must match')
   assert.ok(typeof pkg.author === 'string' && pkg.author.length > 0, 'author must be present')
   assert.ok(pkg.main === 'HPOS-Desktop/main.js', 'Electron main entry must stay HPOS-Desktop/main.js')
-  assert.equal(pkg.build.publish, null, 'no auto-update/publish configuration may be present')
-  console.log('ok: release metadata (name/productName/appId/author/version)')
+  /* The in-app updater (task §6) uses a PINNED release source: the GitHub
+     provider for exactly this repo. No token or secret may live in the
+     config (release-time auth comes from the CI environment). */
+  assert.deepEqual(
+    pkg.build.publish,
+    { provider: 'github', owner: 'hp635738-pro', repo: 'HPOS' },
+    'build.publish must pin the controlled GitHub release source with no secrets'
+  )
+  console.log('ok: release metadata (name/productName/appId/author/version) + pinned release source')
 }
 
 /* ------------------------------------------------------------- NSIS + win */
@@ -177,12 +184,21 @@ console.log('packaging configuration tests...')
   console.log('ok: workspace template ships as extraResources with required files, no forbidden entries')
 }
 
-/* -------------------------------------------------------------- no runtime deps in asar */
+/* --------------------------------------------------- production deps in asar */
 {
   const deps = Object.keys(pkg.dependencies || {})
-  assert.deepEqual(deps, [], 'no production dependencies may ride along in app.asar (renderer is bundled by Vite)')
+  /* Exactly one production dependency is allowed: the electron-updater
+     backend (task §6). It is lazily required by the packaged main process
+     and must stay the only package that rides along in app.asar — the
+     renderer is still bundled by Vite. */
+  assert.deepEqual(
+    deps,
+    ['electron-updater'],
+    'electron-updater is the only production dependency allowed in app.asar'
+  )
+  assert.match(pkg.dependencies['electron-updater'], /^[\^~]?\d+\.\d+\.\d+$/, 'electron-updater must carry an explicit version, not a floating tag')
   assert.ok(pkg.devDependencies && pkg.devDependencies.react && pkg.devDependencies['react-dom'], 'react/react-dom belong in devDependencies')
-  console.log('ok: app.asar carries no npm dependencies (React is bundled into dist)')
+  console.log('ok: app.asar carries only the pinned electron-updater backend')
 }
 
 /* ------------------------------------------------------------- npm scripts */
@@ -197,6 +213,13 @@ console.log('packaging configuration tests...')
   }
   assert.ok(pkg.scripts['dist:win'].includes('--win nsis'), 'dist:win must build the NSIS target')
   assert.ok(pkg.scripts['dist:dir'].includes('--dir'), 'dist:dir must produce an unpacked directory')
+  for (const script of ['dist', 'dist:win', 'dist:dir']) {
+    assert.ok(
+      pkg.scripts[script].includes('--publish never'),
+      `${script} must never publish to the release source (explicit release process only)`
+    )
+  }
+  assert.ok(pkg.scripts.test.includes('node HPOS-Desktop/updater.test.mjs'), 'npm test must run the updater state machine tests')
   assert.ok(pkg.scripts.test.includes('node packaging.test.mjs'), 'npm test must run packaging validation')
   console.log('ok: build/dist scripts chain the production React build')
 }

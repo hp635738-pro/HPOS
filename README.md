@@ -163,7 +163,9 @@ that instead of shipping a demo:
 - Desktop + Start Menu shortcuts named **HPOS**
 - Uninstalling does **not** delete user data — the default workspace under
   `%APPDATA%/HPOS/workspace` and runtime state under `~/.hpos/runtime` are left alone
-- No auto-updater (yet); a new installer installs over the previous version
+- In-app updater: explicit Check/Download/Restart in Settings → App,
+  against the pinned GitHub release source (see *Code Arena — the dev
+  loop* above); updates are never automatic
 - No WSL, Docker or VM requirement or support
 - Building the installer needs network access to GitHub release assets
   (`release-assets.githubusercontent.com`). In sandboxes that block that host,
@@ -177,6 +179,79 @@ that instead of shipping a demo:
 - No generic shell/process API, no arbitrary Git args, no credential logging, bounded sanitized diagnostics
 
 **Requirements:** Node 18+ (Step 6 verification Node 22 par chali hai)
+
+### Code Arena — the dev loop (edit → test → launch → ship)
+
+The NSIS installer is a **release** artifact, not part of everyday
+development. The installed app's Code Arena *is* the dev environment: it
+ships the real project source as its workspace, and the whole loop runs
+inside it — no reinstall, no rebuild:
+
+```
+open Code Arena → Pull from GitHub → edit → save → terminal tests →
+Launch HPOS → test → fix → commit → push
+```
+
+**Git workspace.** A packaged workspace starts life as a plain directory
+(the seeded payload deliberately ships without `.git` and without any
+developer machine's auth material). The GitHub panel shows a
+**Connect workspace to HPOS Git** button in that state; it runs the fixed
+main-process sequence `git init` + branch pinned to `main` + the hard-coded
+`origin` (`hp635738-pro/HPOS`) + local branch upstream config. Existing
+repositories are reported and never modified. After that, the panel gives
+branch, status, changed files, Commit (explicit message + ticked files),
+Pull from GitHub and Push. The contract is fixed and defensive
+(`HPOS-Desktop/gitBridge.js`): origin/main only, ff-only pull, dirty
+workspaces blocked before a pull, push refused when behind, **no force
+push, no reset/clean/stash/rebase**, no renderer-supplied git arguments,
+credential-shaped strings scrubbed before IPC.
+
+**Terminal.** Interactive shell locked to the workspace root
+(`terminalSession.js`): real stdout/stderr streams, exit codes, Ctrl+C,
+resize, Clear (button or Ctrl+L), multiple sessions, full cleanup when
+Code Arena closes. The renderer never gets Node, a shell name, a cwd or an
+env — only `run(command)`.
+
+**Launch HPOS.** The toolbar action starts a **separate HPOS instance from
+the current workspace code** (`devLaunch.js`): the app's own Electron
+binary (`process.execPath`) pointed at the workspace directory, which
+declares `main: HPOS-Desktop/main.js`. The instance is marked
+`HPOS_DEV_WORKSPACE=1` — its window title carries "· development workspace"
+and it loads the workspace-layout entry (root `index.html`/`assets/`,
+falling back from `dist/` only for these instances). Edits to the shell or
+preload take effect on the next Launch; frontend source edits take effect
+after a workspace rebuild (`npm install && npm run build` in the terminal).
+Single instance, Stop button, SIGTERM→SIGKILL, and the child is always
+killed when Code Arena or the app closes. There is no arbitrary-executable
+path: binary, app directory and (scrubbed) env are fixed in the main
+process.
+
+**Updates (Settings → App).** Explicit only: **Check for Updates** against
+the pinned GitHub release source (`build.publish` →
+`hp635738-pro/HPOS`, no secrets in config) → **Download Update** →
+**Restart to Update**. `electron-updater` (the only production dependency)
+handles the download and verifies integrity/signatures; a failed
+verification is reported as *not installed* and can never reach install.
+Auto-download and auto-install are forced off; development instances show a
+structured "updates only in the installed app" state. Developer builds never
+publish: all `dist*` scripts pass `--publish never` — releases are cut by
+an explicit publish step against the pinned repo.
+
+**Dev vs production architecture.**
+- *Dev loop*: Code Arena inside any HPOS instance → workspace code →
+  terminal + Launch HPOS (a dev instance, clearly marked) → commit → push.
+  Nothing in this loop touches the installer.
+- *Release loop*: version bump → `npm run dist:win` (build + workspace
+  payload) → explicit publish to the pinned GitHub release → installed app
+  offers the update in Settings → user restarts → latest.
+
+**Security preserved across all of the above:** `contextIsolation:true`,
+`sandbox:true`, `nodeIntegration:false`; every workspace operation is an
+argument-free preload call into an allowlisted main-process module
+(`terminalSession.js`, `gitBridge.js`, `devLaunch.js`, `updater.js`);
+workspace-root boundaries enforced everywhere; regression tests in
+`HPOS-Desktop/*.test.mjs` pin each contract.
+
 
 Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke steps `BRIDGE.md` mein hain.
 

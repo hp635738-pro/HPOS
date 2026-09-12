@@ -5,6 +5,231 @@ import ColourField from '../components/ColourField'
 import AdvancedEditor from '../components/AdvancedEditor'
 import { Sun, Moon, Monitor, Check, Chevron } from '../components/Icons'
 
+/**
+ * Settings → App → Updates (task §6/§7).
+ *
+ * Explicit flow only: Check for Updates → (available) Download →
+ * Restart to Update. The state machine lives in the main process
+ * (updater.js over electron-updater); this panel only displays states
+ * and calls the three argument-free actions. In a plain browser window
+ * (no preload bridge) it renders the version-less note instead of
+ * faking anything.
+ */
+function UpdatesPanel() {
+  const bridge = (typeof window !== 'undefined' && window.hpos) || null
+  const up =
+    bridge &&
+    bridge.updater &&
+    typeof bridge.updater.check === 'function' &&
+    typeof bridge.updater.status === 'function'
+      ? bridge.updater
+      : null
+
+  const [appInfo, setAppInfo] = useState(null)
+  const [u, setU] = useState(null)
+  const [acting, setActing] = useState(false)
+
+  useEffect(() => {
+    if (bridge && typeof bridge.appInfo === 'function') {
+      bridge.appInfo().then(setAppInfo).catch(() => setAppInfo(null))
+    }
+    if (!up) return undefined
+    if (typeof up.status === 'function') {
+      up.status().then(setU).catch(() => {})
+    }
+    const cb = (payload) => {
+      if (payload && typeof payload.state === 'string') setU(payload)
+    }
+    if (typeof up.onEvent === 'function') up.onEvent(cb)
+    return () => {
+      if (typeof up.offEvent === 'function') up.offEvent(cb)
+    }
+  }, [])
+
+  const busy = acting || (u && (u.state === 'checking' || u.state === 'installing'))
+  const downloading = u && u.state === 'downloading'
+  const progress = downloading ? Math.max(0, Math.min(100, Math.round(u.progress || 0))) : 0
+
+  const act = (fn) => {
+    if (!up || acting) return
+    setActing(true)
+    Promise.resolve(fn())
+      .catch(() => {})
+      .then(() => setActing(false))
+  }
+
+  /* ------------------------------------------------------------- no bridge */
+  if (!up) {
+    return (
+      <div style={U.block}>
+        <div style={U.row}>
+          <span style={U.version}>{appInfo ? `HPOS ${appInfo.version}` : 'HPOS'}</span>
+          <span style={U.note}>This window has no desktop shell bridge — updates are managed by the installed app.</span>
+        </div>
+      </div>
+    )
+  }
+
+  /* ---------------------------------------------------- dev instance (no updater) */
+  if (appInfo && !appInfo.isPackaged) {
+    return (
+      <div style={U.block}>
+        <div style={U.row}>
+          <span style={U.version}>HPOS {appInfo.version} · development instance</span>
+        </div>
+        <p style={U.text}>
+          Updates are only available in the installed (packaged) app. This development instance runs
+          directly from source, so it is already on the code you are editing.
+        </p>
+      </div>
+    )
+  }
+
+  /* -------------------------------------------------------------- state body */
+  let statusNode
+  let actionNode
+
+  switch (u ? u.state : 'idle') {
+    case 'checking':
+      statusNode = <span style={U.note}>Checking the release source for a newer version…</span>
+      actionNode = <button style={{ ...U.btn, opacity: 0.6, cursor: 'default' }} disabled>Checking…</button>
+      break
+
+    case 'up-to-date':
+      statusNode = (
+        <span style={{ ...U.note, color: 'var(--success)' }}>
+          You’re up to date — {u.downloadedVersion || u.currentVersion}.
+        </span>
+      )
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Check for Updates</button>
+      break
+
+    case 'available':
+      statusNode = (
+        <span style={U.note}>
+          Version {u.downloadedVersion} is available (you have {u.currentVersion}).
+        </span>
+      )
+      actionNode = (
+        <div style={U.row}>
+          <span style={U.flex1} />
+          <button
+            style={{ ...U.btn, borderColor: 'var(--accent)', color: 'var(--accent)' }}
+            disabled={busy}
+            onClick={() => act(() => up.download())}
+          >
+            Download Update
+          </button>
+        </div>
+      )
+      break
+
+    case 'downloading':
+      statusNode = (
+        <span style={U.note}>
+          Downloading {u.downloadedVersion}… {progress}%
+        </span>
+      )
+      actionNode = (
+        <div style={U.progressTrack}>
+          <div style={{ ...U.progressFill, width: `${progress}%` }} />
+        </div>
+      )
+      break
+
+    case 'ready':
+      statusNode = (
+        <span style={{ ...U.note, color: 'var(--success)' }}>
+          {u.downloadedVersion} is downloaded and verified.
+        </span>
+      )
+      actionNode = (
+        <div style={U.row}>
+          <span style={U.flex1} />
+          <button
+            style={{ ...U.btn, borderColor: 'var(--accent)', color: 'var(--accent)' }}
+            disabled={busy}
+            onClick={() => act(() => up.install())}
+          >
+            Restart to Update
+          </button>
+        </div>
+      )
+      break
+
+    case 'installing':
+      statusNode = <span style={U.note}>Installing the update — HPOS is restarting…</span>
+      actionNode = null
+      break
+
+    case 'error':
+      statusNode = <span style={{ ...U.note, color: 'var(--danger)' }}>{u.error || 'The update check failed.'}</span>
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Try Again</button>
+      break
+
+    case 'unsupported':
+      statusNode = <span style={U.note}>{u.error || 'Updates are not available in this build.'}</span>
+      actionNode = null
+      break
+
+    default:
+      statusNode = <span style={U.note}>Check for a newer version from the pinned HPOS release source.</span>
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Check for Updates</button>
+  }
+
+  return (
+    <div style={U.block}>
+      <div style={U.row}>
+        <span style={U.version}>HPOS {u.currentVersion || (appInfo && appInfo.version) || '—'}</span>
+        <span style={U.note}>{statusNode}</span>
+      </div>
+      {u && u.releaseNotes && (u.state === 'available' || u.state === 'downloading' || u.state === 'ready') && (
+        <p style={U.notes}>{u.releaseNotes}</p>
+      )}
+      {actionNode}
+    </div>
+  )
+}
+
+const U = {
+  block: { display: 'flex', flexDirection: 'column', gap: 8 },
+  row: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  version: { fontSize: 13, fontWeight: 800, letterSpacing: '-.2px' },
+  note: { fontSize: 12, color: 'var(--muted)', fontWeight: 500 },
+  text: { margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.55 },
+  notes: {
+    margin: 0, padding: '8px 10px',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--radius-sm)',
+    fontSize: 11.5, color: 'var(--text-2)',
+    whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto',
+  },
+  btn: {
+    border: '1px solid var(--line)',
+    background: 'var(--surface-2)',
+    color: 'var(--text)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '7px 14px',
+    fontSize: 12, fontWeight: 700,
+    cursor: 'pointer',
+    transition: 'background .15s',
+  },
+  flex1: { flex: 1 },
+  progressTrack: {
+    height: 6, borderRadius: 3,
+    background: 'var(--surface-2)',
+    border: '1px solid var(--line)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    background: 'var(--accent)',
+    borderRadius: 3,
+    transition: 'width .25s',
+  },
+}
+
 const THEMES = [
   { id: 'light',  label: 'Light',  Icon: Sun },
   { id: 'dark',   label: 'Dark',   Icon: Moon },
@@ -33,6 +258,14 @@ export default function Settings({ jumpTo, onJumped }) {
             </p>
           </div>
         </header>
+
+        {/* ------------------------------------------------------------ APP */}
+        <Section
+          title="App"
+          desc="Version and updates. Checking is explicit — nothing downloads or installs without you asking."
+        >
+          <UpdatesPanel />
+        </Section>
 
         {/* ------------------------------------------------------------ THEME */}
         <Section title="Theme" desc="Light, dark, or follow your operating system.">

@@ -266,6 +266,43 @@
         box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.16);
       }
 
+      .launch-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: var(--surface-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .launch-btn:hover:not(:disabled) {
+        background: var(--elevated);
+      }
+
+      .launch-btn:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .launch-btn svg {
+        width: 11px;
+        height: 11px;
+      }
+
+      .launch-btn--running {
+        border-color: rgba(63, 182, 139, 0.5);
+        background: rgba(63, 182, 139, 0.12);
+        color: var(--success);
+      }
+
       .btn {
         display: inline-flex;
         align-items: center;
@@ -579,6 +616,10 @@
         padding: 10px 12px;
         color: var(--muted);
         font-size: 11.5px;
+      }
+
+      .git-empty--err {
+        color: var(--danger);
       }
 
       .git-file--pick {
@@ -2033,6 +2074,16 @@
         <path d="M1.6 3.6h4l1.2 1.6h7.6v1.4H1.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
         <path d="M1.6 6.6h12.8l-1.4 6H3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
       </symbol>
+      <symbol id="i-trash" viewBox="0 0 16 16">
+        <path d="M2.6 4.2h10.8M6.2 4.2V2.6h3.6v1.6M4 4.2l.8 9.2h6.4l.8-9.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
+        <path d="M6.6 6.8v4M9.4 6.8v4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 16 16">
+        <path d="M4.6 2.9v10.2L13 8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 16 16">
+        <rect x="3.6" y="3.6" width="8.8" height="8.8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3" />
+      </symbol>
     </svg>
 
     <div class="ide">
@@ -2074,6 +2125,17 @@
         </div>
 
         <div class="toolbar-right">
+          <button
+            type="button"
+            class="launch-btn"
+            id="launchHpos"
+            disabled
+            aria-label="Launch HPOS from the workspace"
+            title="Launch is starting…"
+          >
+            <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-play" /></svg>
+            <span id="launchLabel">Launch HPOS</span>
+          </button>
           <span class="chip chip--warn chip--hide-sm"><span class="dot"></span>Runtime offline</span>
           <span class="chip chip--live chip--hide-sm"><span class="dot"></span>HPOS-Desktop</span>
         </div>
@@ -2183,7 +2245,16 @@
               <button type="button" class="panel-tab" id="tabProblems" role="tab" aria-selected="false" aria-controls="paneProblems">Problems</button>
               <button type="button" class="panel-tab" id="tabGitHub" role="tab" aria-selected="false" aria-controls="paneGitHub">GitHub</button>
               <span class="spacer"></span>
-              <span class="panel-note" id="paneNote">local log · no shell attached</span>
+              <span class="panel-note" id="paneNote">starting workspace shell…</span>
+              <button
+                type="button"
+                class="icon-btn"
+                id="terminalClear"
+                title="Clear the terminal display (Ctrl+L) — the workspace session continues"
+                aria-label="Clear terminal"
+              >
+                <svg class="ico" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#i-trash" /></svg>
+              </button>
               <button type="button" class="btn btn-xs" id="terminalFullscreen" aria-pressed="false" title="Expand the terminal workspace">
                 ⛶ Full Screen
               </button>
@@ -2404,6 +2475,19 @@
         var gitSelectionEl = byId('gitSelection')
         var gitSelectAllBtn = byId('gitSelectAll')
         var gitCommitNoteEl = byId('gitCommitNote')
+        /* The connect button is created here (it only exists when the
+           workspace is not yet a Git repository) and moved into the
+           status body by paintGit(). */
+        var gitConnectBtn = null
+        if (gitBodyEl) {
+          gitConnectBtn = document.createElement('button')
+          gitConnectBtn.type = 'button'
+          gitConnectBtn.className = 'btn btn-xs'
+          gitConnectBtn.id = 'gitConnect'
+          gitConnectBtn.setAttribute('hidden', '')
+          gitConnectBtn.setAttribute('aria-label', 'Connect workspace to HPOS Git')
+          gitConnectBtn.addEventListener('click', connectWorkspaceToGit)
+        }
         var paneNoteEl = byId('paneNote')
         var centerWorkspaceEl = byId('centerWorkspace')
         var terminalFullscreenBtn = byId('terminalFullscreen')
@@ -3499,6 +3583,22 @@
           termSessionId = null
         }
 
+        /**
+         * Clear the terminal DISPLAY. The workspace session in the main
+         * process keeps its state (a fresh command still runs in the
+         * workspace root); only the on-screen log is reset, matching what
+         * `clear` does in a real shell.
+         */
+        function termClear() {
+          if (!termOutputEl) return
+          while (termOutputEl.firstChild) termOutputEl.removeChild(termOutputEl.firstChild)
+          var sep = document.createElement('div')
+          sep.className = 'term-line term-line--info'
+          sep.textContent = '[terminal] display cleared — the workspace session continues'
+          termOutputEl.appendChild(sep)
+          termOutputEl.scrollTop = termOutputEl.scrollHeight
+        }
+
         function termSubmit(command) {
           var cmd = String(command || '').replace(/\s+$/g, '')
           if (!cmd) return
@@ -3516,7 +3616,7 @@
             return
           }
           if (!termSessionId) {
-            logLine(termEl, 'err', '[terminal] no shell attached — creating a session')
+            logLine(termEl, 'err', '[terminal] the workspace session is not attached yet — creating it now')
             termBoot()
             return
           }
@@ -3589,6 +3689,11 @@
             }
             return
           }
+          if ((event.ctrlKey || event.metaKey) && (event.key === 'l' || event.key === 'L')) {
+            event.preventDefault()
+            termClear()
+            return
+          }
         }
 
         function termResize() {
@@ -3637,6 +3742,177 @@
               logLine(termEl, 'err', '[terminal] ' + (err && err.message ? err.message : String(err)))
             }
           )
+        }
+
+        /* ================================================================
+           Launch HPOS — run a separate HPOS instance from the CURRENT
+           workspace code (task §4). One fixed, argument-free action: the
+           binary (this Electron), the app directory (the workspace) and
+           the environment are all fixed in the main process
+           (devLaunch.js). No arbitrary executable can be launched. The
+           dev instance marks itself "development workspace" and its
+           output streams into this console pane.
+           ================================================================ */
+        var devBridge =
+          bridge &&
+          bridge.devLaunch &&
+          typeof bridge.devLaunch.launch === 'function' &&
+          typeof bridge.devLaunch.stop === 'function' &&
+          typeof bridge.devLaunch.status === 'function'
+            ? bridge.devLaunch
+            : null
+        var launchBtn = byId('launchHpos')
+        var launchLabelEl = byId('launchLabel')
+        var dev = { status: null, busy: false }
+
+        function devSetIcon(symbolId) {
+          if (!launchBtn) return
+          var use = launchBtn.querySelector('use')
+          if (use) use.setAttribute('href', '#' + symbolId)
+        }
+
+        function devSetButton() {
+          if (!launchBtn || !launchLabelEl) return
+          var s = dev.status
+          if (!devBridge) {
+            devSetIcon('i-play')
+            launchBtn.disabled = true
+            launchBtn.classList.remove('launch-btn--running')
+            launchLabelEl.textContent = 'Launch HPOS'
+            launchBtn.title = 'Launch is unavailable: this window has no preload bridge'
+            return
+          }
+          if (s && s.running) {
+            devSetIcon('i-stop')
+            launchBtn.disabled = dev.busy
+            launchBtn.classList.add('launch-btn--running')
+            launchLabelEl.textContent = 'Stop HPOS'
+            launchBtn.title = 'Stop the workspace HPOS instance (pid ' + (s.pid || '?') + ')'
+            return
+          }
+          devSetIcon('i-play')
+          launchBtn.classList.remove('launch-btn--running')
+          launchLabelEl.textContent = 'Launch HPOS'
+          if (!s) {
+            launchBtn.disabled = true
+            launchBtn.title = 'Checking the workspace…'
+            return
+          }
+          if (!s.available) {
+            launchBtn.disabled = true
+            launchBtn.title = 'Launch unavailable: ' + (s.reason || 'the workspace is not launchable')
+            return
+          }
+          launchBtn.disabled = dev.busy
+          launchBtn.title = 'Launch HPOS from the current workspace code — a separate development instance, no installer rebuild'
+        }
+
+        function devRefresh() {
+          if (!devBridge) {
+            devSetButton()
+            return
+          }
+          devBridge
+            .status()
+            .then(function (s) {
+              dev.status = s || null
+              devSetButton()
+            })
+            .catch(function () {
+              dev.status = null
+              devSetButton()
+            })
+        }
+
+        function devLaunchAction() {
+          if (!devBridge || dev.busy) return
+          dev.busy = true
+          devSetButton()
+          logLine(consoleEl, 'out', '[launch] starting HPOS from the workspace code…')
+          devBridge
+            .launch()
+            .then(function (result) {
+              dev.busy = false
+              if (!result || !result.ok) {
+                if (result && result.status) dev.status = result.status
+                devSetButton()
+                logLine(consoleEl, 'err', '[launch] FAILED — ' + ((result && result.error) || 'unknown error'))
+                emit('hpos:dev-launch', { launched: false, error: (result && result.error) || 'unknown error' })
+                return
+              }
+              logLine(
+                consoleEl,
+                'ok',
+                '[launch] HPOS is running from the workspace (pid ' + result.pid + ') — test it, then Stop it from here'
+              )
+              emit('hpos:dev-launch', { launched: true, pid: result.pid })
+              devRefresh()
+            })
+            .catch(function (err) {
+              dev.busy = false
+              devSetButton()
+              logLine(consoleEl, 'err', '[launch] FAILED — ' + (err && err.message ? err.message : String(err)))
+            })
+        }
+
+        function devStopAction() {
+          if (!devBridge || dev.busy) return
+          dev.busy = true
+          devSetButton()
+          logLine(consoleEl, 'out', '[launch] stopping the workspace HPOS…')
+          devBridge
+            .stop()
+            .then(function (result) {
+              dev.busy = false
+              if (!result || !result.ok) {
+                logLine(consoleEl, 'err', '[launch] stop FAILED — ' + ((result && result.error) || 'unknown error'))
+              } else {
+                logLine(consoleEl, 'ok', '[launch] the workspace HPOS has been stopped')
+              }
+              emit('hpos:dev-launch', { stopped: true })
+              devRefresh()
+            })
+            .catch(function (err) {
+              dev.busy = false
+              devSetButton()
+              logLine(consoleEl, 'err', '[launch] stop FAILED — ' + (err && err.message ? err.message : String(err)))
+            })
+        }
+
+        function devToggle() {
+          if (dev.status && dev.status.running) devStopAction()
+          else devLaunchAction()
+        }
+
+        function devDataCallback(payload) {
+          if (!payload) return
+          if (payload.event === 'exit') {
+            var code = payload.exitCode === null || payload.exitCode === undefined ? payload.signal || 'n/a' : payload.exitCode
+            if (payload.stopped) logLine(consoleEl, 'info', '[launch] workspace HPOS exited (stopped, code ' + code + ')')
+            else logLine(consoleEl, 'info', '[launch] workspace HPOS exited (code ' + code + ')')
+            devRefresh()
+            return
+          }
+          if (payload.event === 'error') {
+            logLine(consoleEl, 'err', '[launch] ' + payload.error)
+            return
+          }
+          if (payload.stream === 'err') logLine(consoleEl, 'err', '[dev] ' + payload.data)
+          else logLine(consoleEl, 'out', '[dev] ' + payload.data)
+        }
+
+        function devBoot() {
+          if (!devBridge) {
+            devSetButton()
+            logLine(consoleEl, 'info', '[launch] no preload bridge in this window — Launch HPOS is disabled')
+            return
+          }
+          devBridge.onOutput(devDataCallback)
+          devRefresh()
+        }
+
+        if (launchBtn) {
+          launchBtn.addEventListener('click', devToggle)
         }
 
         /* ================================================================
@@ -3761,6 +4037,10 @@
           loaded: false,
           data: null,
           error: null,
+          /* connect state: turning a non-repo workspace into the HPOS Git
+             working tree is one argument-free main-process call. */
+          connecting: false,
+          connectError: null,
           /* commit state */
           selected: {},      // project-relative path -> true
           committing: false,
@@ -3978,11 +4258,31 @@
             gitStateChip.className = 'chip chip--warn'
             gitStateText.textContent = 'Not a Git repository'
             gitBodyEl.appendChild(
-              gitEl('div', 'git-empty', data.message || 'HPOS-Desktop is not inside a Git repository')
+              gitEl('div', 'git-empty', data.message || 'The workspace is not inside a Git repository')
             )
-            gitBodyEl.appendChild(
-              gitEl('div', 'git-empty', 'git init inside HPOS-Desktop (or its parent) to track changes here.')
-            )
+            if (gitConnectBtn) {
+              if (git.connecting) {
+                gitConnectBtn.setAttribute('disabled', '')
+                gitConnectBtn.textContent = 'Connecting…'
+              } else if (git.connectError) {
+                gitConnectBtn.removeAttribute('disabled')
+                gitConnectBtn.textContent = 'Retry connect'
+                gitConnectBtn.setAttribute('title', git.connectError)
+              } else {
+                gitConnectBtn.removeAttribute('disabled')
+                gitConnectBtn.textContent = 'Connect workspace to HPOS Git'
+                gitConnectBtn.setAttribute('title', 'Initialise this workspace as a Git working tree on branch main, connected to the fixed HPOS repository (origin). No files or history are copied; nothing is fetched or pushed.')
+              }
+              gitConnectBtn.removeAttribute('hidden')
+              gitBodyEl.appendChild(gitConnectBtn)
+            }
+            if (git.connectError) {
+              gitBodyEl.appendChild(gitEl('div', 'git-empty git-empty--err', git.connectError))
+            } else {
+              gitBodyEl.appendChild(
+                gitEl('div', 'git-empty', 'This workspace snapshot ships without .git. Connect it to make status, commit and push work here — the connect only runs git init with the fixed HPOS remote.')
+              )
+            }
             return
           }
 
@@ -4576,6 +4876,60 @@
           })
         }
 
+        /**
+         * Connect this workspace to the HPOS Git repository. The call
+         * carries no arguments: the remote URL, branch name and every
+         * command are fixed in the main process (git init + the fixed
+         * HPOS origin). Existing repositories are never touched.
+         */
+        function connectWorkspaceToGit() {
+          if (git.connecting) return Promise.resolve()
+          if (!bridge || typeof bridge.gitConnectWorkspace !== 'function') {
+            git.connectError = 'This preload build has no Git connect bridge.'
+            renderGit()
+            logLine(consoleEl, 'err', '[git] connect FAILED — no connect bridge in this window')
+            return Promise.resolve()
+          }
+
+          git.connecting = true
+          git.connectError = null
+          renderGit()
+          logLine(consoleEl, 'out', '[git] connecting the workspace to the HPOS Git repository…')
+
+          return bridge.gitConnectWorkspace().then(
+            function (result) {
+              git.connecting = false
+              if (!result || !result.ok) {
+                git.connectError = (result && result.error) || 'Could not connect the workspace to Git'
+                renderGit()
+                logLine(consoleEl, 'err', '[git] connect FAILED — ' + git.connectError)
+                return
+              }
+              if (result.status) {
+                git.data = result.status
+                pruneGitSelection()
+              }
+              git.connectError = null
+              renderGit()
+              logLine(consoleEl, 'ok', '[git] ' + (result.message || 'workspace connected to HPOS Git'))
+              logLine(termEl, 'ok', '$ hpos git connect → ' + (result.branch || 'main') + ' @ ' + (result.origin || 'origin'))
+              emit('hpos:git-connect', {
+                connected: !!result.connected,
+                reason: result.reason || null,
+                branch: result.branch || null,
+                origin: result.origin || null,
+              })
+              refreshGit({ quiet: true })
+            },
+            function (err) {
+              git.connecting = false
+              git.connectError = err && err.message ? err.message : String(err)
+              renderGit()
+              logLine(consoleEl, 'err', '[git] connect FAILED — ' + git.connectError)
+            }
+          )
+        }
+
         function refreshGit(options) {
           /* An explicit refresh is also how a user clears a stale push note: the
              note belongs to the attempt, not to the status that replaces it. The
@@ -4834,6 +5188,10 @@
           })
         }
 
+        if (byId('terminalClear')) {
+          byId('terminalClear').addEventListener('click', termClear)
+        }
+
         document.addEventListener('keydown', function (e) {
           if (e.key === 'Escape' && centerWorkspaceEl.classList.contains('terminal-fullscreen')) {
             setTerminalFullscreen(false)
@@ -4934,6 +5292,8 @@
         refreshGit({ quiet: true })
 
         termBoot()
+
+        devBoot()
 
       })()
     </script>
