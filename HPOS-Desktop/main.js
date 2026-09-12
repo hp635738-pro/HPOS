@@ -5,6 +5,8 @@ const { classifyGitPullState, packageFilesChanged: hasPullPackageFiles } = requi
 const { WORKSPACE_ENV, resolveWorkspaceRoot } = require('./workspaceRoot')
 const { resolveFrontendEntry, getFrontendMode } = require('./frontendEntry')
 const { createRuntimeManager, resolveRuntimeDir } = require('./runtimeManager')
+const { seedWorkspaceIfNeeded } = require('./workspaceSeed')
+const { createPreviewServer } = require('./previewServer')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -423,50 +425,33 @@ const CHANNEL_PREVIEW_STATUS = 'hpos:preview:status'
 const VITE_PREVIEW_PORT = 5173
 const VITE_PREVIEW_URL = 'http://localhost:' + VITE_PREVIEW_PORT + '/'
 
-const PREVIEW_MIME = {
-  html: 'text/html; charset=utf-8',
-  htm: 'text/html; charset=utf-8',
-  js: 'text/javascript; charset=utf-8',
-  mjs: 'text/javascript; charset=utf-8',
-  cjs: 'text/javascript; charset=utf-8',
-  jsx: 'text/javascript; charset=utf-8',
-  json: 'application/json; charset=utf-8',
-  map: 'application/json; charset=utf-8',
-  css: 'text/css; charset=utf-8',
-  svg: 'image/svg+xml',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  ico: 'image/x-icon',
-  woff: 'font/woff',
-  woff2: 'font/woff2',
-  ttf: 'font/ttf',
-  txt: 'text/plain; charset=utf-8',
-}
-
-let previewServer = null
-let previewInfo = null
+/* Static preview server — created lazily so that WORKSPACE_ROOT and
+   resolveInProject (both defined below) are available when the handler
+   is constructed.  In dev mode Vite may already be running on :5173
+   and we detect it; in packaged mode the built-in static server serves
+   the workspace directly, with no Vite or node_modules dependency. */
+let staticPreviewServer = null
 let previewProcess = null
 let previewProcessOwned = false
 let previewStartPromise = null
-const previewSockets = new Set()
 
 function previewStatusPayload() {
-  if (!previewInfo) {
-    return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
+  if (staticPreviewServer) {
+    const status = staticPreviewServer.getStatus()
+    if (status.running) return status
   }
-  return {
-    ok: true,
-    running: true,
-    url: previewInfo.url,
-    port: previewInfo.port,
-    host: '127.0.0.1',
-    root: WORKSPACE_ROOT,
-    startedAt: previewInfo.startedAt,
-    requests: previewInfo.requests,
+  if (previewProcess && previewProcessOwned) {
+    // Vite is running externally — synthesise a status payload.
+    return {
+      ok: true,
+      running: true,
+      url: VITE_PREVIEW_URL,
+      port: VITE_PREVIEW_PORT,
+      host: '127.0.0.1',
+      root: WORKSPACE_ROOT,
+    }
   }
+  return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
 }
 
 function probeVitePreview() {
@@ -521,121 +506,49 @@ function waitForVitePreview(child) {
   })
 }
 
-function previewSend(res, status, body) {
-  const text = String(body)
-  res.writeHead(status, {
-    'content-type': 'text/plain; charset=utf-8',
-    'content-length': Buffer.byteLength(text),
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-  })
-  res.end(text)
-}
-
-function previewExtension(filePath) {
-  const dot = filePath.lastIndexOf('.')
-  return dot === -1 ? '' : filePath.slice(dot + 1).toLowerCase()
-}
-
-function previewSendFile(res, filePath, stats, method) {
-  const type = PREVIEW_MIME[previewExtension(filePath)] || 'application/octet-stream'
-  res.writeHead(200, {
-    'content-type': type,
-    'content-length': stats.size,
-    // Always revalidate: the whole point is to show the file the user just saved.
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-  })
-  if (method === 'HEAD') return res.end()
-  const stream = fs.createReadStream(filePath)
-  stream.on('error', () => {
-    try {
-      res.destroy()
-    } catch (err) {
-      // Nothing left to do.
-    }
-  })
-  stream.pipe(res)
-}
-
-function handlePreviewRequest(req, res) {
-  if (!previewInfo) return previewSend(res, 503, 'Preview server is not running\n')
-  previewInfo.requests += 1
-
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return previewSend(res, 405, 'Method not allowed\n')
-  }
-
-  let pathname = '/'
-  try {
-    pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname
-  } catch (err) {
-    return previewSend(res, 400, 'Bad request\n')
-  }
-
-  let rel
-  try {
-    rel = decodeURIComponent(pathname)
-  } catch (err) {
-    return previewSend(res, 400, 'Bad request\n')
-  }
-  rel = rel.replace(/^\/+/, '')
-  if (rel === '') rel = 'index.html'
-  if (rel.indexOf('\0') !== -1) return previewSend(res, 400, 'Bad request\n')
-  if (rel.split('/').indexOf('..') !== -1) return previewSend(res, 403, 'Refused: parent-directory segment\n')
-  if (rel.split('/').some((segment) => segment.charAt(0) === '.')) {
-    return previewSend(res, 403, 'Refused: hidden paths are not served\n')
-  }
-
-  const resolved = resolveInProject(rel)
-  if (!resolved.ok) return previewSend(res, 403, 'Refused: ' + resolved.error + '\n')
-
-  fs.promises
-    .stat(resolved.path)
-    .then((stats) => {
-      if (stats.isDirectory()) {
-        const next = rel.replace(/\/+$/, '') + '/index.html'
-        const inner = resolveInProject(next)
-        if (!inner.ok) return previewSend(res, 403, 'Refused: ' + inner.error + '\n')
-        return fs.promises
-          .stat(inner.path)
-          .then((innerStats) => {
-            if (!innerStats.isFile()) return previewSend(res, 404, 'Not found: /' + next + '\n')
-            previewSendFile(res, inner.path, innerStats, req.method)
-          })
-          .catch(() => previewSend(res, 404, 'Not found: /' + next + '\n'))
-      }
-      if (!stats.isFile()) return previewSend(res, 404, 'Not found: /' + rel + '\n')
-      previewSendFile(res, resolved.path, stats, req.method)
+function startStaticPreview(requestedPort) {
+  if (!staticPreviewServer) {
+    staticPreviewServer = createPreviewServer({
+      workspaceRoot: WORKSPACE_ROOT,
+      resolveInProject: (name) => resolveInProject(name),
     })
-    .catch((err) => {
-      if (err.code === 'ENOENT') return previewSend(res, 404, 'Not found: /' + rel + '\n')
-      return previewSend(res, 500, 'Could not read /' + rel + ': ' + err.message + '\n')
-    })
-}
-
-function previewListen(port) {
-  return new Promise((resolve) => {
-    const server = http.createServer(handlePreviewRequest)
-    server.on('connection', (socket) => {
-      previewSockets.add(socket)
-      socket.on('close', () => previewSockets.delete(socket))
-    })
-    server.once('error', (err) => resolve({ ok: false, error: err }))
-    server.listen(port, '127.0.0.1', () => resolve({ ok: true, server: server, address: server.address() }))
-  })
+  }
+  return staticPreviewServer.start(requestedPort)
 }
 
 async function startPreviewServer(requestedPort) {
-  if (previewInfo) return previewStatusPayload()
+  // Already running via either path? Return current status.
+  if (staticPreviewServer) {
+    const current = staticPreviewServer.getStatus()
+    if (current.running) return current
+  }
+  if (previewProcess && previewProcessOwned) return previewStatusPayload()
   if (previewStartPromise) return previewStartPromise
 
   previewStartPromise = (async () => {
-    if (await probeVitePreview()) {
-      previewInfo = { port: VITE_PREVIEW_PORT, url: VITE_PREVIEW_URL, startedAt: Date.now(), requests: 0 }
-      return previewStatusPayload()
+    /* Packaged mode: no Vite, no node_modules in the workspace.
+       Use the built-in static preview server directly. */
+    if (app.isPackaged) {
+      return startStaticPreview(requestedPort)
     }
 
+    /* Development mode: a Vite dev server may already be running. */
+    if (await probeVitePreview()) {
+      return {
+        ok: true,
+        running: true,
+        url: VITE_PREVIEW_URL,
+        port: VITE_PREVIEW_PORT,
+        host: '127.0.0.1',
+        root: WORKSPACE_ROOT,
+        startedAt: Date.now(),
+        requests: 0,
+      }
+    }
+
+    /* Development mode fallback: try starting Vite via npm.  If it
+       fails (e.g. no node_modules), fall back to the static server
+       rather than erroring out. */
     const command = process.platform === 'win32' ? 'npm.cmd' : 'npm'
     const child = require('child_process').spawn(
       command,
@@ -646,22 +559,21 @@ async function startPreviewServer(requestedPort) {
     previewProcessOwned = true
 
     const result = await waitForVitePreview(child)
-    if (!result.ready) {
-      try { child.kill() } catch (err) { /* Already stopped. */ }
-      previewProcess = null
-      previewProcessOwned = false
-      return fail('EVITE', 'Could not start the Vite preview server')
+    if (result.ready) {
+      child.once('exit', () => {
+        if (previewProcess === child) {
+          previewProcess = null
+          previewProcessOwned = false
+        }
+      })
+      return previewStatusPayload()
     }
 
-    previewInfo = { port: VITE_PREVIEW_PORT, url: VITE_PREVIEW_URL, startedAt: Date.now(), requests: 0 }
-    child.once('exit', () => {
-      if (previewProcess === child) {
-        previewProcess = null
-        previewProcessOwned = false
-        previewInfo = null
-      }
-    })
-    return previewStatusPayload()
+    /* Vite failed — fall back to the static server. */
+    try { child.kill() } catch { /* Already stopped. */ }
+    previewProcess = null
+    previewProcessOwned = false
+    return startStaticPreview(requestedPort)
   })()
 
   try {
@@ -672,49 +584,29 @@ async function startPreviewServer(requestedPort) {
 }
 
 function stopPreviewServer() {
-  return new Promise((resolve) => {
-    if (!previewInfo && !previewProcess) {
-      previewInfo = null
-      return resolve({ ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT })
-    }
-
+  return (async () => {
     if (previewProcess && previewProcessOwned) {
-      try { previewProcess.kill() } catch (err) { /* Already stopped. */ }
+      try { previewProcess.kill() } catch { /* Already stopped. */ }
     }
     previewProcess = null
     previewProcessOwned = false
-    previewInfo = null
-    resolve({ ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT })
-  })
+    if (staticPreviewServer) {
+      await staticPreviewServer.stop()
+    }
+    return { ok: true, running: false, url: null, port: null, root: WORKSPACE_ROOT }
+  })()
 }
 
 function shutdownPreview() {
-  previewSockets.forEach((socket) => {
-    try {
-      socket.destroy()
-    } catch (err) {
-      // Already gone.
-    }
-  })
-  previewSockets.clear()
   if (previewProcess && previewProcessOwned) {
-    try {
-      previewProcess.kill()
-    } catch (err) {
-      // Already stopped.
-    }
+    try { previewProcess.kill() } catch { /* Already stopped. */ }
   }
   previewProcess = null
   previewProcessOwned = false
-  if (previewServer) {
-    try {
-      previewServer.close()
-    } catch (err) {
-      // Already closed.
-    }
+  if (staticPreviewServer) {
+    staticPreviewServer.stop().catch(() => {})
+    staticPreviewServer = null
   }
-  previewServer = null
-  previewInfo = null
 }
 
 /* -------------------------------------------------------------------- git
@@ -2046,6 +1938,31 @@ app.whenReady().then(async () => {
   }
 
   registerFsBridge()
+
+  // Workspace seeding: in packaged mode the user workspace at <userData>/workspace
+  // is created empty on first launch.  Seed it with the bundled project template
+  // so that Explorer shows content and Preview has something to serve.
+  // Development mode uses the repo root as workspace, which is already populated.
+  if (app.isPackaged) {
+    try {
+      const seedResult = seedWorkspaceIfNeeded({
+        workspaceRoot: WORKSPACE_ROOT,
+        isPackaged: true,
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+      })
+      if (!seedResult.ok) {
+        // eslint-disable-next-line no-console
+        console.warn('[hpos-workspace] seed failed:', seedResult.code, seedResult.error || '')
+      } else if (seedResult.seeded) {
+        // eslint-disable-next-line no-console
+        console.log('[hpos-workspace] seeded', seedResult.copied.length, 'files')
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[hpos-workspace] seed exception:', err && err.message ? err.message : String(err))
+    }
+  }
 
   // Runtime lifecycle: start owned runtime if no external one exists.
   // Fixed dir, existing entrypoint, bounded diagnostics, health-based readiness.
