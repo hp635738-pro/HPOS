@@ -261,7 +261,7 @@ console.log('workspace seed tests...')
   assert.equal(result.seeded, true, 'should seed from the bundled payload')
   assert.ok(['workspace-project', 'workspace-template'].includes(result.source), 'the payload source must be reported, got ' + result.source)
   assert.ok(result.copied.length > 0, 'should copy files from the bundled payload')
-  assert.equal(result.entrypoint, 'index.html', 'the seeded workspace must have a preview entrypoint')
+  assert.equal(result.entrypoint, 'index.html', 'the seeded workspace must have a served entrypoint')
 
   rmSync(workspace, { recursive: true, force: true })
   rmSync(template, { recursive: true, force: true })

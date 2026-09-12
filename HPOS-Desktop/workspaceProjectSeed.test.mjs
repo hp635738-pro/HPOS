@@ -6,8 +6,8 @@
  *   · a first packaged launch seeds the actual Code Arena project into the
  *     user workspace (simulated with a fake `resources/` dir, exactly the
  *     shape electron-builder produces);
- *   · the seeded workspace's Preview entrypoint is the real Code Arena shell,
- *     never the PR #25 starter demo;
+ *   · the seeded workspace's served entrypoint is the real HPOS application
+ *     build, never the Code Arena editor shell or the PR #25 starter demo;
  *   · secrets, dependencies, caches, build artifacts and Git metadata can
  *     never be seeded, even from a tampered payload;
  *   · an existing user workspace is never blindly overwritten — with one
@@ -127,7 +127,7 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   assert.equal(result.ok, true, 'seeding must succeed: ' + (result.error || ''))
   assert.equal(result.seeded, true, 'the empty workspace must be seeded')
   assert.equal(result.source, PROJECT_SOURCE, 'the real project payload must win over the starter demo')
-  assert.equal(result.entrypoint, WORKSPACE_ENTRYPOINT, 'the seeded workspace must have a preview entrypoint')
+  assert.equal(result.entrypoint, WORKSPACE_ENTRYPOINT, 'the seeded workspace must have a served entrypoint')
   assert.ok(result.copied.length >= 150, 'the whole project must be seeded, got ' + result.copied.length)
   assert.deepEqual(result.errors, [], 'no file may fail to seed')
 
@@ -167,9 +167,9 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   assert.ok(entry.includes('data-hpos-app="hpos"'), 'entrypoint must be the real HPOS application page')
   assert.ok(entry.includes('id="root"'), 'entrypoint must mount the HPOS React application')
   // REGRESSION (PR #26): the seeded `/` page must never be the Code Arena
-  // editor shell — that made LIVE PREVIEW render Code Arena inside itself.
+  // editor shell — that made the desktop render Code Arena inside itself.
   assert.ok(!entry.includes('HPOS Code Arena'), 'entrypoint must NOT be the Code Arena editor shell')
-  assert.ok(!entry.includes('id="previewFrame"'), 'entrypoint must NOT carry the Code Arena preview frame')
+  assert.ok(!entry.includes('id="termInput"'), 'entrypoint must NOT carry the Code Arena terminal')
   assert.ok(!entry.includes('Welcome to HPOS'), 'entrypoint must not be the starter demo')
   assert.ok(
     readFileSync(join(workspace, SERVED_ENTRYPOINT)).equals(readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))),
@@ -199,7 +199,7 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   assert.equal(manifest.entrypoint.servedFrom, 'dist/index.html', 'the manifest must record the app build as the source')
   assert.equal(manifest.entrypoint.servedFrom, SERVED_ENTRYPOINT_SOURCE.split('\\').join('/'))
 
-  console.log('ok: seeded preview entrypoint is the real HPOS application, not the Code Arena shell or the demo')
+  console.log('ok: seeded served entrypoint is the real HPOS application, not the Code Arena shell or the demo')
 }
 
 /* --------------------- 3. no secret/dependency/artifact can ever be seeded */

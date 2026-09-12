@@ -6,7 +6,7 @@
  * ---------------
  * In development, Code Arena's workspace root IS this repository
  * (`HPOS-Desktop/main.js` → `developmentRoot: path.resolve(__dirname, '..')`),
- * so Explorer, the editor, Git and Preview all operate on the real HPOS
+ * so Explorer, the editor, Git and the terminal all operate on the real HPOS
  * project. In a packaged build the workspace is `<userData>/workspace`, which
  * starts out empty, so the real project has to travel inside the installer.
  *
@@ -36,16 +36,14 @@
  *
  * Entrypoint mapping (the one deliberate difference from the repo tree)
  *   · `index.html`            ← `dist/index.html`  (the HPOS application)
- *     Preview must render the actual HPOS application, so the served
- *     entrypoint is the production frontend build — the exact same
- *     `dist/index.html` the packaged Electron shell loads
+ *     The served entrypoint is the production frontend build — the exact
+ *     same `dist/index.html` the packaged Electron shell loads
  *     (HPOS-Desktop/frontendEntry.js). It is fully static (Vite `base: './'`),
  *     renders under a plain static server with no Vite and no node_modules,
  *     and degrades gracefully without the preload bridge.
  *     It must NEVER be `src/pages/CodeArena.html`: serving the Code Arena
- *     editor shell from Code Arena's own LIVE PREVIEW produced a recursive
- *     editor-inside-preview (the PR #26 regression). The builder refuses to
- *     map the shell as the entrypoint.
+ *     editor shell at `/` would nest the editor inside itself (the PR #26
+ *     regression). The builder refuses to map the shell as the entrypoint.
  *   · `assets/`               ← `dist/assets/`
  *     The hashed JS/CSS bundle the built app references, copied under a
  *     plain `assets/` directory (a literal `dist/` directory is a forbidden
@@ -99,7 +97,7 @@ export const SEED_SOURCE_LABEL = 'workspace-project'
 export const MANIFEST_NAME = 'HPOS-WORKSPACE.json'
 export const MANIFEST_VERSION = 1
 
-/** The static-preview entrypoint and the real file it comes from: the HPOS
+/** The served entrypoint and the real file it comes from: the HPOS
  *  application's production build — the same entry the packaged Electron
  *  shell loads (HPOS-Desktop/frontendEntry.js → dist/index.html). */
 export const SERVED_ENTRYPOINT = 'index.html'
@@ -110,7 +108,7 @@ export const APP_ASSETS_DIR = 'assets'
 export const APP_ASSETS_SOURCE = join('dist', 'assets')
 /** The Code Arena editor shell — real project source that ships at its own
  *  path, but must NEVER be mapped to the served entrypoint (recursive
- *  editor-inside-preview, the PR #26 regression). */
+ *  editor shell, the PR #26 regression). */
 export const CODE_ARENA_SHELL = join('src', 'pages', 'CodeArena.html')
 /** Where the repository's real Vite/React entry is preserved. */
 export const PRESERVED_VITE_ENTRY = 'vite-index.html'
@@ -343,7 +341,7 @@ export function buildWorkspaceProject({
     throw new Error(
       'The HPOS application build is missing: ' + SERVED_ENTRYPOINT_SOURCE.split(sep).join('/') +
         ' not found in ' + repoRoot + '. Run `npm run build:prod` before building the workspace payload — ' +
-        'Preview serves the real HPOS application, never the Code Arena editor shell.'
+        'The served entrypoint is the real HPOS application, never the Code Arena editor shell.'
     )
   }
 
@@ -375,21 +373,20 @@ export function buildWorkspaceProject({
   }
 
   /* ---------------------------------------------------- entrypoint mapping
-     Preview must render the actual HPOS application, so the served
-     entrypoint is the production frontend build (dist/index.html — the same
-     entry the packaged Electron shell loads) plus its hashed asset bundle
-     under `assets/`. The repo's own Vite entry is preserved verbatim next to
-     it, and the Code Arena editor shell is NEVER mapped to `/`. */
+     The served entrypoint is the production frontend build (dist/index.html —
+     the same entry the packaged Electron shell loads) plus its hashed asset
+     bundle under `assets/`. The repo's own Vite entry is preserved verbatim
+     next to it, and the Code Arena editor shell is NEVER mapped to `/`. */
   if (SERVED_ENTRYPOINT_SOURCE === CODE_ARENA_SHELL) {
     throw new Error(
       'Refusing to map the Code Arena editor shell (' + CODE_ARENA_SHELL.split(sep).join('/') +
-        ') as the preview entrypoint: LIVE PREVIEW must render the HPOS application, not Code Arena itself.'
+        ') as the served entrypoint: the workspace must serve the HPOS application, not Code Arena itself.'
     )
   }
   const appEntrySource = join(repoRoot, SERVED_ENTRYPOINT_SOURCE)
   const viteEntry = join(outputDir, VITE_ENTRY_SOURCE)
   if (!existsSync(appEntrySource)) {
-    throw new Error('The HPOS application build is missing ' + SERVED_ENTRYPOINT_SOURCE + ' — cannot map the preview entrypoint')
+    throw new Error('The HPOS application build is missing ' + SERVED_ENTRYPOINT_SOURCE + ' — cannot map the served entrypoint')
   }
   if (!existsSync(viteEntry)) {
     throw new Error('Payload is missing the project Vite entry ' + VITE_ENTRY_SOURCE)
@@ -398,7 +395,7 @@ export function buildWorkspaceProject({
   const shellGuard = join(repoRoot, CODE_ARENA_SHELL)
   if (existsSync(shellGuard) && appEntryBytes.equals(readFileSync(shellGuard))) {
     throw new Error(
-      'The served entrypoint content is the Code Arena editor shell — refusing to build a recursive preview payload.'
+      'The served entrypoint content is the Code Arena editor shell — refusing to build a recursive editor payload.'
     )
   }
   const viteBytes = readFileSync(viteEntry)
@@ -492,7 +489,7 @@ export function buildWorkspaceProject({
       appAssetsDir: APP_ASSETS_DIR,
       appAssetsFrom: APP_ASSETS_SOURCE.split(sep).join('/'),
       reason:
-        'LIVE PREVIEW renders the real HPOS application: the served entrypoint is the production ' +
+        'The workspace serves the real HPOS application: the served entrypoint is the production ' +
         'frontend build (the same dist/index.html the packaged Electron shell loads), never the ' +
         'Code Arena editor shell. The Vite/React dev entry is preserved unchanged.',
     },

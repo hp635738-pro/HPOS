@@ -7,8 +7,9 @@
  *     directory that is not the HPOS project (nothing is ever invented);
  *   · it contains the expected production project files of every real
  *     subsystem (frontend, Electron shell, runtime, extension, server, docs);
- *   · the served preview entrypoint is the real self-contained Code Arena
- *     shell, with the repository's Vite entry preserved unchanged;
+ *   · the served entrypoint is the real HPOS application build
+ *     (dist/index.html), never the Code Arena editor shell, with the
+ *     repository's Vite entry preserved unchanged;
  *   · it is NOT the 5-file PR #25 starter demo;
  *   · no secret, dependency, cache, build artifact, test or Git entry rides
  *     along.
@@ -107,9 +108,8 @@ let manifest
     'src/lib/storage/conversationStore.js', 'src/lib/chat/history.js',
     // Electron shell (the HPOS-Desktop project itself)
     'HPOS-Desktop/main.js', 'HPOS-Desktop/preload.js', 'HPOS-Desktop/package.json',
-    'HPOS-Desktop/workspaceRoot.js', 'HPOS-Desktop/workspaceSeed.js', 'HPOS-Desktop/previewServer.js',
+    'HPOS-Desktop/workspaceRoot.js', 'HPOS-Desktop/workspaceSeed.js', 'HPOS-Desktop/terminalSession.js',
     'HPOS-Desktop/runtimeManager.js', 'HPOS-Desktop/frontendEntry.js', 'HPOS-Desktop/gitPullPlan.js',
-    'HPOS-Desktop/index.html',
     // runtime (packaged read-only next to the workspace)
     'runtime/package.json', 'runtime/README.md', 'runtime/daemon.js', 'runtime/bin/hpos-runtime.js',
     'runtime/supervisor.js', 'runtime/tasks.js', 'runtime/workspace.js',
@@ -142,7 +142,7 @@ let manifest
   console.log('ok: expected production project files present (' + expected.length + ' checked)')
 }
 
-/* --------------- 3. Preview entrypoint is the HPOS application, not Code Arena */
+/* ------------- 3. Served entrypoint is the HPOS application, not Code Arena */
 {
   const served = readFileSync(join(payload, SERVED_ENTRYPOINT))
   const appBuild = readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))
@@ -154,8 +154,8 @@ let manifest
   assert.ok(served.equals(appBuild), 'served index.html must be byte-identical to ' + SERVED_ENTRYPOINT_SOURCE)
 
   // REGRESSION (PR #26): `/` must never resolve to the Code Arena editor
-  // shell — that made LIVE PREVIEW render Code Arena inside Code Arena.
-  assert.ok(!served.equals(codeArenaShell), 'served index.html must NOT be src/pages/CodeArena.html (recursive preview)')
+  // shell — the served entrypoint must never be the editor itself.
+  assert.ok(!served.equals(codeArenaShell), 'served index.html must NOT be src/pages/CodeArena.html (recursive editor)')
   assert.notEqual(SERVED_ENTRYPOINT_SOURCE, CODE_ARENA_SHELL, 'the entrypoint mapping must not point at the Code Arena shell')
 
   const html = served.toString('utf8')
@@ -163,7 +163,7 @@ let manifest
   assert.ok(html.includes('id="root"'), 'entrypoint must mount the real HPOS React application')
   assert.ok(/\.\/assets\/index-[^"']+\.js/.test(html), 'entrypoint must reference the built app bundle relatively')
   assert.ok(!html.includes('HPOS Code Arena'), 'entrypoint must NOT be the Code Arena editor shell')
-  assert.ok(!html.includes('id="previewFrame"'), 'entrypoint must NOT carry the Code Arena preview frame (recursion)')
+  assert.ok(!html.includes('id="termInput"'), 'entrypoint must NOT carry the Code Arena terminal (recursive editor)')
   assert.ok(!html.includes('Welcome to HPOS'), 'entrypoint must NOT be the starter demo page')
   assert.ok(!html.includes('Edit files in Code Arena and click'), 'entrypoint must NOT be the starter demo page')
 
@@ -193,7 +193,7 @@ let manifest
   assert.ok(preserved.equals(viteEntry), PRESERVED_VITE_ENTRY + ' must be byte-identical to the repository ' + VITE_ENTRY_SOURCE)
   assert.ok(preserved.toString('utf8').includes('/src/main.jsx'), 'preserved Vite entry must still reference /src/main.jsx')
 
-  console.log('ok: preview entrypoint is the real HPOS application, never the Code Arena shell')
+  console.log('ok: served entrypoint is the real HPOS application, never the Code Arena shell')
 }
 
 /* ------------------------------------------- 4. byte parity with the source */
@@ -328,7 +328,7 @@ let manifest
     writeFileSync(abs, rel.endsWith('package.json') ? '{\n  "name": "hpos-fixture",\n  "version": "0.0.0"\n}\n' : '/* fixture */ ' + rel)
   }
 
-  // Without the application build there is no preview entrypoint: refused.
+  // Without the application build there is no served entrypoint: refused.
   assert.throws(
     () => buildWorkspaceProject({ repoRoot: notProject, outputDir: join(notProject, 'no-dist'), quiet: true }),
     /application build is missing/,
@@ -337,11 +337,11 @@ let manifest
   mkdirSync(join(notProject, 'dist'), { recursive: true })
 
   // REGRESSION (PR #26): an application "build" that is actually the Code
-  // Arena editor shell must be refused — Preview must never serve the shell.
+  // Arena editor shell must be refused — the workspace must never serve it.
   writeFileSync(join(notProject, 'dist', 'index.html'), readFileSync(join(notProject, 'src', 'pages', 'CodeArena.html')))
   assert.throws(
     () => buildWorkspaceProject({ repoRoot: notProject, outputDir: join(notProject, 'recursive'), quiet: true }),
-    /refusing to build a recursive preview payload/,
+    /refusing to build a recursive editor payload/,
     'a Code Arena shell posing as the app build must be refused'
   )
   rmSync(join(notProject, 'recursive'), { recursive: true, force: true })

@@ -119,7 +119,7 @@ console.log('packaging configuration tests...')
   assert.ok(includes('!**/.git/**/*'), '.git must be excluded')
   assert.ok(includes('!server/.env') && includes('!**/server/.env'), 'server/.env must be excluded')
   assert.ok(includes('!**/*.map'), 'source maps must be excluded')
-  assert.ok(includes('!HPOS-Desktop/index.html'), 'legacy static page must not be packaged')
+  assert.ok(!fs.existsSync(path.join(root, 'HPOS-Desktop', 'index.html')), 'legacy static page must be gone')
   assert.ok(pkg.build.asar === true, 'asar packing must stay enabled')
   assert.equal(
     pkg.build.directories.output,
@@ -265,10 +265,10 @@ console.log('packaging configuration tests...')
     assert.ok(fs.existsSync(path.join(root, rel)), 'the real project must provide ' + rel + ' for the workspace payload')
   }
 
-  // Preview entrypoint contract: LIVE PREVIEW serves the real HPOS
+  // Served entrypoint contract: the workspace serves the real HPOS
   // application build — the same dist/index.html the packaged Electron shell
   // loads (HPOS-Desktop/frontendEntry.js) — and NEVER the Code Arena editor
-  // shell (the PR #26 recursive-preview regression).
+  // shell (the PR #26 recursive-editor regression).
   assert.equal(SERVED_ENTRYPOINT, 'index.html', 'the served entrypoint must be the workspace index.html')
   assert.equal(
     SERVED_ENTRYPOINT_SOURCE.split(path.sep).join('/'),
@@ -285,7 +285,7 @@ console.log('packaging configuration tests...')
   const frontendEntry = fs.readFileSync(path.join(root, 'HPOS-Desktop', 'frontendEntry.js'), 'utf8')
   assert.ok(
     /['"]dist['"],\s*['"]index\.html['"]/.test(frontendEntry),
-    'HPOS-Desktop/frontendEntry.js must resolve dist/index.html — the same entry the preview payload serves'
+    'HPOS-Desktop/frontendEntry.js must resolve dist/index.html — the same entry the workspace payload serves'
   )
   // The packaging scripts guarantee the app build exists before the payload
   // builder runs, so the entrypoint mapping can never silently miss.
@@ -310,7 +310,7 @@ console.log('packaging configuration tests...')
   )
   assert.ok(!EXCLUDED_FILE_PATTERNS.some((p) => p.test(MANIFEST_NAME)), 'the payload manifest must survive the seed filters')
 
-  console.log('ok: real project payload ships as extraResources; preview entrypoint is the HPOS app, never the Code Arena shell')
+  console.log('ok: real project payload ships as extraResources; served entrypoint is the HPOS app, never the Code Arena shell')
 }
 
 console.log('packaging configuration tests: all passed')
