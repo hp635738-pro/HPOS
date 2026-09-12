@@ -17,6 +17,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  DEFAULT_OUTPUT_DIR,
+  EXCLUDED_FILE_PATTERNS,
+  MANIFEST_NAME,
+  PRESERVED_VITE_ENTRY,
+  REQUIRED_PROJECT_FILES,
+  RESOURCE_DIR_NAME,
+  SERVED_ENTRYPOINT,
+  SERVED_ENTRYPOINT_SOURCE,
+  STAGING_DIR_NAME,
+  VITE_ENTRY_SOURCE,
+} from './scripts/build-workspace-project.mjs'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
@@ -120,7 +132,10 @@ console.log('packaging configuration tests...')
 /* --------------------------------------------------- runtime as a resource */
 {
   const extra = pkg.build.extraResources
-  assert.ok(Array.isArray(extra) && extra.length === 2, 'exactly two extraResources entries (runtime + workspace-template)')
+  assert.ok(
+    Array.isArray(extra) && extra.length === 3,
+    'exactly three extraResources entries (runtime + workspace-template fallback + workspace-project)'
+  )
   assert.equal(extra[0].from, 'runtime', 'runtime must be copied from runtime/')
   assert.equal(extra[0].to, 'runtime', 'runtime must land in resources/runtime')
   assert.ok(!extra[0].filter.includes('**/node_modules/*'), 'runtime node_modules must not be filtered out wholesale')
@@ -132,11 +147,11 @@ console.log('packaging configuration tests...')
   console.log('ok: runtime ships as extraResources with its entrypoint')
 }
 
-/* ------------------------------------------ workspace template as a resource */
+/* --------------------- starter demo template as the last-resort fallback --- */
 {
   const extra = pkg.build.extraResources
   const template = extra[1]
-  assert.ok(template, 'second extraResources entry must exist (workspace-template)')
+  assert.ok(template, 'second extraResources entry must exist (workspace-template fallback)')
   assert.equal(template.from, 'workspace-template', 'workspace template must be copied from workspace-template/')
   assert.equal(template.to, 'workspace-template', 'workspace template must land in resources/workspace-template')
   assert.ok(Array.isArray(template.filter), 'workspace template must have a filter list')
@@ -196,6 +211,80 @@ console.log('packaging configuration tests...')
     )
   }
   console.log('ok: release/, out/, server/.env, node_modules, dist stay gitignored')
+}
+
+/* ------------------- real Code Arena project payload as a resource --------- */
+{
+  const extra = pkg.build.extraResources
+  const project = extra[2]
+
+  assert.ok(project, 'third extraResources entry must exist (workspace-project)')
+  assert.equal(project.from, STAGING_DIR_NAME, 'the project payload must be staged by scripts/build-workspace-project.mjs')
+  assert.equal(project.to, RESOURCE_DIR_NAME, 'the project payload must land in resources/workspace-project')
+  assert.equal(project.from, DEFAULT_OUTPUT_DIR.split('/').pop(), 'extraResources.from must match the generator output dir')
+  assert.equal(
+    path.resolve(root, project.from),
+    DEFAULT_OUTPUT_DIR,
+    'extraResources.from must be exactly the generator default output directory'
+  )
+
+  assert.ok(Array.isArray(project.filter), 'the project payload must have a filter list')
+  assert.ok(project.filter.includes('**/*'), 'the project payload filter must include **/*')
+  for (const pattern of ['!**/.git/**', '!**/node_modules/**', '!**/.env*', '!**/*.key', '!**/*.pem', '!**/*.map', '!**/*.test.mjs', '!**/tests/**', '!**/dist/**', '!**/release/**']) {
+    assert.ok(project.filter.includes(pattern), 'the project payload filter must keep excluding ' + pattern)
+  }
+
+  // The payload is generated, never committed: it must stay gitignored and out of asar.
+  const gitignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8').split(/\r?\n/)
+  assert.ok(
+    gitignore.some((line) => line.trim() === STAGING_DIR_NAME + '/'),
+    'the generated workspace-project payload must stay gitignored'
+  )
+  assert.ok(
+    pkg.build.files.includes('!workspace-project/**/*'),
+    'the generated payload must never be packed into app.asar (it ships as a resource)'
+  )
+
+  // The generator itself must exist and be wired into every dist script.
+  const generator = path.join(root, 'scripts', 'build-workspace-project.mjs')
+  assert.ok(fs.existsSync(generator), 'scripts/build-workspace-project.mjs must exist')
+  assert.equal(pkg.scripts['workspace:project'], 'node scripts/build-workspace-project.mjs', 'workspace:project must run the generator')
+  for (const script of ['dist', 'dist:win', 'dist:dir']) {
+    const value = pkg.scripts[script]
+    assert.ok(value.includes('npm run workspace:project'), `${script} must build the workspace project payload`)
+    assert.ok(
+      value.indexOf('npm run workspace:project') < value.indexOf('electron-builder'),
+      `${script} must build the payload BEFORE electron-builder runs`
+    )
+  }
+  assert.ok(pkg.scripts.test.includes('node scripts/build-workspace-project.test.mjs'), 'npm test must run the payload tests')
+  assert.ok(pkg.scripts.test.includes('node HPOS-Desktop/workspaceProjectSeed.test.mjs'), 'npm test must run the project seeding tests')
+
+  // The payload is built from the real project: every anchor file must exist.
+  for (const rel of REQUIRED_PROJECT_FILES) {
+    assert.ok(fs.existsSync(path.join(root, rel)), 'the real project must provide ' + rel + ' for the workspace payload')
+  }
+
+  // Preview entrypoint contract: a real, self-contained page that renders with
+  // no Vite, no node_modules and no build step in the packaged workspace.
+  assert.equal(SERVED_ENTRYPOINT, 'index.html', 'the served entrypoint must be the workspace index.html')
+  const shellPath = path.join(root, SERVED_ENTRYPOINT_SOURCE)
+  assert.ok(fs.existsSync(shellPath), SERVED_ENTRYPOINT_SOURCE + ' must exist (it becomes the workspace entrypoint)')
+  const shell = fs.readFileSync(shellPath, 'utf8')
+  assert.ok(shell.includes('HPOS Code Arena'), 'the served entrypoint must be the real Code Arena shell')
+  assert.ok(!/<script[^>]+\ssrc=/i.test(shell), 'the served entrypoint must not depend on an external script')
+  assert.ok(!/<link[^>]+rel=["']?stylesheet/i.test(shell), 'the served entrypoint must not depend on an external stylesheet')
+  const remoteUrls = shell.match(/https?:\/\/[^"'\s)>]*/g) || []
+  const nonLocal = remoteUrls.filter((url) => !/^https?:\/\/(www\.w3\.org|127\.0\.0\.1|localhost)/i.test(url))
+  assert.deepEqual(nonLocal, [], 'the served entrypoint must not reference remote assets')
+  assert.ok(fs.existsSync(path.join(root, VITE_ENTRY_SOURCE)), 'the repository Vite entry must exist')
+  assert.ok(
+    fs.readFileSync(path.join(root, VITE_ENTRY_SOURCE), 'utf8').includes('/src/main.jsx'),
+    'the preserved Vite entry (' + PRESERVED_VITE_ENTRY + ') must be the real React entry'
+  )
+  assert.ok(!EXCLUDED_FILE_PATTERNS.some((p) => p.test(MANIFEST_NAME)), 'the payload manifest must survive the seed filters')
+
+  console.log('ok: real Code Arena project payload ships as extraResources, generated before packaging')
 }
 
 console.log('packaging configuration tests: all passed')

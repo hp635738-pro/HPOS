@@ -1940,8 +1940,14 @@ app.whenReady().then(async () => {
   registerFsBridge()
 
   // Workspace seeding: in packaged mode the user workspace at <userData>/workspace
-  // is created empty on first launch.  Seed it with the bundled project template
-  // so that Explorer shows content and Preview has something to serve.
+  // is created empty on first launch.  Seed it with the bundled REAL Code Arena
+  // project payload (resources/workspace-project, generated at package time from
+  // the repository tree) so Explorer shows the actual project and Preview serves
+  // its real entrypoint.  The PR #25 starter demo (resources/workspace-template)
+  // is only a last-resort fallback when no project payload is bundled, and an
+  // untouched demo seed is upgraded to the real project.
+  // Existing user content is never overwritten, and nothing outside the
+  // workspace boundary is ever written.
   // Development mode uses the repo root as workspace, which is already populated.
   if (app.isPackaged) {
     try {
@@ -1956,7 +1962,18 @@ app.whenReady().then(async () => {
         console.warn('[hpos-workspace] seed failed:', seedResult.code, seedResult.error || '')
       } else if (seedResult.seeded) {
         // eslint-disable-next-line no-console
-        console.log('[hpos-workspace] seeded', seedResult.copied.length, 'files')
+        console.log(
+          '[hpos-workspace] seeded', seedResult.copied.length, 'files from',
+          seedResult.source || 'bundled payload',
+          seedResult.entrypoint ? '(entrypoint ' + seedResult.entrypoint + ')' : '(no entrypoint!)'
+        )
+        if (seedResult.migratedFrom) {
+          // eslint-disable-next-line no-console
+          console.log('[hpos-workspace] replaced the untouched', seedResult.migratedFrom, 'starter demo with', seedResult.source)
+        }
+      } else if (seedResult.reason === 'workspace-not-empty') {
+        // eslint-disable-next-line no-console
+        console.log('[hpos-workspace] existing workspace preserved — nothing seeded')
       }
     } catch (err) {
       // eslint-disable-next-line no-console

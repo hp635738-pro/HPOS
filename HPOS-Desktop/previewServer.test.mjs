@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+import {
+  MANIFEST_NAME,
+  PRESERVED_VITE_ENTRY,
+  SERVED_ENTRYPOINT,
+  SERVED_ENTRYPOINT_SOURCE,
+  buildWorkspaceProject,
+} from '../scripts/build-workspace-project.mjs'
 
 const require = createRequire(import.meta.url)
 const { createPreviewServer, createPreviewHandler, PREVIEW_MIME } = require('./previewServer.js')
+const { seedWorkspaceFromSources } = require('./workspaceSeed.js')
+
+const repoRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
 
 console.log('preview server tests...')
 
@@ -247,6 +259,100 @@ function httpGet(url) {
 
   rmSync(workspace, { recursive: true, force: true })
   console.log('ok: createPreviewHandler')
+}
+
+/* -------- 9. Preview serves the REAL Code Arena project entrypoint --------
+   End-to-end for the packaged flow: build the production payload from the real
+   repository, seed a first-launch workspace with the real seeder, then serve it
+   with this static server (unchanged from PR #25) and prove `/` renders the
+   actual project — not the starter demo. */
+{
+  const payloadDir = mkdtempSync(join(tmpdir(), 'hpos-preview-payload-'))
+  rmSync(payloadDir, { recursive: true, force: true })
+  buildWorkspaceProject({ repoRoot, outputDir: payloadDir, quiet: true })
+
+  // The workspace sits inside a parent that holds a decoy: nothing outside the
+  // workspace boundary may ever be served, however the path is spelled.
+  const previewRoot = mkdtempSync(join(tmpdir(), 'hpos-preview-real-'))
+  const workspace = join(previewRoot, 'workspace')
+  mkdirSync(workspace, { recursive: true })
+  writeFileSync(join(previewRoot, 'outside-secret.txt'), 'OUTSIDE-SECRET')
+
+  const seed = seedWorkspaceFromSources({
+    workspaceRoot: workspace,
+    projectDir: payloadDir,
+    templateDir: join(repoRoot, 'workspace-template'),
+  })
+  assert.equal(seed.seeded, true, 'the workspace must be seeded from the real payload')
+  assert.equal(seed.source, 'workspace-project', 'the real project payload must be used')
+
+  const server = createPreviewServer({ workspaceRoot: workspace, resolveInProject: makeResolver(workspace) })
+  const status = await server.start()
+  assert.equal(status.running, true, 'the static preview server must start')
+
+  // `/` is the real Code Arena shell, byte-for-byte.
+  const rootRes = await httpGet(status.url)
+  const entryOnDisk = readFileSync(join(workspace, SERVED_ENTRYPOINT))
+  assert.equal(rootRes.status, 200, 'the entrypoint must be served')
+  assert.ok(rootRes.headers['content-type'].includes('text/html'), 'the entrypoint must be HTML')
+  assert.equal(rootRes.body.length, entryOnDisk.toString('utf8').length, 'the whole entrypoint must be served')
+  assert.ok(entryOnDisk.equals(readFileSync(join(repoRoot, SERVED_ENTRYPOINT_SOURCE))), 'the workspace entrypoint is the real shell')
+  assert.ok(rootRes.body.includes('HPOS Code Arena'), 'Preview must render the actual Code Arena project')
+  assert.ok(rootRes.body.includes('id="previewFrame"'), 'Preview must serve the real shell markup')
+  assert.ok(!rootRes.body.includes('Welcome to HPOS'), 'Preview must not serve the starter demo')
+
+  const demoPage = readFileSync(join(repoRoot, 'workspace-template', 'index.html'), 'utf8')
+  assert.notEqual(rootRes.body, demoPage, 'the served page must differ from the PR #25 demo page')
+
+  // The real project files behind it are served too.
+  const pkgRes = await httpGet(status.url + 'package.json')
+  assert.equal(pkgRes.status, 200)
+  assert.equal(JSON.parse(pkgRes.body).name, 'hpos', 'Preview must serve the real project manifest')
+
+  const manifestRes = await httpGet(status.url + MANIFEST_NAME)
+  assert.equal(manifestRes.status, 200)
+  assert.equal(JSON.parse(manifestRes.body).entrypoint.served, SERVED_ENTRYPOINT, 'the payload manifest must be served')
+
+  for (const rel of ['src/main.jsx', 'src/App.jsx', 'HPOS-Desktop/main.js', 'runtime/bin/hpos-runtime.js', 'public/icon.svg']) {
+    const res = await httpGet(status.url + rel)
+    assert.equal(res.status, 200, 'Preview must serve the real project file ' + rel)
+    assert.ok(res.body.length > 0, rel + ' must not be empty')
+  }
+
+  // The preserved Vite/React entry is still reachable under its own name.
+  const viteRes = await httpGet(status.url + PRESERVED_VITE_ENTRY)
+  assert.equal(viteRes.status, 200)
+  assert.ok(viteRes.body.includes('/src/main.jsx'), 'the preserved Vite entry must stay intact')
+
+  // Boundary rules from PR #25 are unchanged.
+  assert.equal((await httpGet(status.url + '.env')).status, 403, 'hidden paths stay refused')
+  assert.equal((await httpGet(status.url + '.git/config')).status, 403, 'Git metadata stays refused')
+  const escape = await httpGet(status.url + '%2e%2e/outside-secret.txt')
+  assert.ok(!escape.body.includes('OUTSIDE-SECRET'), 'nothing outside the workspace may be served')
+  assert.ok(escape.status === 403 || escape.status === 404, 'normalised traversal stays refused, got ' + escape.status)
+
+  const rawEscape = await httpGet(status.url + '..%2Foutside-secret.txt')
+  assert.ok(!rawEscape.body.includes('OUTSIDE-SECRET'), 'encoded traversal must not escape the workspace')
+  assert.equal(rawEscape.status, 403, 'an encoded parent-directory segment must be refused, got ' + rawEscape.status)
+
+  // HEAD works and reports the real size without a body.
+  const head = await new Promise((resolvePromise) => {
+    const req = http.request(status.url, { method: 'HEAD' }, (res) => {
+      let body = ''
+      res.on('data', (c) => { body += c })
+      res.on('end', () => resolvePromise({ status: res.statusCode, headers: res.headers, body }))
+    })
+    req.on('error', (err) => resolvePromise({ error: err }))
+    req.end()
+  })
+  assert.equal(head.status, 200, 'HEAD on the entrypoint must succeed')
+  assert.equal(head.body, '', 'HEAD must not send a body')
+  assert.equal(Number(head.headers['content-length']), entryOnDisk.length, 'HEAD must report the real entrypoint size')
+
+  await server.stop()
+  rmSync(previewRoot, { recursive: true, force: true })
+  rmSync(payloadDir, { recursive: true, force: true })
+  console.log('ok: Preview serves the real Code Arena project entrypoint')
 }
 
 console.log('preview server tests: all passed')
