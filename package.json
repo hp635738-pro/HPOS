@@ -14,13 +14,14 @@
     "dev": "vite",
     "build": "vite build",
     "build:prod": "vite build",
-    "dist": "npm run build:prod && electron-builder",
-    "dist:win": "npm run build:prod && electron-builder --win nsis",
-    "dist:dir": "npm run build:prod && electron-builder --win --dir",
+    "dist": "npm run build:prod && npm run workspace:project && electron-builder",
+    "dist:win": "npm run build:prod && npm run workspace:project && electron-builder --win nsis",
+    "dist:dir": "npm run build:prod && npm run workspace:project && electron-builder --win --dir",
     "lint": "oxlint",
     "preview": "vite preview",
+    "workspace:project": "node scripts/build-workspace-project.mjs",
     "bridge:check": "node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs",
-    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node HPOS-Desktop/workspaceSeed.test.mjs && node HPOS-Desktop/previewServer.test.mjs && node packaging.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/linuxStatus.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node src/lib/bridge/deepseekRuntimeClient.test.mjs && node vite-runtime-proxy.test.mjs && node src/components/chat/ImageGeneration.test.mjs && node src/lib/chat/history.test.mjs && node src/lib/chat/chatUiPrefs.test.mjs && node src/components/chat/ChatRestructure.test.mjs && node src/lib/chat/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/lib/chat/sendFailure.test.mjs && node src/components/chat/ChatPolish.test.mjs && node src/lib/chat/attachments.test.mjs && node src/components/chat/ComposerUpgrade.test.mjs && node src/theme/tokens.test.mjs"
+    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node HPOS-Desktop/workspaceSeed.test.mjs && node HPOS-Desktop/previewServer.test.mjs && node HPOS-Desktop/workspaceProjectSeed.test.mjs && node scripts/build-workspace-project.test.mjs && node packaging.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/sync.test.mjs && node src/lib/storage/conversationStore.test.mjs && node src/lib/storage/deepseekBindingStore.test.mjs && node src/lib/bridge/recovery.test.mjs && node src/lib/bridge/harden.test.mjs && node src/lib/bridge/deepseekAdapter.test.mjs && node src/lib/bridge/newChat.test.mjs && node src/lib/bridge/deepthink.test.mjs && node src/lib/bridge/realBrowser.test.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/linuxStatus.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node src/lib/bridge/deepseekRuntimeClient.test.mjs && node vite-runtime-proxy.test.mjs && node src/components/chat/ImageGeneration.test.mjs && node src/lib/chat/history.test.mjs && node src/lib/chat/chatUiPrefs.test.mjs && node src/components/chat/ChatRestructure.test.mjs && node src/lib/chat/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/lib/chat/sendFailure.test.mjs && node src/components/chat/ChatPolish.test.mjs && node src/lib/chat/attachments.test.mjs && node src/components/chat/ComposerUpgrade.test.mjs && node src/theme/tokens.test.mjs"
   },
   "dependencies": {},
   "devDependencies": {
@@ -60,7 +61,8 @@
       "!server/.env",
       "!**/server/.env",
       "!**/*.map",
-      "!**/node_modules/.cache/**/*"
+      "!**/node_modules/.cache/**/*",
+      "!workspace-project/**/*"
     ],
     "extraResources": [
       {
@@ -85,6 +87,30 @@
           "!**/.env*",
           "!**/*.test.mjs",
           "!**/*.test.js"
+        ]
+      },
+      {
+        "from": "workspace-project",
+        "to": "workspace-project",
+        "filter": [
+          "**/*",
+          "!**/.git/**",
+          "!**/node_modules/**",
+          "!**/.env*",
+          "!**/*.key",
+          "!**/*.pem",
+          "!**/*.p12",
+          "!**/*.pfx",
+          "!**/*-lock.json",
+          "!**/*.log",
+          "!**/*.map",
+          "!**/*.test.mjs",
+          "!**/*.test.js",
+          "!**/tests/**",
+          "!**/__tests__/**",
+          "!**/dist/**",
+          "!**/build/**",
+          "!**/release/**"
         ]
       }
     ],
