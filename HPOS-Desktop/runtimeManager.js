@@ -309,8 +309,15 @@ function createRuntimeManager({
         }
 
         // 3. Spawn existing runtime command/entrypoint — reuse, don't duplicate
-        // Use process.execPath (node binary) to avoid PATH hijack, cwd fixed
-        const spawnEnv = { ...env }
+        // Use process.execPath (node binary) to avoid PATH hijack, cwd fixed.
+        // In a packaged Electron app process.execPath is the app binary
+        // (HPOS.exe), not node: without ELECTRON_RUN_AS_NODE=1 a packaged app
+        // would simply launch a second HPOS instance instead of the runtime.
+        // The flag makes the Electron binary behave as plain Node in both dev
+        // (node_modules/electron/dist/electron) and packaged modes, and it is
+        // inherited by the runtime's own task spawns (supervisor uses
+        // process.execPath too). Ignored by a real node executable.
+        const spawnEnv = { ...env, ELECTRON_RUN_AS_NODE: '1' }
         // Ensure port is default unless overridden by env — reuse existing env contract
         // Don't inject token or secrets
         const args = [entrypoint]

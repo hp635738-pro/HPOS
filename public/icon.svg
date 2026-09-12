@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!--
+    HPOS application icon source.
+
+    The glyph is the existing HPOS logo mark (the primary path of
+    public/favicon.svg), placed on a rounded dark tile that matches the
+    application background (#0f1013). Brand purple #863bff is preserved as
+    the mid stop of the vertical gradient.
+
+    public/icon.ico (16/24/32/48/64/128/256 px, PNG-compressed entries) is
+    generated from this file with an SVG rasterizer plus an ICO packer
+    (e.g. resvg + a small PNG-to-ICO script, or ImageMagick with SVG
+    support). See README "Windows installer" for details.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262832"/>
+      <stop offset="1" stop-color="#0d0e12"/>
+    </linearGradient>
+    <linearGradient id="glyph" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9b5cff"/>
+      <stop offset="0.5" stop-color="#863bff"/>
+      <stop offset="1" stop-color="#7a20ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tile)"/>
+  <g transform="translate(46.4 49.8) scale(3.4)">
+    <path fill="url(#glyph)" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
+  </g>
+</svg>

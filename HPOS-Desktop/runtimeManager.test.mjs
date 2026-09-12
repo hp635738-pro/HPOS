@@ -13,6 +13,7 @@ const {
   resolveStateDir,
   getEndpointFilePath,
   sanitizeLogLine,
+  createRuntimeManager,
 } = require('./runtimeManager.js')
 
 console.log('runtimeManager path tests...')
@@ -112,6 +113,55 @@ console.log('runtimeManager path tests...')
   // This will fail because path doesn't exist, but if it existed, it should be rejected as inside app resources
   // We test the logic by mocking realpath? For now just ensure it doesn't throw
   console.log('ok: workspaceRoot packaged inside check exists')
+}
+
+// Test 9: owned runtime spawn must run as Node (ELECTRON_RUN_AS_NODE=1)
+//
+// In a packaged Electron app process.execPath is HPOS.exe, not node — without
+// ELECTRON_RUN_AS_NODE=1 the spawn would launch a second HPOS instance
+// instead of the runtime daemon. This test spawns the real entrypoint through
+// createRuntimeManager and asserts the child saw the flag and the fixed cwd.
+{
+  const os = require('node:os')
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hpos-rt-spawn-'))
+  const runtimeDir = path.join(work, 'runtime')
+  const stateDir = path.join(work, 'state')
+  const marker = path.join(work, 'spawned.json')
+  fs.mkdirSync(path.join(runtimeDir, 'bin'), { recursive: true })
+  fs.mkdirSync(stateDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(runtimeDir, 'bin', 'hpos-runtime.js'),
+    `const fs = require('fs')\n` +
+      `fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify({\n` +
+      `  runAsNode: process.env.ELECTRON_RUN_AS_NODE || null,\n` +
+      `  cwd: process.cwd(),\n` +
+      `  argv1: process.argv[1] || null,\n` +
+      `}))\n`
+  )
+
+  const manager = createRuntimeManager({
+    runtimeDir,
+    stateDir,
+    env: { ...process.env },
+    startupTimeoutMs: 1500,
+    logLevel: 'silent',
+  })
+  const result = await manager.start()
+  // The fake entrypoint exits immediately instead of serving /health, so the
+  // manager must report a premature exit — never a silent success.
+  assert.equal(result.ok, false, 'fake runtime that exits must not report ok')
+  assert.equal(result.code, 'ERUNTIME_EXIT', 'expected ERUNTIME_EXIT, got ' + result.code)
+
+  assert.ok(fs.existsSync(marker), 'spawned runtime should have written its marker')
+  const observed = JSON.parse(fs.readFileSync(marker, 'utf8'))
+  assert.equal(observed.runAsNode, '1', 'spawned runtime must see ELECTRON_RUN_AS_NODE=1')
+  assert.equal(observed.cwd, path.resolve(runtimeDir), 'spawned runtime cwd must be the runtime dir')
+  assert.ok(
+    String(observed.argv1 || '').endsWith(path.join('bin', 'hpos-runtime.js')),
+    'spawned runtime must receive the fixed entrypoint as argv[1]'
+  )
+  console.log('ok: owned runtime spawns with ELECTRON_RUN_AS_NODE=1 and fixed cwd')
+  fs.rmSync(work, { recursive: true, force: true })
 }
 
 console.log('runtimeManager packaging tests: all passed')
