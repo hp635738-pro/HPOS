@@ -7,6 +7,7 @@ const { createRuntimeManager, resolveRuntimeDir } = require('./runtimeManager')
 const { seedWorkspaceIfNeeded } = require('./workspaceSeed')
 const { createTerminalManager } = require('./terminalSession')
 const { createDevLauncher, DEV_WORKSPACE_FLAG } = require('./devLaunch')
+const { createUpdater } = require('./updater')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -463,6 +464,72 @@ const devLauncher = createDevLauncher({
   },
 })
 
+/* ---------------------------------------------------------------- updater
+   In-app updates (task §6/§7): explicit Check → Download → Restart only
+   (autoDownload/autoInstall forced off). The release source is the pinned
+   electron-builder `build.publish` GitHub config — nothing URL-shaped
+   crosses the IPC boundary. In a dev instance the state machine reports a
+   structured 'unsupported' state instead of faking a flow. */
+const CHANNEL_UPDATER_CHECK = 'hpos:updater:check'
+const CHANNEL_UPDATER_DOWNLOAD = 'hpos:updater:download'
+const CHANNEL_UPDATER_INSTALL = 'hpos:updater:install'
+const CHANNEL_UPDATER_STATUS = 'hpos:updater:status'
+const CHANNEL_UPDATER_EVENT = 'hpos:updater:event'
+const CHANNEL_APP_INFO = 'hpos:app:info'
+
+function pushUpdaterEvent(payload) {
+  // Settings lives in the main app window(s); every window may be showing
+  // the updates panel, so the event goes to all live windows.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(CHANNEL_UPDATER_EVENT, payload)
+  }
+}
+
+function createAppUpdater() {
+  if (!app.isPackaged) {
+    return createUpdater({
+      autoUpdater: null,
+      version: app.getVersion(),
+      platform: process.platform,
+      isPackaged: false,
+      onEvent: pushUpdaterEvent,
+    })
+  }
+  let au = null
+  try {
+    // electron-updater is a production dependency in the packaged app.
+    // Dev trees never need it (require is lazy, packaged branch only).
+    au = require('electron-updater').autoUpdater
+    au.autoDownload = false
+    au.autoInstallAppAtExit = false
+    au.autoRunAppAfterInstall = true
+  } catch (err) {
+    au = null
+  }
+  return createUpdater({
+    autoUpdater: au,
+    version: app.getVersion(),
+    platform: process.platform,
+    isPackaged: true,
+    onEvent: pushUpdaterEvent,
+  })
+}
+
+const appUpdater = createAppUpdater()
+
+function readAppInfo() {
+  return {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    isPackaged: app.isPackaged,
+    devWorkspace: isDevWorkspaceInstance(),
+    electron: process.versions.electron || null,
+    chrome: process.versions.chrome || null,
+    node: process.versions.node || null,
+  }
+}
+
 /* -------------------------------------------------------------------- git
    All Git operations live in gitBridge.js. The renderer sends no
    arguments at all — no command string, no path, no remote, no refspec
@@ -593,6 +660,31 @@ function registerFsBridge() {
   ipcMain.handle(CHANNEL_DEV_STATUS, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return devLauncher.status()
+  })
+
+  ipcMain.handle(CHANNEL_UPDATER_CHECK, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return appUpdater.check()
+  })
+
+  ipcMain.handle(CHANNEL_UPDATER_DOWNLOAD, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return appUpdater.download()
+  })
+
+  ipcMain.handle(CHANNEL_UPDATER_INSTALL, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return appUpdater.install()
+  })
+
+  ipcMain.handle(CHANNEL_UPDATER_STATUS, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return appUpdater.status()
+  })
+
+  ipcMain.handle(CHANNEL_APP_INFO, (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    return readAppInfo()
   })
 
   ipcMain.handle(CHANNEL_GIT_STATUS, (event) => {

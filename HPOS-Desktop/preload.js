@@ -68,6 +68,12 @@ const CHANNEL_DEV_LAUNCH = 'hpos:dev:launch'
 const CHANNEL_DEV_STOP = 'hpos:dev:stop'
 const CHANNEL_DEV_STATUS = 'hpos:dev:status'
 const CHANNEL_DEV_OUTPUT = 'hpos:dev:output'
+const CHANNEL_UPDATER_CHECK = 'hpos:updater:check'
+const CHANNEL_UPDATER_DOWNLOAD = 'hpos:updater:download'
+const CHANNEL_UPDATER_INSTALL = 'hpos:updater:install'
+const CHANNEL_UPDATER_STATUS = 'hpos:updater:status'
+const CHANNEL_UPDATER_EVENT = 'hpos:updater:event'
+const CHANNEL_APP_INFO = 'hpos:app:info'
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
 const CHANNEL_GIT_PUSH = 'hpos:git:push'
@@ -80,6 +86,7 @@ const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
    it added. */
 const terminalListeners = new Map()
 const devLaunchListeners = new Map()
+const updaterListeners = new Map()
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -215,6 +222,58 @@ contextBridge.exposeInMainWorld('hpos', {
       ipcRenderer.removeListener(CHANNEL_DEV_OUTPUT, listener)
       devLaunchListeners.delete(callback)
     },
+  },
+
+  /**
+   * In-app updates. Explicit flow only (Check → Download → Restart to
+   * Update); auto-download and auto-install are off in the main process.
+   * Nothing crosses IPC: there is no URL, version or option argument —
+   * the release source is the pinned electron-builder publish config.
+   */
+  updater: {
+    /** Ask the pinned release source whether an update exists. */
+    check() {
+      return ipcRenderer.invoke(CHANNEL_UPDATER_CHECK)
+    },
+
+    /** Download the available update (only after a successful check). */
+    download() {
+      return ipcRenderer.invoke(CHANNEL_UPDATER_DOWNLOAD)
+    },
+
+    /** Install the downloaded update and restart (only when ready). */
+    install() {
+      return ipcRenderer.invoke(CHANNEL_UPDATER_INSTALL)
+    },
+
+    /** Current updater state (state, versions, progress, error). */
+    status() {
+      return ipcRenderer.invoke(CHANNEL_UPDATER_STATUS)
+    },
+
+    /** Subscribe to state/progress events pushed by the main process. */
+    onEvent(callback) {
+      if (typeof callback !== 'function') return
+      const listener = (_event, data) => callback(data)
+      updaterListeners.set(callback, listener)
+      ipcRenderer.on(CHANNEL_UPDATER_EVENT, listener)
+    },
+
+    /** Unsubscribe a previously registered event callback. */
+    offEvent(callback) {
+      const listener = updaterListeners.get(callback)
+      if (!listener) return
+      ipcRenderer.removeListener(CHANNEL_UPDATER_EVENT, listener)
+      updaterListeners.delete(callback)
+    },
+  },
+
+  /**
+   * App metadata for the Settings → Updates panel (version, platform,
+   * whether this is a packaged build or a dev instance).
+   */
+  appInfo() {
+    return ipcRenderer.invoke(CHANNEL_APP_INFO)
   },
 
   /**
