@@ -432,13 +432,24 @@ const CHANNEL_TERM_INTERRUPT = 'hpos:term:interrupt'
 const CHANNEL_TERM_DISPOSE = 'hpos:term:dispose'
 const CHANNEL_TERM_DATA = 'hpos:term:data'
 
+function safeSendToCodeArena(channel, payload) {
+  try {
+    if (!codeArenaWindow) return
+    if (codeArenaWindow.isDestroyed()) return
+    const wc = codeArenaWindow.webContents
+    if (!wc) return
+    if (wc.isDestroyed()) return
+    wc.send(channel, payload)
+  } catch {
+    // Window was destroyed between checks — ignore, no crash.
+  }
+}
+
 const terminalManager = createTerminalManager({
   workspaceRoot: WORKSPACE_ROOT,
   env: process.env,
   onOutput: function (payload) {
-    if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
-      codeArenaWindow.webContents.send(CHANNEL_TERM_DATA, payload)
-    }
+    safeSendToCodeArena(CHANNEL_TERM_DATA, payload)
   },
 })
 
@@ -458,9 +469,7 @@ const devLauncher = createDevLauncher({
   workspaceRoot: WORKSPACE_ROOT,
   env: process.env,
   onOutput: function (payload) {
-    if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
-      codeArenaWindow.webContents.send(CHANNEL_DEV_OUTPUT, payload)
-    }
+    safeSendToCodeArena(CHANNEL_DEV_OUTPUT, payload)
   },
 })
 
@@ -481,7 +490,14 @@ function pushUpdaterEvent(payload) {
   // Settings lives in the main app window(s); every window may be showing
   // the updates panel, so the event goes to all live windows.
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(CHANNEL_UPDATER_EVENT, payload)
+    try {
+      if (win.isDestroyed()) continue
+      const wc = win.webContents
+      if (!wc || wc.isDestroyed()) continue
+      wc.send(CHANNEL_UPDATER_EVENT, payload)
+    } catch {
+      // Window destroyed between checks — skip.
+    }
   }
 }
 
@@ -599,7 +615,7 @@ function registerFsBridge() {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     const checked = validateAiProposal(proposal)
     if (!checked.ok) return checked
-    if (!codeArenaWindow || codeArenaWindow.isDestroyed()) {
+    if (!codeArenaWindow || codeArenaWindow.isDestroyed() || !codeArenaWindow.webContents || codeArenaWindow.webContents.isDestroyed()) {
       return fail('ENOARENA', 'Open Code Arena before sending an AI edit proposal')
     }
     const message = {
@@ -607,8 +623,9 @@ function registerFsBridge() {
       original: checked.original,
       proposed: checked.proposed,
     }
-    if (codeArenaReady) codeArenaWindow.webContents.send('hpos:ai-edit-proposal', message)
-    else {
+    if (codeArenaReady) {
+      safeSendToCodeArena('hpos:ai-edit-proposal', message)
+    } else {
       if (pendingAiProposals.length >= 4) pendingAiProposals.shift()
       pendingAiProposals.push(message)
     }
@@ -720,6 +737,20 @@ function registerFsBridge() {
   ipcMain.handle('hpos:open-code-arena', (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
 
+    // Prevent duplicate Code Arena windows — focus existing instead.
+    if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
+      try {
+        if (codeArenaWindow.isMinimized()) codeArenaWindow.restore()
+        codeArenaWindow.focus()
+        codeArenaWindow.show()
+      } catch {
+        // If focus fails, fall through to create a new one.
+      }
+      if (codeArenaWindow && !codeArenaWindow.isDestroyed()) {
+        return { ok: true, focused: true }
+      }
+    }
+
     const parent = BrowserWindow.fromWebContents(event.sender)
 
     const arena = new BrowserWindow({
@@ -742,15 +773,27 @@ function registerFsBridge() {
     trustedContents.add(arena.webContents)
 
     arena.webContents.once('did-finish-load', () => {
-      if (codeArenaWindow !== arena || arena.isDestroyed()) return
-      codeArenaReady = true
-      while (pendingAiProposals.length) {
-        arena.webContents.send('hpos:ai-edit-proposal', pendingAiProposals.shift())
+      try {
+        if (codeArenaWindow !== arena || arena.isDestroyed()) return
+        const wc = arena.webContents
+        if (!wc || wc.isDestroyed()) return
+        codeArenaReady = true
+        while (pendingAiProposals.length) {
+          wc.send('hpos:ai-edit-proposal', pendingAiProposals.shift())
+        }
+      } catch {
+        // Window destroyed during load — ignore.
       }
     })
 
     arena.on('closed', () => {
-      trustedContents.delete(arena.webContents)
+      try {
+        if (arena.webContents && !arena.webContents.isDestroyed()) {
+          trustedContents.delete(arena.webContents)
+        }
+      } catch {
+        // webContents already destroyed
+      }
       if (codeArenaWindow === arena) {
         codeArenaWindow = null
         codeArenaReady = false
@@ -794,14 +837,25 @@ function createWindow() {
 
   const contents = win.webContents
   trustedContents.add(contents)
-  contents.on('destroyed', () => trustedContents.delete(contents))
+  contents.on('destroyed', () => {
+    try {
+      trustedContents.delete(contents)
+    } catch {
+      // Already gone
+    }
+  })
   if (devInstance) {
     // The document's <title> would erase the marker, so keep the suffix.
     contents.on('page-title-updated', (event) => {
       event.preventDefault()
-      const base = event.title || 'HPOS'
-      if (base.indexOf('development workspace') === -1) {
-        win.setTitle(base + ' · development workspace')
+      try {
+        if (win.isDestroyed()) return
+        const base = event.title || 'HPOS'
+        if (base.indexOf('development workspace') === -1) {
+          win.setTitle(base + ' · development workspace')
+        }
+      } catch {
+        // Window destroyed between event and setTitle — ignore.
       }
     })
   }
