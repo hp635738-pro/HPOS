@@ -2,9 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
-  Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star, Gear,
+  Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
+/**
+ * Rail navigation only. Settings is deliberately NOT a rail item: it is a
+ * header (Topbar) destination owned by the Topbar gear button. Keeping it out
+ * of NAV also stops App from classifying the settings view as a rail page, so
+ * the header receives `active === 'settings'` and its gear can show the
+ * on-state. Regression: HPOS-Desktop/settingsNavigation.test.mjs.
+ */
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
   { id: 'schedule',  label: 'Analyzing',      Icon: Analyzing },
@@ -22,7 +29,6 @@ export const NAV = [
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
   { id: 'assistant', label: 'Assistant',      Icon: Ghost },
   { id: 'star',      label: 'Favourites',     Icon: Star },
-  { id: 'settings',  label: 'Settings',       Icon: Gear },
 ]
 
 /** Flat list of every leaf nav id (children included), in display order. */
@@ -313,24 +319,9 @@ export default function Sidebar({ active, onChange }) {
         })}
       </nav>
 
+      {/* Footer holds rail chrome only. Settings is a header destination —
+          the Topbar gear button owns it (no rail Settings entry point). */}
       <div style={S.foot}>
-        <button
-          onClick={() => onChange('settings')}
-          title={mini ? 'Settings' : undefined}
-          aria-label="Settings"
-          style={{
-            ...S.item,
-            height: prefs.railItemH,
-            borderRadius: prefs.railRadius,
-            justifyContent: mini ? 'center' : 'flex-start',
-            padding: mini ? 0 : '0 11px',
-            color: active === 'settings' ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
-            background: active === 'settings' ? 'var(--rail-hover)' : 'transparent',
-          }}
-        >
-          <span style={S.iconBox}><Gear size={prefs.railIcon - 1} /></span>
-          {!mini && <span style={S.label}>Settings</span>}
-        </button>
         <button
           onClick={() => set('sidebar', mini ? 'expanded' : 'icons')}
           title={mini ? 'Expand sidebar' : 'Collapse sidebar'}

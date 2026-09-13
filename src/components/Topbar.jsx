@@ -36,6 +36,11 @@ export default function Topbar({ title, active, onNavigate, historyOpen, onToggl
       <div style={{ ...S.right, gap: prefs.barGap }}>
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
 
+        {/* THE Settings entry point. Always rendered (never gated on
+            prefs.barShowNotch) and always navigating through the same
+            onNavigate(view) contract the rest of the header uses — no URLs,
+            no IPC, no extra buttons. Settings is not a rail page, so App
+            hands this button the active state for the settings view. */}
         <button
           type="button"
           onClick={() => onNavigate?.('settings')}
