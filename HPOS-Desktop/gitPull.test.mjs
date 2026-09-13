@@ -72,6 +72,6 @@ assert.match(arena, /Pull from GitHub/)
 assert.match(arena, /window\.confirm\(pullConfirmation\(plan\)\)/)
 assert.match(arena, /Dependencies changed\. Run npm install/)
 assert.match(arena, /connectWorkspaceToGit/)
-assert.match(arena, /Connect workspace to HPOS Git/)
+assert.match(arena, /Connect Workspace to GitHub/)
 
 console.log('git pull contract tests: all passed')

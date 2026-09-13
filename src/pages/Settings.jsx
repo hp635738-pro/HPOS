@@ -180,7 +180,7 @@ function UpdatesPanel() {
   return (
     <div style={U.block}>
       <div style={U.row}>
-        <span style={U.version}>HPOS {u.currentVersion || (appInfo && appInfo.version) || '—'}</span>
+        <span style={U.version}>HPOS {u?.currentVersion || (appInfo && appInfo.version) || '—'}</span>
         <span style={U.note}>{statusNode}</span>
       </div>
       {u && u.releaseNotes && (u.state === 'available' || u.state === 'downloading' || u.state === 'ready') && (
