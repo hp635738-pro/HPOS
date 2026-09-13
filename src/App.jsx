@@ -73,7 +73,10 @@ export default function App() {
     ''
 
   // True for both top-level nav items and their nested children.
-  const inRail = allNav.some((n) => n.id === view)
+  // Settings is excluded on purpose: it is a header destination, so the
+  // Topbar (never the rail) owns its active state and the header gear stays
+  // the Settings entry point.
+  const inRail = view !== 'settings' && allNav.some((n) => n.id === view)
 
   // Pass child id to sidebar (so highlight can track child + parent state).
   const activeInSidebar = inRail ? view : null
