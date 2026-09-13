@@ -195,7 +195,7 @@ Launch HPOS → test → fix → commit → push
 **Git workspace.** A packaged workspace starts life as a plain directory
 (the seeded payload deliberately ships without `.git` and without any
 developer machine's auth material). The GitHub panel shows a
-**Connect workspace to HPOS Git** button in that state; it runs the fixed
+**Connect Workspace to GitHub** button in that state; it runs the fixed
 main-process sequence `git init` + branch pinned to `main` + the hard-coded
 `origin` (`hp635738-pro/HPOS`) + local branch upstream config. Existing
 repositories are reported and never modified. After that, the panel gives
