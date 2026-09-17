@@ -157,6 +157,17 @@ that instead of shipping a demo:
   `npm run workspace:project` to inspect the exact payload a packaged build ships
 - Prod: `dist/index.html` via `app.getAppPath()`, runtime auto-started, no terminal required, no blank screen, Code Arena not main
 
+**One-click update (Settings → App → "Update from GitHub"):**
+- Dev-shell feature: ek button press → check `origin/main` → fast-forward pull →
+  `npm install` (agar dependency files badle) → `npm run build:prod` (agar
+  frontend sources badle aur Vite dev server serve nahi kar raha) → window
+  reload ya poori app ka restart — jo bhi changed files maange
+- Pull path exactly wahi hai jo Code Arena Pull use karta hai (gitBridge.js):
+  dirty workspace refuse (`ELOCALCHANGES`), divergence refuse, force kabhi nahi
+- Renderer koi argument nahi bhejta — flow fixed hai (`appUpdate.js`),
+  progress events se dikhta hai; packaged installs pe panel hidden hai
+  (wahan Releases updater — Check for Updates — app shell update karta hai)
+
 **Windows installer behavior / limitations:**
 - Assisted (non-one-click) NSIS installer, per-user by default (no admin required
   unless an all-users location is chosen), custom install directory allowed
@@ -179,6 +190,75 @@ that instead of shipping a demo:
 - No generic shell/process API, no arbitrary Git args, no credential logging, bounded sanitized diagnostics
 
 **Requirements:** Node 18+ (Step 6 verification Node 22 par chali hai)
+
+### Production packaging (Linux)
+
+Same electron-builder pipeline, same payload — **AppImage (portable) + deb
+(Debian/Ubuntu install) on x64**. Aapke paas jo bhi Debian/Ubuntu/Mint jaisa
+64-bit system hai, usi pe build hota hai — koi cross-compilation nahi chahiye.
+
+**Prerequisites (Windows jaise hi, plus kuch nahi):**
+- Node 18+ (tested on 22)
+- `runtime/` dependencies installed: `cd runtime && npm install` (playwright-core)
+- Network access to GitHub release assets on the first run (Electron binary +
+  fpm/AppImage tooling; cached under `~/.cache` afterwards)
+- No extra system packages — electron-builder apna fpm + AppImage tooling khud
+  download karta hai (kisi bhi distro pe chal jata hai)
+
+**Build frontend + package:**
+
+```bash
+# AppImage + deb – produces release/HPOS-0.1.0.AppImage + release/hpos_0.1.0_amd64.deb
+npm run dist:linux
+
+# Unpacked dir only (fast smoke test) – release/linux-unpacked/HPOS
+npm run dist:linux:dir
+```
+
+**Output (gitignored via `release/` in `.gitignore`):**
+- AppImage: `release/HPOS-0.1.0.AppImage` — portable, kisi bhi glibc ≥2.31
+  (Debian 11+/Ubuntu 20.04+) Linux pe direct chalta hai
+- deb: `release/hpos_0.1.0_amd64.deb` — system install (`sudo apt install ./…`),
+  menu entry + icons + uninstall support
+- Unpacked: `release/linux-unpacked/HPOS` — raw Electron app directory
+
+**Application icon:**
+- `public/icon.png` — 512×512 PNG rendered from the same `public/icon.svg`
+  source as the Windows `icon.ico`; wired via `build.linux.icon`
+- electron-builder isse resize karke hicolor size set (16→512) banata hai jo
+  AppImage, deb aur desktop entry use karte hain
+- `public/icon.png` `build.files` mein bhi pack hota hai taaki `main.js` har
+  Linux window ko explicit icon de sake (`linuxWindowIcon()` — kai WMs desktop
+  file ka icon tab tak ignore karte hain jab tak window khud icon set na kare)
+
+**Run/install:**
+- AppImage: `chmod +x HPOS-0.1.0.AppImage && ./HPOS-0.1.0.AppImage`
+  (Debian 12/Ubuntu 22.04+ pe `libfuse2` chahiye: `sudo apt install libfuse2`)
+- deb: `sudo apt install ./hpos_0.1.0_amd64.deb` → apps menu mein **HPOS**
+- Uninstall: `sudo apt remove hpos` (user data — `~/.config/HPOS/workspace` aur
+  `~/.hpos/runtime` — deliberately delete nahi hoti)
+
+**Linux-specific notes:**
+- Workspace default: `<userData>/workspace` (`~/.config/HPOS/workspace`), same
+  seeding behavior as Windows — pehli launch pe real project payload seed hota hai
+- `HPOS_WORKSPACE_ROOT` env (absolute path) packaged mode mein workspace override
+  karta hai — dono platforms pe same
+- Terminal sessions `sh -c`/`$SHELL` use karte hain (`terminalSession.js`
+  platform-aware hai); runtime daemon `ELECTRON_RUN_AS_NODE=1` ke saath chalta hai
+- In-app updater Linux AppImage/deb builds pe "unsupported" dikhata hai
+  (electron-updater auto-update AppImage ke liye AppImageUpdate mangta hai jo
+  abhi wired nahi) — update ka flow: naya build download karke replace kar do
+- AppImage pe `libfuse2` na ho toh: `sudo apt install libfuse2`, ya
+  `./HPOS-0.1.0.AppImage --appimage-extract && squashfs-root/AppRun`
+- Purane/locked-down distros (Ubuntu 24.04+) pe Electron ka sandbox na chale toh
+  SETUP-LINUX.md ka **Troubleshooting** section dekho
+- Building needs network access to GitHub release assets — sandboxed networks jo
+  `objects.githubusercontent.com` block karte hain, wahan download step fail hoga
+  (environment limitation, project error nahi). Config validation har jagah
+  hoti hai: `npm test` → `packaging.test.mjs` ab Linux contract bhi check karta hai
+
+**Full step-by-step Hinglish guide (install, dev mode, packaging,
+troubleshooting):** [SETUP-LINUX.md](SETUP-LINUX.md)
 
 ### Code Arena — the dev loop (edit → test → launch → ship)
 

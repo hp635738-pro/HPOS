@@ -212,6 +212,45 @@ assert(
   )
 }
 
+/* ---------------- GitHubUpdatePanel (one-click "Update from GitHub") ------ */
+{
+  const ghStart = settings.indexOf('function GitHubUpdatePanel()')
+  const ghEnd = settings.indexOf('\nfunction UpdatesPanel()', ghStart)
+  const gh = settings.slice(ghStart, ghEnd)
+  assert(ghStart !== -1 && ghEnd !== -1, '5: GitHubUpdatePanel source extracted')
+
+  // Hooks run before any early return (same class of bug the UpdatesPanel
+  // null-safety regression came from).
+  const firstReturn = gh.indexOf('return null')
+  assert(firstReturn !== -1, '5: packaged/browser early return exists')
+  const hooks = gh.slice(0, firstReturn)
+  const hookCount = (hooks.match(/useState\(|useEffect\(/g) || []).length
+  assert(hookCount >= 5, '5: all useState/useEffect hooks run before the early returns')
+
+  // The button presses the argument-free main-process flow and nothing else.
+  assert(gh.includes('bridge.appUpdateRun()'), '5: the panel calls the argument-free appUpdateRun()')
+  assert(!/appUpdateRun\([^)]/.test(gh), '5: appUpdateRun() is never called with arguments')
+  assert(!/checkGitPull|applyGitPull/.test(gh), '5: the panel reuses the fixed flow, not raw pull bridge calls')
+
+  // Progress arrives via events, and the subscription is torn down.
+  assert(gh.includes('bridge.onAppUpdateEvent(cb)'), '5: progress subscribes to app update events')
+  assert(gh.includes('bridge.offAppUpdateEvent(cb)'), '5: the event subscription is cleaned up')
+
+  // Packaged installs and bridge-less browsers render nothing.
+  assert(gh.includes('if (appInfo && appInfo.isPackaged) return null'), '5: packaged installs hide the panel (Releases updater owns that flow)')
+  assert(gh.includes('if (!canRun) return null'), '5: bridge-less windows hide the panel')
+
+  // The visible contract: an "Update" button + step list + result note.
+  assert(gh.includes('>Update</button>'), '5: the button is labelled Update')
+  assert(gh.includes('Update from GitHub'), '5: the panel names its source (GitHub)')
+  assert(/npm install/.test(gh) || gh.includes("'install'"), '5: the step list shows the install step')
+  assert(/Frontend build/.test(gh), '5: the step list shows the build step')
+  assert(/App restart|Windows reload/.test(gh), '5: the step list shows the restart/reload outcome')
+
+  // It is actually rendered in the App section.
+  assert(settings.includes('<GitHubUpdatePanel />'), '5: GitHubUpdatePanel is rendered in Settings')
+}
+
 if (failed) {
   console.error(`\n${failed} settings null-safety test(s) failed`)
   process.exit(1)

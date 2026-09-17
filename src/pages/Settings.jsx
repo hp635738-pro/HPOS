@@ -6,6 +6,161 @@ import AdvancedEditor from '../components/AdvancedEditor'
 import { Sun, Moon, Monitor, Check, Chevron } from '../components/Icons'
 
 /**
+ * Settings → App → "Update from GitHub" (one-click self-update).
+ *
+ * The single button runs the whole fixed flow in the main process:
+ * check origin/main → fast-forward pull → npm install (if dependency
+ * files changed) → production frontend build (if sources changed and no
+ * Vite dev server is serving) → window reload or full app restart.
+ * The renderer presses the button and displays progress — run() takes
+ * no arguments, so nothing renderer-controlled reaches git or npm.
+ * Local (uncommitted) changes make the update refuse safely.
+ *
+ * Rendered only in development shells: packaged installs get their shell
+ * updates from the Releases updater (UpdatesPanel below) and plain
+ * browser windows have no bridge at all — both render nothing here.
+ */
+function GitHubUpdatePanel() {
+  const bridge = (typeof window !== 'undefined' && window.hpos) || null
+  const canRun =
+    bridge &&
+    typeof bridge.appUpdateRun === 'function' &&
+    typeof bridge.onAppUpdateEvent === 'function' &&
+    typeof bridge.offAppUpdateEvent === 'function' &&
+    typeof bridge.appInfo === 'function'
+
+  const [appInfo, setAppInfo] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [phase, setPhase] = useState(null)
+  const [steps, setSteps] = useState(null)
+  const [done, setDone] = useState(null)
+
+  useEffect(() => {
+    if (!canRun) return undefined
+    bridge.appInfo().then(setAppInfo).catch(() => setAppInfo(null))
+    const cb = (payload) => {
+      if (!payload || typeof payload.type !== 'string') return
+      if (payload.type === 'phase') {
+        setRunning(true)
+        setPhase(payload.phase)
+      } else if (payload.type === 'plan') {
+        setSteps(payload.actions || null)
+      } else if (payload.type === 'done') {
+        setRunning(false)
+        setPhase(null)
+        setDone({
+          ok: payload.state === 'updated' || payload.state === 'up-to-date',
+          state: payload.state,
+          message: payload.message || 'Update flow finished.',
+        })
+      }
+    }
+    bridge.onAppUpdateEvent(cb)
+    return () => {
+      bridge.offAppUpdateEvent(cb)
+    }
+  }, [])
+
+  if (!canRun) return null
+  if (appInfo && appInfo.isPackaged) return null
+
+  async function startUpdate() {
+    if (running) return
+    setRunning(true)
+    setDone(null)
+    setSteps(null)
+    setPhase('check')
+    try {
+      const result = await bridge.appUpdateRun()
+      const state = result && typeof result.state === 'string' ? result.state : null
+      if (state === 'relaunching') {
+        setPhase('relaunch')
+      } else if (state === 'updated' || state === 'up-to-date') {
+        setDone({ ok: true, state: state, message: (result && result.message) || 'Update applied.' })
+        setPhase(null)
+      } else {
+        setDone({
+          ok: false,
+          state: state || 'error',
+          message: (result && (result.message || result.error)) || 'Update nahi ho paya — detail ke liye message dekho.',
+        })
+        setPhase(null)
+      }
+    } catch {
+      setDone({ ok: false, state: 'error', message: 'Update flow fail ho gaya — dobara try karo.' })
+      setPhase(null)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const ORDER = ['check', 'pull', 'install', 'build', 'finish']
+  const phaseStep = phase === 'reload' || phase === 'relaunch' ? 'finish' : phase
+  const activeIdx = phaseStep ? ORDER.indexOf(phaseStep) : -1
+  const stepDefs = [
+    { id: 'check', label: 'GitHub check (origin/main)' },
+    { id: 'pull', label: 'Pull — fast-forward only' },
+    { id: 'install', label: 'npm install', skipped: !!(steps && !steps.deps) },
+    { id: 'build', label: 'Frontend build', skipped: !!(steps && !steps.build) },
+    {
+      id: 'finish',
+      label: steps
+        ? steps.mode === 'relaunch'
+          ? 'App restart'
+          : steps.mode === 'reload'
+            ? 'Windows reload'
+            : 'Files update ho gaye'
+        : 'Apply',
+      skipped: !!(steps && steps.mode === 'none'),
+    },
+  ]
+  function stepState(id, skipped) {
+    if (skipped) return 'skipped'
+    if (done) return done.ok ? 'done' : id === 'check' ? 'done' : 'pending'
+    const idx = ORDER.indexOf(id)
+    if (activeIdx === -1) return 'pending'
+    if (idx < activeIdx) return 'done'
+    if (idx === activeIdx) return 'active'
+    return 'pending'
+  }
+
+  return (
+    <div style={U.block}>
+      <div style={U.row}>
+        <span style={U.version}>Update from GitHub</span>
+        <span style={U.flex1} />
+        <button style={U.btn} disabled={running} onClick={startUpdate}>Update</button>
+      </div>
+      <p style={U.text}>
+        origin/main ke saare changes laata hai aur running app pe apply karta hai —
+        pull, install, build aur (zarurat ho toh) restart, sab ek click mein.
+        Uncommitted local changes hone par update safe refuse ho jata hai.
+      </p>
+      {(running || done) && (
+        <div style={U.block}>
+          {stepDefs.map(({ id, label, skipped }) => {
+            const st = stepState(id, skipped)
+            const tint =
+              st === 'done' ? 'var(--text-2)' : st === 'active' ? 'var(--text)' : 'var(--muted)'
+            return (
+              <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: tint }}>
+                <span style={{ width: 14, textAlign: 'center' }}>
+                  {st === 'done' ? '✓' : st === 'active' ? '…' : st === 'skipped' ? '–' : '·'}
+                </span>
+                <span>{label}{st === 'skipped' ? ' (skip)' : ''}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {done && (
+        <div style={U.notes}>{done.message}</div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Settings → App → Updates (task §6/§7).
  *
  * Explicit flow only: Check for Updates → (available) Download →
@@ -264,7 +419,10 @@ export default function Settings({ jumpTo, onJumped }) {
           title="App"
           desc="Version and updates. Checking is explicit — nothing downloads or installs without you asking."
         >
-          <UpdatesPanel />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <GitHubUpdatePanel />
+            <UpdatesPanel />
+          </div>
         </Section>
 
         {/* ------------------------------------------------------------ THEME */}
