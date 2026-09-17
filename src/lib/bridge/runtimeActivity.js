@@ -23,7 +23,6 @@
 import { RUNTIME_ERROR, getLocalRuntimeBridge } from './LocalRuntimeBridge.js'
 import { RUNTIME_CONNECTION_STATE, getRuntimeConnectionController } from './runtimeConnection.js'
 import { RUNTIME_STREAM_STATE } from './runtimeEvents.js'
-import { initialLinuxState, readLinuxCapability } from './linuxStatus.js'
 
 export const ACTIVITY_LIMITS = Object.freeze({
   MAX_RECENT_TASKS: 20,
@@ -32,9 +31,9 @@ export const ACTIVITY_LIMITS = Object.freeze({
 })
 
 const ACTIVE_STATUSES = new Set(['QUEUED', 'RUNNING', 'GENERATING', 'STREAMING'])
-/* Step 5: which execution backend ran a task. The runtime publishes only these
-   two names; anything else is dropped rather than displayed. */
-const TASK_EVENT_EXECUTORS = new Set(['native', 'linux'])
+/* Which execution backend ran a task. The runtime publishes only this name;
+   anything else is dropped rather than displayed. */
+const TASK_EVENT_EXECUTORS = new Set(['native'])
 const TERMINAL_EVENT_TO_STATUS = {
   'task.completed': 'COMPLETE',
   'task.failed': 'FAILED',
@@ -61,9 +60,6 @@ function initialSnapshot() {
       lastEventAt: null,
     },
     runtime: { status: null, pid: null, uptimeMs: null, engine: null, version: null },
-    /* Step 5: the Linux capability verdict (see linuxStatus.js). A projection
-       of RT_STATUS — no paths, no commands, no environment, no storage. */
-    linux: initialLinuxState(),
     metrics: { cpu: null, memory: null },
     counters: {
       total: 0, active: 0, queued: 0, running: 0,
@@ -141,7 +137,6 @@ export class RuntimeActivityController {
       connection: { ...this._snapshot.connection },
       stream: { ...this._snapshot.stream },
       runtime: { ...this._snapshot.runtime },
-      linux: { ...this._snapshot.linux },
       metrics: clone(this._snapshot.metrics),
       counters: { ...this._snapshot.counters },
       active: this._snapshot.active,
@@ -284,11 +279,6 @@ export class RuntimeActivityController {
       checkedAt: snapshot.checkedAt || null,
     }
     if (state === RUNTIME_CONNECTION_STATE.CONNECTED) this._lastError = null
-    else if (state !== RUNTIME_CONNECTION_STATE.CHECKING) {
-      /* We cannot reach the runtime, so we do not claim to know what it can
-         execute. The row goes back to "Unknown" instead of going stale. */
-      this._snapshot.linux = initialLinuxState(this._now)
-    }
     this._emit()
   }
 
@@ -317,7 +307,6 @@ export class RuntimeActivityController {
         break
       case 'runtime.stopped':
         this._snapshot.runtime.status = 'stopped'
-        this._snapshot.linux = initialLinuxState(this._now)
         this._active.clear()
         this._syncActive()
         break
@@ -406,9 +395,6 @@ export class RuntimeActivityController {
 
   /** Seed from an RT_STATUS RPC payload (same allowlisted shape). */
   _seedFromStatusPayload(payload) {
-    /* The Linux verdict only ever arrives on the RPC status response, never on
-       an event — so this is the one place that reads it. */
-    if (payload.linux) this._snapshot.linux = readLinuxCapability(payload, { now: this._now })
     if (payload.tasks && typeof payload.tasks === 'object') {
       const c = this._snapshot.counters
       for (const key of ['total', 'active', 'queued', 'running', 'completed', 'cancelled', 'failed']) {

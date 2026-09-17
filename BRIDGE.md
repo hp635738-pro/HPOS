@@ -1,5 +1,13 @@
 # HPOS Browser Bridge + DeepSeek Connector
 
+> **Status:** the web app's AI chat pages (AI chats / Code Arena entry points),
+> their `src/lib/bridge` BrowserBridge/DeepSeekConnector client and the local
+> conversation store have been **removed from the app**. This document now
+> describes the surface that remains in the repository: the `extension/`
+> browser extension and the runtime's fixed `browser.deepseek` provider
+> (`runtime/browser/providers/deepseek/`). The extension is loadable and
+> self-contained, but no page in the web app talks to it anymore.
+
 HPOS chat ko user ke **already-open** DeepSeek tab se jodta hai. DeepSeek API, cookies, passwords, tokens, CAPTCHA/login bypass **nahi** hain.
 
 ```

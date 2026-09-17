@@ -5,8 +5,8 @@
  * deliberately absent here: the Vite development proxy reads the daemon
  * endpoint file and adds the credential on the server side.
  *
- * This module is transport-focused. It does not replace BrowserBridge and it
- * does not expose a generic fetch or task-execution surface.
+ * This module is transport-focused: it exposes only the fixed runtime routes
+ * and no generic fetch or task-execution surface.
  */
 
 import {

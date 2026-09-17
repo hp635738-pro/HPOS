@@ -2,15 +2,15 @@
  * Runtime status UX contract tests (source-level — no DOM, no new deps).
  * Run: node src/components/RuntimeStatus.test.mjs
  *
- * Same pattern as the chat UI suites: the project has no React rendering
+ * Same pattern as the other UI suites: the project has no React rendering
  * harness, so component contracts are verified by reading sources. Hold
- * timing semantics have real unit tests in src/lib/chat/longPress.test.mjs.
+ * timing semantics have real unit tests in src/lib/longPress.test.mjs.
  *
  *   - header container: dot + running cat (icon-only, no visible text), compact, labelled
  *   - cat motion follows state (idle / run / fast), never the only signal
  *   - hold (~3s, pointer + keyboard) opens full-panel details; clicks don't
  *   - details: labelled view, sections, back/escape close, focus, no secrets
- *   - composer banner removed; send path untouched; reduced-motion safe
+ *   - composer banner removed; reduced-motion safe
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -30,10 +30,9 @@ const assert = (cond, msg) => {
 
 const status = readFileSync(join(dir, 'RuntimeStatus.jsx'), 'utf8')
 const cat = readFileSync(join(dir, 'RunningCat.jsx'), 'utf8')
-const panel = readFileSync(join(dir, 'chat/RuntimeDetailsPanel.jsx'), 'utf8')
-const hook = readFileSync(join(root, 'src/lib/chat/useLongPress.js'), 'utf8')
-const ctrl = readFileSync(join(root, 'src/lib/chat/longPress.js'), 'utf8')
-const chatPage = readFileSync(join(root, 'src/pages/ChatPage.jsx'), 'utf8')
+const panel = readFileSync(join(dir, 'RuntimeDetailsPanel.jsx'), 'utf8')
+const hook = readFileSync(join(root, 'src/lib/useLongPress.js'), 'utf8')
+const ctrl = readFileSync(join(root, 'src/lib/longPress.js'), 'utf8')
 const topbar = readFileSync(join(dir, 'Topbar.jsx'), 'utf8')
 const app = readFileSync(join(root, 'src/App.jsx'), 'utf8')
 const css = readFileSync(join(root, 'src/index.css'), 'utf8')
@@ -67,7 +66,7 @@ assert(
   'no hardcoded dot colors remain',
 )
 assert(
-  status.includes('aria-label={`${label}') && status.includes('title={`${conn.detail || label}'),
+  status.includes('aria-label={`${label}') && status.includes('conn.detail || label') && status.includes('title={`'),
   'full state stays in the accessible label + tooltip',
 )
 assert(!status.includes('onClick'), 'normal clicks never open details (no click handler)')
@@ -86,8 +85,7 @@ assert(
 )
 assert(
   cat.includes("data-motion={mode}") && cat.includes('rt-cat-bob') &&
-    cat.includes('rt-cat-legs-a') && cat.includes('rt-cat-legs-b') &&
-    cat.includes('rt-cat-tail'),
+    cat.includes('rt-cat-legs-a') && cat.includes('rt-cat-legs-b') && cat.includes('rt-cat-tail'),
   'cat exposes motion state with bobbing, legs and tail',
 )
 assert(cat.includes('aria-hidden="true"'), 'cat is decorative for assistive tech')
@@ -123,10 +121,10 @@ assert(
 /* 4. details view */
 assert(panel.includes('aria-label="Runtime details"'), 'details is a labelled view')
 assert(
-  panel.includes('Back to chat') && panel.includes('onBack'),
+  panel.includes('Back') && panel.includes('onBack'),
   'details has an obvious back control',
 )
-for (const section of ['Status', 'Runtime', 'Capability', 'Recent']) {
+for (const section of ['Status', 'Runtime', 'Recent']) {
   assert(panel.includes(`>${section}<`), `details shows a ${section} section`)
 }
 assert(panel.includes('Running{running.length'), 'details shows a Running section')
@@ -148,20 +146,18 @@ assert(
   assert(!secretRe.test(status), 'status container exposes no secrets/credentials data')
 }
 
-/* 5. banner removed, chat wiring */
+/* 5. banner removed */
 assert(!existsSync(join(root, 'src/components/chat/RuntimeDeepSeekStatus.jsx')), 'composer banner file is deleted')
-assert(!chatPage.includes('RuntimeDeepSeekStatus'), 'ChatPage no longer renders the banner')
-assert(
-  chatPage.includes('detailsOpen') && chatPage.includes('<RuntimeDetailsPanel onBack='),
-  'ChatPage renders the details overlay',
-)
-assert(chatPage.includes('inert={detailsOpen'), 'chat content is inert while details are open')
 
 /* 6. app + header wiring */
 assert(app.includes('const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false)'), 'details start closed')
 assert(
-  app.includes("navigate('aiagents')") && app.includes('setRuntimeDetailsOpen(true)'),
-  'opening lands in the chat view',
+  app.includes('setRuntimeDetailsOpen(true)'),
+  'opening the details flips the overlay state',
+)
+assert(
+  app.includes('<RuntimeDetailsPanel onBack={closeRuntimeDetails}'),
+  'App renders the details overlay above the main view',
 )
 assert(
   app.includes('runtimeStatusRef.current?.focus()'),
@@ -193,7 +189,7 @@ assert(
   'reduced-motion disables cat + panel animation (interaction is timer-based)',
 )
 
-/* 8. no new stacks, send path untouched */
+/* 8. no new stacks */
 {
   const names = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).join(' ').toLowerCase()
   assert(!names.includes('shadcn'), 'no shadcn dependency added')
@@ -204,10 +200,6 @@ assert(
   )
   assert(!names.includes('lucide') && !names.includes('typescript'), 'no lucide/TypeScript added')
 }
-assert(
-  chatPage.includes('getDeepSeekRuntimeClient().send(content, {'),
-  'DeepSeek send path untouched',
-)
 assert(
   !panel.includes('DeepSeek') && !status.includes('DeepSeek'),
   'status UI makes no DeepSeek provider claims',

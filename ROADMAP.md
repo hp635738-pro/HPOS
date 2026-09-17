@@ -100,7 +100,7 @@ Kya ban chuka hai aur kya baaki hai, ek jagah.
 
 ### Data layer *(backend design ke baad)*
 
-- [ ] Page content — Input terminal, Analyzing, Topics, Bord, AI analyz, Chats, Assistant
+- [ ] Page content — Input terminal, Analyzing, Topics, Bord, Chats, Assistant
 - [ ] State management — jab data aayega
 - [ ] Persistence — localStorage se aage (file system / DB)
 - [ ] Error boundaries + loading states

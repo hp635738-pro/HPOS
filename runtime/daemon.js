@@ -3,13 +3,12 @@
  *
  *   env ──▶ claimEndpoint (~/.hpos/runtime/endpoints.json, 0600, token)
  *       ──▶ resolveLimits + detectCapabilities   (what this OS can enforce)
- *       ──▶ detectLinuxCapabilities              (Step 5: can Linux execute here?)
  *       ──▶ prepareWorkspaceRoot                 (outside the repository)
  *       ──▶ process supervisor                   (one child process per task)
  *       ──▶ backend router                       (service → executor → backend)
  *       ──▶ task registry                        (QUEUED → RUNNING → …)
  *       ──▶ actions allowlist (PING, RT_STATUS, RT_TASK_RUN, RT_TASK_STOP)
- *       ──▶ event bus + metrics                  (Step 4 observability)
+ *       ──▶ event bus + metrics                  (observability)
  *       ──▶ HTTP transport (127.0.0.1 only; /health, /rpc, /events)
  *
  * The daemon is a supervisor, not an execution environment: task code runs in a
@@ -17,10 +16,9 @@
  * event loop that answers RPC. The daemon owns only the bounds — timeout, kill
  * chain, environment, workspace, concurrency.
  *
- * Step 5 adds a capability-gated Linux backend behind the service router;
- * Step 6 adds a fixed browser.deepseek route in an isolated provider child.
- * The daemon still has NO shell or generic exec/browser endpoint, installs
- * nothing, and performs no provider work in its own event loop.
+ * The fixed browser.deepseek route runs in an isolated provider child. The
+ * daemon has NO shell or generic exec/browser endpoint, installs nothing, and
+ * performs no provider work in its own event loop.
  *
  * Exports:
  *   createRuntime(opts) → { start(), stop(), tasks, supervisor, capabilities,
@@ -29,8 +27,6 @@
  *   main()               → CLI entrypoint (env-driven)
  */
 
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createHttpServer } from './transport.js'
@@ -45,15 +41,10 @@ import { createLogger } from './log.js'
 import { EVENT_TYPE, STOP_REASON, createEventBus } from './events.js'
 import { measureRuntimeMetrics, uptimeMs } from './metrics.js'
 import { resolveBrowserSessionConfig } from './browser/contracts.js'
-import { createBackendRouter, createNativeBackend, createLinuxBackend } from './backend.js'
-import { EXECUTOR, PLANNED_SERVICE_NAMES, executorOf } from './executors.js'
-import { detectLinuxCapabilities, publicLinuxCapabilities, summarizeLinuxCapabilities } from './linux/capabilities.js'
-import { createLinuxLauncher } from './linux/launcher.js'
+import { createBackendRouter, createNativeBackend } from './backend.js'
+import { EXECUTOR, executorOf } from './executors.js'
 
 export const DEFAULT_PORT = 5190
-
-/** The runtime package directory — a task must never run in it or under it. */
-const RUNTIME_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)))
 
 export function createRuntime({
   port = DEFAULT_PORT,
@@ -67,12 +58,8 @@ export function createRuntime({
   /* Test seam: drive the daemon with a stand-in supervisor. The workspace root
      is not injectable — HPOS_RUNTIME_TASK_WORKSPACE_ROOT is the one knob. */
   supervisor: injectedSupervisor = null,
-  /* Step 5 seams: what host to report capabilities for, and how to probe it.
-     They exist so Windows behaviour is a tested fact on every machine, and so a
-     test can assert the Linux refusal without a Linux box. */
   platform = process.platform,
-  probeExists = existsSync,
-  /* Step 5 seam: replace the whole backend router (tests inject fakes). */
+  /* Replace the whole backend router (tests inject fakes). */
   backends: injectedBackends = null,
 } = {}) {
   const dir = stateDir || resolveStateDir(env)
@@ -96,46 +83,16 @@ export function createRuntime({
     log,
   })
 
-  /* ---- Step 5: execution backends ----------------------------------------
-     Which backend a task uses is decided by its *service*, so detection only
-     has to answer "can Linux execution run here" — and it may honestly answer
-     no. An unavailable Linux backend must not stop the daemon, and must not
-     fall through to the native path either. */
+  /* ---- Execution backends --------------------------------------------------
+     Which backend a task uses is decided by its *service*; today every
+     registered service runs on the native path (one supervised child). */
   const registeredServices = Object.keys(SERVICES)
-  const linuxServices = registeredServices.filter(
-    (name) => executorOf(SERVICES[name]) === EXECUTOR.LINUX,
-  )
   const nativeServices = registeredServices.filter(
     (name) => executorOf(SERVICES[name]) === EXECUTOR.NATIVE,
   )
-  const linuxCapabilities = publicLinuxCapabilities(
-    detectLinuxCapabilities({ platform, env, probeExists, execPath: process.execPath, services: linuxServices }),
-  )
-  /* The runtime credential is claimed further down; the launcher is built now,
-     so it reads the value through this holder instead of holding it itself. */
-  const secrets = { values: [] }
-  const linuxLauncher = createLinuxLauncher({
-    platform,
-    env,
-    execPath: process.execPath,
-    heapArgs: heapArgs(limits),
-    limits,
-    workspaceRoot: prepared.root,
-    protectedDirs: [RUNTIME_DIR, resolve(RUNTIME_DIR, '..'), process.cwd()],
-    getSecrets: () => secrets.values,
-    linuxAvailable: linuxCapabilities.available,
-    log,
-  })
-  const linuxBackend = createLinuxBackend({
-    capabilities: linuxCapabilities,
-    launcher: linuxLauncher,
-    supervisor,
-    log,
-  })
   const backends = injectedBackends || createBackendRouter({
     backends: [
       createNativeBackend({ supervisor, capabilities, services: nativeServices, log }),
-      linuxBackend,
     ],
     log,
   })
@@ -157,15 +114,11 @@ export function createRuntime({
     log,
     limits,
     capabilities,
-    linux: linuxCapabilities,
   })
 
   const claimed = claimEndpoint({ stateDir: dir, port, protocol: VERSION })
   const file = claimed.file
   const token = claimed.token
-  /* From here on, a linux task child gets the token *scanned out* of its
-     environment by value, not just by name (see launcher.js). */
-  secrets.values = [token]
 
   /** Allowlisted, metric-only status payload (no env, no paths, no token). */
   function statusFields() {
@@ -228,11 +181,6 @@ export function createRuntime({
     tasks,
     supervisor,
     capabilities,
-    /* Step 5: the Linux verdict, the router, and the planned-service list (all
-       three are read-only; nothing here can be steered by an RPC payload). */
-    linux: linuxCapabilities,
-    linuxSummary: () => summarizeLinuxCapabilities(linuxCapabilities),
-    plannedServices: () => [...PLANNED_SERVICE_NAMES],
     backends,
     backendStatus,
     limits,
@@ -258,15 +206,6 @@ export function createRuntime({
             pid: process.pid,
             maxActive: limits.maxActive,
             defaultTimeoutMs: limits.defaultTimeoutMs,
-          })
-          /* One line, and it is a capability statement, not an error: an
-             unavailable Linux backend is the normal answer on most hosts. */
-          log.info('linux_capability', {
-            available: linuxCapabilities.available,
-            support: linuxCapabilities.support,
-            platform: linuxCapabilities.platform,
-            executor: linuxCapabilities.executor,
-            reason: linuxCapabilities.reason,
           })
           /* Seed the event stream: the runtime is up, and the first status
              snapshot gives a reconnecting client counters + metrics even if
@@ -377,12 +316,6 @@ export async function main() {
     console.error(`hpos-runtime endpoint file: ${rt.endpoint.file}`)
     console.error(`hpos-runtime task workspaces: ${rt.workspaceRoot}`)
     console.error(`hpos-runtime executor: one child process per task, timeout <= ${rt.limits.maxTimeoutMs}ms`)
-    /* Capability line, not a warning: an unavailable Linux backend is the
-       expected answer on a host with no adapter, and the daemon is healthy. */
-    console.error(
-      `hpos-runtime linux: ${rt.linux.available ? `available (${rt.linux.support})` : `unavailable (${rt.linux.reason})`}`
-      + `${rt.linux.available ? '' : ' — nothing was installed or enabled'}`,
-    )
   } catch (err) {
     /* Release the endpoint file we claimed before the listen failed. */
     releaseEndpoint({ file: rt.endpoint.file, token: rt.endpoint.token })

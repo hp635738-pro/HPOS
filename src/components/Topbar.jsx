@@ -1,5 +1,5 @@
 import { useTheme } from '../theme/ThemeContext'
-import { Sun, Moon, History, Gear } from './Icons'
+import { Sun, Moon } from './Icons'
 import Notch, { TOOLS } from './Notch'
 import RuntimeStatus from './RuntimeStatus.jsx'
 
@@ -7,12 +7,11 @@ export { TOOLS }
 
 /**
  * Top bar. The "notch" is an inline pill inside the header holding the
- * primary workspace actions, sat beside the theme and bell buttons.
- * Page-specific actions (e.g. the history toggle) sit in the same right
- * cluster as independent controls — never inside the notch pill. New chat
- * lives in the history sidebar, not the header.
+ * primary workspace actions (including the Settings entry point), sat beside
+ * the theme button. New chat / history controls are gone with the chat page;
+ * the runtime status container is the only live surface here.
  */
-export default function Topbar({ title, active, onNavigate, historyOpen, onToggleHistory, onOpenRuntimeDetails, runtimeStatusRef }) {
+export default function Topbar({ title, active, onNavigate, onOpenRuntimeDetails, runtimeStatusRef }) {
   const { prefs, resolved, set } = useTheme()
 
   return (
@@ -36,47 +35,7 @@ export default function Topbar({ title, active, onNavigate, historyOpen, onToggl
       <div style={{ ...S.right, gap: prefs.barGap }}>
         {prefs.barShowNotch && <Notch active={active} onNavigate={onNavigate} />}
 
-        {/* THE Settings entry point. Always rendered (never gated on
-            prefs.barShowNotch) and always navigating through the same
-            onNavigate(view) contract the rest of the header uses — no URLs,
-            no IPC, no extra buttons. Settings is not a rail page, so App
-            hands this button the active state for the settings view. */}
-        <button
-          type="button"
-          onClick={() => onNavigate?.('settings')}
-          title="Settings"
-          aria-label="Settings"
-          data-testid="settings-button"
-          style={{
-            ...S.iconBtn,
-            width: prefs.barBtn,
-            height: prefs.barBtn,
-            ...(active === 'settings' ? S.historyOn : null),
-          }}
-        >
-          <Gear size={17} />
-        </button>
-
         <RuntimeStatus onOpenDetails={onOpenRuntimeDetails} triggerRef={runtimeStatusRef} />
-
-        {onToggleHistory && (
-          <button
-            type="button"
-            onClick={onToggleHistory}
-            className="hdr-action"
-            title={historyOpen ? 'Hide chat history' : 'Show chat history'}
-            aria-label={historyOpen ? 'Hide chat history' : 'Show chat history'}
-            aria-pressed={historyOpen === true}
-            style={{
-              ...S.iconBtn,
-              width: prefs.barBtn,
-              height: prefs.barBtn,
-              ...(historyOpen ? S.historyOn : null),
-            }}
-          >
-            <History size={17} />
-          </button>
-        )}
 
         {prefs.barShowTheme && (
           <button
@@ -114,10 +73,5 @@ const S = {
     border: '1px solid var(--line)',
     background: 'var(--surface-2)',
     transition: 'border-radius .18s, background .22s',
-  },
-  historyOn: {
-    color: 'var(--accent)',
-    borderColor: 'var(--accent)',
-    background: 'var(--accent-soft)',
   },
 }

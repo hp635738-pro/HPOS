@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
-  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost, Sparkle, Bot,
+  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
@@ -17,15 +17,6 @@ export const NAV = [
   { id: 'schedule',  label: 'Analyzing',      Icon: Analyzing },
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
-  {
-    id: 'aianalyz',
-    label: 'AI tools',
-    Icon: Sparkle,
-  children: [
-  { id: 'aiagents', label: 'AI chats', Icon: Bot },
-  { id: 'codearena', label: 'Code Arena', Icon: Bot },
-],
-  },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
   { id: 'assistant', label: 'Assistant',      Icon: Ghost },
   { id: 'star',      label: 'Favourites',     Icon: Star },
@@ -58,7 +49,7 @@ export default function Sidebar({ active, onChange }) {
 
   const pinned = prefs.navPinned || []
   const locked = prefs.navLocked || []
-  const expanded = prefs.navExpanded || ['aianalyz']
+  const expanded = prefs.navExpanded || []
 
   // Pinned items float to the top, keeping their relative order.
   const items = useMemo(() => {
@@ -85,7 +76,7 @@ export default function Sidebar({ active, onChange }) {
   // Persist expanded state on mount so default-open stays across reloads.
   useEffect(() => {
     if (!Array.isArray(prefs.navExpanded)) {
-      set('navExpanded', ['aianalyz'])
+      set('navExpanded', [])
     }
   }, [])
 
@@ -110,7 +101,7 @@ export default function Sidebar({ active, onChange }) {
   }
 
   const toggleExpanded = (id) => {
-    const list = prefs.navExpanded || ['aianalyz']
+    const list = prefs.navExpanded || []
     set('navExpanded', list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
   }
 
@@ -372,7 +363,7 @@ export default function Sidebar({ active, onChange }) {
                 className="ctx-item"
                 style={S.menuBtn}
                 onClick={() => {
-                  set('navOrder', null); set('navPinned', []); set('navLocked', []); set('navExpanded', ['aianalyz'])
+                  set('navOrder', null); set('navPinned', []); set('navLocked', []); set('navExpanded', [])
                   setMenu(null)
                 }}
               >

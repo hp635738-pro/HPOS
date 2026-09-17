@@ -129,7 +129,7 @@ for (const [pal, label] of [[LIGHT_TOKENS, 'light'], [DARK_TOKENS, 'dark']]) {
     'src/components/BackupPanel.jsx',
     'src/components/ColourPicker.jsx',
     'src/components/ComponentPanel.jsx',
-    'src/components/chat/RuntimeDetailsPanel.jsx',
+    'src/components/RuntimeDetailsPanel.jsx',
     'src/components/ui/Kit.jsx',
     'src/components/ui/Toast.jsx',
   ]

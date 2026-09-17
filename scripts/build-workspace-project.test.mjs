@@ -76,7 +76,7 @@ let manifest
   assert.equal(result.outputDir, out, 'output dir must be the requested one')
   assert.equal(result.entrypoint, SERVED_ENTRYPOINT, 'served entrypoint must be index.html')
   assert.equal(result.preservedViteEntry, PRESERVED_VITE_ENTRY, 'Vite entry must be preserved as vite-index.html')
-  assert.ok(result.files >= 150, 'the real project payload must carry the project, got ' + result.files + ' files')
+  assert.ok(result.files >= 130, 'the real project payload must carry the project, got ' + result.files + ' files')
   assert.ok(result.bytes > 500 * 1024, 'payload must be the real source tree, got ' + result.bytes + ' bytes')
 
   payload = out
@@ -101,11 +101,10 @@ let manifest
     // React frontend
     'src/main.jsx', 'src/App.jsx', 'src/index.css',
     'src/theme/tokens.js', 'src/theme/ThemeContext.jsx',
-    'src/pages/CodeArena.jsx', 'src/pages/CodeArena.html', 'src/pages/ChatPage.jsx', 'src/pages/Settings.jsx',
+    'src/pages/CodeArena.html', 'src/pages/Settings.jsx',
     'src/components/Sidebar.jsx', 'src/components/AdvancedEditor.jsx', 'src/components/FilesWorkspace.jsx',
-    'src/components/ui/Kit.jsx', 'src/components/chat/MessageComposer.jsx',
-    'src/lib/colour.js', 'src/lib/bridge/DeepSeekConnector.js', 'src/lib/bridge/LocalRuntimeBridge.js',
-    'src/lib/storage/conversationStore.js', 'src/lib/chat/history.js',
+    'src/components/ui/Kit.jsx', 'src/components/Topbar.jsx',
+    'src/lib/colour.js', 'src/lib/longPress.js', 'src/lib/bridge/LocalRuntimeBridge.js',
     // Electron shell (the HPOS-Desktop project itself)
     'HPOS-Desktop/main.js', 'HPOS-Desktop/preload.js', 'HPOS-Desktop/package.json',
     'HPOS-Desktop/workspaceRoot.js', 'HPOS-Desktop/workspaceSeed.js', 'HPOS-Desktop/terminalSession.js',
@@ -113,7 +112,7 @@ let manifest
     // runtime (packaged read-only next to the workspace)
     'runtime/package.json', 'runtime/README.md', 'runtime/daemon.js', 'runtime/bin/hpos-runtime.js',
     'runtime/supervisor.js', 'runtime/tasks.js', 'runtime/workspace.js',
-    'runtime/linux/backend.js', 'runtime/linux/capabilities.js',
+    'runtime/executors.js', 'runtime/executors/services.js',
     'runtime/browser/providers/deepseek/index.js',
     // browser extension + backend service
     'extension/manifest.json', 'extension/background.js', 'extension/adapters/deepseek.js',
@@ -217,7 +216,7 @@ let manifest
   }
 
   assert.deepEqual(drifted, [], 'payload files must be byte-identical copies of the repository')
-  assert.ok(checked >= 150, 'parity must be checked across the whole payload, checked ' + checked)
+  assert.ok(checked >= 130, 'parity must be checked across the whole payload, checked ' + checked)
 
   console.log('ok: ' + checked + ' payload files are byte-identical to the repository')
 }

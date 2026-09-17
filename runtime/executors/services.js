@@ -12,7 +12,6 @@ import { EXECUTOR } from '../executors.js'
 
 export const SERVICE = Object.freeze({
   STUB: 'stub',
-  LINUX_STUB: 'linux-stub',
   DEEPSEEK_BROWSER: 'browser.deepseek',
 })
 
@@ -23,7 +22,6 @@ export const EXEC_MODE = Object.freeze({
   FAIL: 'fail',
   INSPECT_ENV: 'inspect-env',
   INSPECT_WORKSPACE: 'inspect-workspace',
-  INSPECT_LINUX: 'inspect-linux',
   FLOOD: 'flood',
   BROWSER_PROVIDER: 'browser-provider',
 })
@@ -35,14 +33,6 @@ export const SERVICES = Object.freeze({
     name: SERVICE.STUB,
     description: 'Lifecycle stub — runs a supervised child for durationMs, no side effects',
     executor: EXECUTOR.NATIVE,
-    execMode: EXEC_MODE.SLEEP,
-    idleMode: EXEC_MODE.NOOP,
-    maxActive: null,
-  }),
-  [SERVICE.LINUX_STUB]: Object.freeze({
-    name: SERVICE.LINUX_STUB,
-    description: 'Linux backend boundary stub — a supervised child with no side effects',
-    executor: EXECUTOR.LINUX,
     execMode: EXEC_MODE.SLEEP,
     idleMode: EXEC_MODE.NOOP,
     maxActive: null,

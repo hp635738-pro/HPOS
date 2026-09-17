@@ -1,6 +1,6 @@
 import { useRuntimeActivity } from '../lib/bridge/useRuntimeActivity.js'
 import { RUNTIME_CONNECTION_STATE } from '../lib/bridge/runtimeConnection.js'
-import { useLongPress } from '../lib/chat/useLongPress.js'
+import { useLongPress } from '../lib/useLongPress.js'
 import RunningCat from './RunningCat'
 
 const CONN_COPY = {
