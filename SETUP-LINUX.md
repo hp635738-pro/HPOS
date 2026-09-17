@@ -182,7 +182,34 @@ delete nahi hoti (`~/.config/HPOS/` aur `~/.hpos/runtime` bachi rehti hain).
 
 ---
 
-## 6. Windows installer Linux pe banana ho toh (optional)
+## 6. App ko update karna — Settings → App → "Update from GitHub" (naya!)
+
+Jab repo (`hp635738-pro/HPOS`) mein naye changes aa jayein, aapko kuch
+manually karne ki zarurat **nahi** — app ke andar hi update button hai:
+
+1. HPOS desktop app kholo → **Settings (gear icon)** → **App** section
+2. **"Update from GitHub"** panel mein **Update** button dabao
+3. Bas. App khud ye sab karta hai, live progress ke saath:
+   - `origin/main` check (naya update hai ya nahi)
+   - Fast-forward pull (aapke uncommitted changes honge toh **safe refuse** —
+     pehle commit kar lo)
+   - `package.json` badla ho toh `npm install`
+   - Frontend sources badli hain toh `npm run build:prod`
+   - Ant mein jo zaruri ho: windows reload **ya** poori app restart
+
+Aapke is doubt ka jawab — *"code local par laane se app mein badlav hoga ya
+nahi?"* — button isi liye bana hai: pull ke baad changed files dekh kar app
+**khud decide karta hai** ki install/build/restart kya chahiye, aur naya code
+running app mein apply ho jata hai. Kuch manually nahi karna padta.
+
+> Ye button dev-shell (repo se chalane) ke liye hai. AppImage/deb install mein
+> panel hidden hai — wahan app updates **Check for Updates** (Releases) se
+> aate hain. Code Arena ke andar workspace pull wala button pehle se hai —
+> ye Settings wala uska app-updating bada bhai hai.
+
+---
+
+## 7. Windows installer Linux pe banana ho toh (optional)
 
 electron-builder Linux se NSIS `.exe` cross-build kar sakta hai, par uske liye
 **Wine** chahiye hota hai — practical nahi. Better hai Windows installer apne
@@ -190,7 +217,7 @@ Windows machine pe banao (`npm run dist:win`) ya CI use karo.
 
 ---
 
-## 7. Zaroori paths aur env vars
+## 8. Zaroori paths aur env vars
 
 | Cheez | Value |
 |---|---|
@@ -204,7 +231,7 @@ App ki prefs file: `~/.config/HPOS/hpos-prefs.json` (themes, sidebar order, etc.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 **`AppImages require FUSE to run`**
 ```bash
@@ -260,7 +287,7 @@ npm install
 
 ---
 
-## 9. Tests chalana (sab kuch verify karo)
+## 10. Tests chalana (sab kuch verify karo)
 
 ```bash
 npm test          # 551+ assertions — packaging, bridge, runtime, terminal, themes
@@ -284,3 +311,6 @@ npm run build:prod && npx electron HPOS-Desktop   # desktop window
 npm run dist:linux                # AppImage + deb banao
 sudo apt install ./release/hpos_0.1.0_amd64.deb   # system mein install
 ```
+
+App update? App ke andar **Settings → App → Update from GitHub → Update** —
+bas ek click (section 6 dekho).

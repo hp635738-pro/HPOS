@@ -157,6 +157,17 @@ that instead of shipping a demo:
   `npm run workspace:project` to inspect the exact payload a packaged build ships
 - Prod: `dist/index.html` via `app.getAppPath()`, runtime auto-started, no terminal required, no blank screen, Code Arena not main
 
+**One-click update (Settings → App → "Update from GitHub"):**
+- Dev-shell feature: ek button press → check `origin/main` → fast-forward pull →
+  `npm install` (agar dependency files badle) → `npm run build:prod` (agar
+  frontend sources badle aur Vite dev server serve nahi kar raha) → window
+  reload ya poori app ka restart — jo bhi changed files maange
+- Pull path exactly wahi hai jo Code Arena Pull use karta hai (gitBridge.js):
+  dirty workspace refuse (`ELOCALCHANGES`), divergence refuse, force kabhi nahi
+- Renderer koi argument nahi bhejta — flow fixed hai (`appUpdate.js`),
+  progress events se dikhta hai; packaged installs pe panel hidden hai
+  (wahan Releases updater — Check for Updates — app shell update karta hai)
+
 **Windows installer behavior / limitations:**
 - Assisted (non-one-click) NSIS installer, per-user by default (no admin required
   unless an all-users location is chosen), custom install directory allowed

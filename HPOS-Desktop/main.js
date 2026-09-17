@@ -584,6 +584,7 @@ function readAppInfo() {
    No reset, checkout, clean, stash, rebase or remote set-url is
    reachable from this bridge. */
 const { createGitBridge } = require('./gitBridge')
+const { createAppUpdateService } = require('./appUpdate')
 
 const CHANNEL_GIT_STATUS = 'hpos:git:status'
 const CHANNEL_GIT_COMMIT = 'hpos:git:commit'
@@ -596,6 +597,51 @@ const gitBridge = createGitBridge({
   workspaceRoot: WORKSPACE_ROOT,
   resolveProjectPath: function (name) {
     return resolveInProject(name)
+  },
+})
+
+/* --------------------------------------------------- one-click GitHub update
+   Settings → App → "Update from GitHub". Reuses the hardened gitBridge pull
+   (fetch origin/main + fast-forward-only, dirty workspaces refused) and then
+   applies the pulled changes to the RUNNING app: npm install when dependency
+   files changed, a production frontend build when sources changed (skipped
+   under a Vite dev URL), then a window reload or a full app relaunch —
+   planned purely from the changed-file list (appUpdate.js). The renderer
+   sends no arguments and no renderer-controlled string reaches any command. */
+const appUpdateService = createAppUpdateService({
+  gitBridge: gitBridge,
+  workspaceRoot: WORKSPACE_ROOT,
+  isPackaged: app.isPackaged,
+  devUrl: getDevUrl(),
+  onEvent: function (payload) {
+    // Same broadcast contract as the updater events: every live window may
+    // be showing the Settings → App panel.
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (win.isDestroyed()) continue
+        const wc = win.webContents
+        if (!wc || wc.isDestroyed()) continue
+        wc.send('hpos:app-update:event', payload)
+      } catch {
+        // Window destroyed between checks — skip.
+      }
+    }
+  },
+  reloadWindows: function () {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (win.isDestroyed()) continue
+        const wc = win.webContents
+        if (!wc || wc.isDestroyed()) continue
+        wc.reload()
+      } catch {
+        // Window destroyed between checks — skip.
+      }
+    }
+  },
+  relaunchApp: function () {
+    app.relaunch()
+    app.exit(0)
   },
 })
 
@@ -747,6 +793,12 @@ function registerFsBridge() {
   ipcMain.handle(CHANNEL_GIT_CONNECT, (event) => {
     if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
     return gitBridge.connectWorkspace()
+  })
+
+  ipcMain.handle('hpos:app-update:run', (event) => {
+    if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+    /* No arguments: the one-click update flow is fixed (appUpdate.js). */
+    return appUpdateService.run()
   })
 
   ipcMain.handle('hpos:open-code-arena', (event) => {

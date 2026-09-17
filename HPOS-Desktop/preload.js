@@ -80,13 +80,16 @@ const CHANNEL_GIT_PUSH = 'hpos:git:push'
 const CHANNEL_GIT_PULL_CHECK = 'hpos:git:pull-check'
 const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
 const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
-
+const CHANNEL_APP_UPDATE_RUN = 'hpos:app-update:run'
+const CHANNEL_APP_UPDATE_EVENT = 'hpos:app-update:event'
+ 
 /* Terminal output subscriptions. The renderer hands us a callback; we keep a
    stable listener per callback so offTerminalData can remove exactly the one
    it added. */
 const terminalListeners = new Map()
 const devLaunchListeners = new Map()
 const updaterListeners = new Map()
+const appUpdateListeners = new Map()
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -316,6 +319,32 @@ contextBridge.exposeInMainWorld('hpos', {
    */
   gitConnectWorkspace() {
     return ipcRenderer.invoke(CHANNEL_GIT_CONNECT)
+  },
+
+  /**
+   * One-click "Update from GitHub" (Settings → App): check origin/main,
+   * fast-forward, install/build whatever the changed files require, then
+   * reload or restart the app. Takes NO arguments — the flow is fixed in
+   * the main process; progress arrives via onAppUpdateEvent.
+   */
+  appUpdateRun() {
+    return ipcRenderer.invoke(CHANNEL_APP_UPDATE_RUN)
+  },
+
+  /** Subscribe to update progress events (phase/plan/done payloads). */
+  onAppUpdateEvent(callback) {
+    if (typeof callback !== 'function') return
+    const listener = (_event, data) => callback(data)
+    appUpdateListeners.set(callback, listener)
+    ipcRenderer.on(CHANNEL_APP_UPDATE_EVENT, listener)
+  },
+
+  /** Unsubscribe a previously registered update event callback. */
+  offAppUpdateEvent(callback) {
+    const listener = appUpdateListeners.get(callback)
+    if (!listener) return
+    ipcRenderer.removeListener(CHANNEL_APP_UPDATE_EVENT, listener)
+    appUpdateListeners.delete(callback)
   },
 
   /**
