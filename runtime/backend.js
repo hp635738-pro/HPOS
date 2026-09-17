@@ -5,8 +5,7 @@
  * registry resolves a service to an executor name; the router resolves that name
  * to a backend object implementing the small internal interface
  * (detectCapabilities / isAvailable / plan / run / stop / getStatus). Neither
- * side knows anything about the other's specifics, and neither knows what Linux
- * *is* — that lives in ./linux/.
+ * side knows anything about the other's specifics.
  *
  *   registry ──executor name──▶ router ──▶ backend ──┐
  *                                                     ├─▶ the one shared supervisor
@@ -19,18 +18,15 @@
  *     around the existing supervisor call, and it deliberately passes *no*
  *     `backend` to `supervisor.start()`, so a Step 1–4 task follows the exact
  *     same code path it did before this file existed.
- *   - **An unavailable executor is a refusal, not a fallback.** A Linux task is
- *     never quietly downgraded to native execution: that would let a caller get
- *     *some* process where the answer should be "no".
+ *   - **An unavailable executor is a refusal, not a fallback.** A task on an
+ *     executor with no usable backend here is refused outright: a caller never
+ *     gets *some* process where the answer should be "no".
  *
  * No dependencies, Node 18+.
  */
 
 import { ERROR, rtError } from './protocol.js'
 import { EXECUTOR } from './executors.js'
-import { createLinuxBackend, LINUX_BACKEND_NAME } from './linux/backend.js'
-
-export { createLinuxBackend, LINUX_BACKEND_NAME }
 
 /**
  * The native (Steps 1–4) backend, expressed in the same interface as any other.
@@ -196,17 +192,6 @@ export function createBackendRouter({ backends = [], log = null } = {}) {
     return out
   }
 
-  /** The Linux section of RT_STATUS — the safe projection, or null. */
-  function linuxCapabilities() {
-    const backend = table.get(LINUX_BACKEND_NAME)
-    if (!backend || typeof backend.detectCapabilities !== 'function') return null
-    try {
-      return backend.detectCapabilities()
-    } catch {
-      return null
-    }
-  }
-
   /** Registered services per executor, for RT_STATUS/UI copy. */
   function servicesFor(executor) {
     const backend = table.get(executor)
@@ -228,7 +213,6 @@ export function createBackendRouter({ backends = [], log = null } = {}) {
     run,
     stop,
     statusAll,
-    linuxCapabilities,
     servicesFor,
     /** Executors this router can ever name — closed set, from the registry. */
     knownExecutors: () => [...Object.values(EXECUTOR)],

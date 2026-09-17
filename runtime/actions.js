@@ -25,7 +25,6 @@ import { isValidTaskId, MAX_DURATION_MS, DEFAULT_DURATION_MS } from './tasks.js'
 import { LIMIT_DEFAULTS, isPublicTimeoutAllowed, summarizeCapabilities } from './limits.js'
 import { BROWSER_TASK_LIMITS, cleanPrompt, isCorrelationId } from './browser/contracts.js'
 import { SERVICE } from './executors/services.js'
-import { publicLinuxCapabilities } from './linux/capabilities.js'
 
 export const ACTION = {
   PING: 'PING',
@@ -137,11 +136,8 @@ function pickStatusPayload(payload) {
  * Build the RPC dispatcher. `tasks` is the task registry; `startedAt` and
  * `log` are for status/diagnostics; `limits`/`capabilities` describe what the
  * executor will and will not enforce, so a client can see the real bounds
- * before it asks for a task. `linux` (Step 5) is the host's Linux execution
- * capability record — it is re-projected through publicLinuxCapabilities(), so
- * this response can only ever carry the safe field set even if the caller hands
- * over something else. Returns handleRpc(envelope) → response envelope (never
- * throws).
+ * before it asks for a task. Returns handleRpc(envelope) → response envelope
+ * (never throws).
  */
 export function createRpcHandler({
   tasks,
@@ -149,9 +145,7 @@ export function createRpcHandler({
   log,
   limits,
   capabilities = null,
-  linux = null,
 } = {}) {
-  const linuxStatus = linux ? publicLinuxCapabilities(linux) : null
   const warn = log && log.warn ? (event, meta) => log.warn(event, meta) : () => {}
   const bounds = limits || (tasks && tasks.limits) || LIMIT_DEFAULTS
 
@@ -207,20 +201,6 @@ export function createRpcHandler({
         capabilities,
       }
       if (capabilities) out.capabilityNotes = summarizeCapabilities(capabilities)
-      /* Step 8 of M1: the Linux section is a capability report, not a control
-         surface. `available: false` with a reason is a complete, healthy answer. */
-      if (linuxStatus) {
-        out.linux = linuxStatus
-        out.executor.backends = {
-          native: { available: true, executor: 'native' },
-          linux: {
-            available: linuxStatus.available,
-            executor: linuxStatus.executor,
-            support: linuxStatus.support,
-            reason: linuxStatus.reason,
-          },
-        }
-      }
       if (taskId) {
         const task = tasks.get(taskId)
         if (!task) throw rtError(ERROR.TASK_NOT_FOUND, `Unknown taskId: ${taskId}`)

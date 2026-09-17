@@ -21,7 +21,7 @@ npm run build       # production build -> dist/
 npm run build:prod  # same as build, explicit prod naming for packaging
 npm run preview     # build ko locally serve karo
 npm run lint        # oxlint
-npm test            # all packaging/path + bridge + storage + chat tests
+npm test            # all packaging/path + runtime-bridge + theme tests
 ```
 
 ### Production packaging (Windows)
@@ -66,7 +66,7 @@ npm run build:prod
 - `dist/` – Vite-built React frontend (inside app.asar, loaded via `app.getAppPath()`)
 - `src/pages/CodeArena.html` – standalone Code Arena shell (secondary window, not main)
 - `runtime/` – read-only runtime via `extraResources` → `resources/runtime`
-  - Includes `bin/hpos-runtime.js`, daemon, executors, browser provider, linux backend
+  - Includes `bin/hpos-runtime.js`, daemon, executors, browser provider
   - `runtime/node_modules/playwright-core` is included once `cd runtime && npm install`
     has run (tests inside `runtime/` are filtered out)
   - Writes only to `~/.hpos/runtime` (state dir, `HPOS_RUNTIME_HOME`), never to app resources
@@ -253,10 +253,11 @@ workspace-root boundaries enforced everywhere; regression tests in
 `HPOS-Desktop/*.test.mjs` pin each contract.
 
 
-Browser bridge + DeepSeek connector — Chrome/Edge extension load karne ke steps `BRIDGE.md` mein hain.
-
-Conversations local `localStorage` mein persist hoti hain — koi cloud sync ya
-DeepSeek API nahi; Step 6 execution localhost runtime ke through hota hai.
+Note: the web-side AI chat pages (AI chats / Code Arena entry points), their
+bridge client and the local conversation store have been removed from the app.
+The `extension/` browser extension and the runtime's fixed
+`browser.deepseek` provider remain in the repository for compatibility —
+`BRIDGE.md` documents that remaining surface.
 
 ### Local runtime + browser DeepSeek (Step 6)
 
@@ -277,11 +278,11 @@ chromium --remote-debugging-port=9222 \
   --user-data-dir="$HOME/.hpos/deepseek-browser"
 ```
 
-HPOS Chat submits the fixed `browser.deepseek` service to the runtime; it does
-not use the extension Browser Bridge as its primary execution path. The runtime
-never receives browser credentials/session data, never reads cookies/storage,
-and never retries a prompt after an uncertain send, timeout, disconnect or
-restart. See `runtime/README.md` for browser variants, lifecycle and security.
+The `browser.deepseek` service is a fixed, source-registered route: the
+runtime never receives browser credentials/session data, never reads
+cookies/storage, and never retries a prompt after an uncertain send, timeout,
+disconnect or restart. See `runtime/README.md` for browser variants, lifecycle
+and security.
 
 With `npm run dev` running from the project root, the browser uses the fixed
 same-origin routes `/hpos-runtime/health`, `/hpos-runtime/rpc` and (Step 4)
@@ -291,27 +292,11 @@ server-side. `LocalRuntimeBridge` never receives, stores, or sends that
 credential. `Runtime connected` means authenticated `PING` and `RT_STATUS` both
 succeeded; `/health` is liveness only.
 
-Step 5 adds the **Linux execution backend foundation**: an internal,
-capability-driven executor layer, not a desktop environment. A task runs on
-Linux only when its *service* is registered on the Linux executor
-(`runtime/executors.js`), and that executor exists only when
-`runtime/linux/capabilities.js` finds an implemented backend adapter — on a
-Linux host that is `host-linux` (reported as `support: "partial"`, because M1
-enforces no namespaces or privilege drop); on Windows or macOS the runtime
-simply reports `available: false` with a reason, keeps working, and installs
-nothing (no WSL, Docker or VM workflow exists or is offered). The one registered
-Linux service is `linux-stub`, whose child does nothing. `RT_STATUS` includes a
-safe `linux` section and Runtime Activity includes a `Linux` capability row.
-Planned Linux services for Python, FFmpeg, Git and a future Linux DeepSeek route
-remain non-runnable placeholders; the Step 6 `browser.deepseek` service is a
-separate fixed, native supervised provider path. Details: `runtime/linux/README.md`.
-
-The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`) over
-SSE, including `GENERATING`/`STREAMING` and the bounded final assistant response
-for Chat. Holding the header runtime status container opens the full-panel
+The runtime publishes allowlisted lifecycle events (`runtime.*`, `task.*`)
+over SSE. Holding the header runtime status container opens the full-panel
 **Runtime details** view: connection/stream state, running tasks with Stop,
-Linux executor labels, bounded recent tasks, counters, and safe process
-metrics; it deliberately discards chat output and remains **not a terminal**.
+bounded recent tasks, counters, and safe process metrics; it is observability
+only and remains **not a terminal**.
 Event history is a bounded in-memory ring (never written to disk), and there
 is no arbitrary task, browser, command or shell UI.
 
@@ -319,9 +304,9 @@ Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
 
 ```bash
-npm test        # bridge, runtime-connection, runtime-event-stream, runtime-activity,
-                # linux-capability state, proxy and storage checks (root)
-                # + `cd runtime && npm test` (includes the Step 5 linux suites)
+npm test        # packaging/path + runtime-bridge (protocol, connection, events,
+                # activity), proxy and theme checks (root)
+                # + `cd runtime && npm test` (runtime daemon suites)
 ```
 
 ---
@@ -329,7 +314,7 @@ npm test        # bridge, runtime-connection, runtime-event-stream, runtime-acti
 ## Kya bana hua hai
 
 ### Shell
-- Sidebar — 8 pages, drag-to-reorder, right-click se pin/lock, collapse mode
+- Sidebar — 7 pages, drag-to-reorder, right-click se pin/lock, collapse mode
 - Header — page title, Wide Notch (Settings/File pill), theme toggle
 - Pages abhi blank hain, content ka intezaar
 
@@ -363,9 +348,8 @@ src/
 │
 ├── lib/
 │   ├── colour.js           hex/rgb/hsv/hsl, contrast, harmony
-│   ├── chat/               message factory + conversation hook
-│   ├── storage/            local conversation store (Step 5)
-│   └── bridge/             BrowserBridge compatibility + runtime DeepSeek client
+│   ├── longPress.js        hold-to-open gesture (runtime status container)
+│   └── bridge/             local runtime bridge (protocol, connection, events, activity)
 │
 ├── pages/
 │   ├── Blank.jsx           empty canvas
@@ -431,69 +415,6 @@ resolved                      // 'light' ya 'dark' (system resolve ho ke)
 ```js
 { id: 'act:something', group: 'Actions', name: 'Do the thing', run: () => {} }
 ```
-
----
-
-## Conversations (Step 5)
-
-AI chat transcripts **local** persistent conversations hain. Koi cloud sync,
-DeepSeek API, ya AI title API nahi; browser execution localhost runtime own karta hai.
-
-### Storage
-
-- **Key:** `localStorage['hpos.conversations']`
-- **Schema version:** `1`
-- **Module:** `src/lib/storage/conversationStore.js` — UI is module ko use karti hai; components khud `localStorage` nahi chhuute.
-
-```json
-{
-  "version": 1,
-  "activeId": "c-…",
-  "conversations": [
-    {
-      "id": "c-…",
-      "title": "Explain quantum computing",
-      "createdAt": 1710000000000,
-      "updatedAt": 1710000000000,
-      "provider": "deepseek",
-      "messages": [
-        { "id": "m-…", "role": "user", "content": "…", "ts": 1710000000000, "status": "sent" }
-      ]
-    }
-  ]
-}
-```
-
-`ts` existing chat timestamp hai (`MessageBubble` usi ko use karta hai). Cookies, passwords, tokens persist **nahi** hote.
-
-Corrupt JSON / invalid records ignore ho jaate hain — app crash nahi karti, empty state dikhti hai. Future schema: `migrate()` `version` ke through chalta hai.
-
-### New chat
-
-Header ka standalone **New chat** naya conversation create karta hai (`title: "New chat"`, `provider: "deepseek"`), usko active karta hai, aur chat area empty state dikhata hai. Composer turant usable hai. Har click ek naya conversation banata hai — mount par auto-create nahi.
-
-Pehli meaningful user message se title **local** truncate hota hai (koi API nahi): `"Explain quantum computing"` → wahi title.
-
-### History sidebar
-
-Conversations right-side Chat History panel mein rehte hain (header ke History toggle se open/close): New Chat sabse upar, phir Today / Yesterday / Earlier groups. Row: title + subtle time. Selected row highlight. Hover par trash; confirm ke baad delete.
-
-Delete active conversation: remaining mein sabse recent active ho jaati hai. Last wali delete ho to “Start a new chat”.
-
-### Switch + refresh
-
-Conversation click → selected load, composer reset, messages mix nahi hote. Streaming deltas **usi** conversation id par patch hoti hain, visible chat chahe switch ho chuka ho.
-
-Refresh: conversations aur messages `localStorage` se wapas.
-
-Streaming: memory har delta par update, disk ~280ms debounce, complete par flush.
-
-### Limitations
-
-- Sirf is browser origin ka localStorage. Dusre device / profile par copy nahi.
-- DeepSeek tab/session persist nahi — sirf HPOS transcript.
-- `provider` abhi `"deepseek"` (future providers ke liye field reserved).
-- Title rename UI is step mein nahi.
 
 ---
 

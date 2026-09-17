@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { getRuntimeActivityController } from '../../lib/bridge/runtimeActivity.js'
-import { RUNTIME_CONNECTION_STATE } from '../../lib/bridge/runtimeConnection.js'
-import { RUNTIME_STREAM_STATE } from '../../lib/bridge/runtimeEvents.js'
-import { linuxStateLabel, linuxStateTone } from '../../lib/bridge/linuxStatus.js'
-import { Chevron } from '../Icons'
+import { getRuntimeActivityController } from '../lib/bridge/runtimeActivity.js'
+import { RUNTIME_CONNECTION_STATE } from '../lib/bridge/runtimeConnection.js'
+import { RUNTIME_STREAM_STATE } from '../lib/bridge/runtimeEvents.js'
+import { Chevron } from './Icons'
 
 const CONN_COPY = {
   [RUNTIME_CONNECTION_STATE.UNKNOWN]: 'Runtime unknown',
@@ -120,7 +119,6 @@ export default function RuntimeDetailsPanel({ onBack }) {
   const conn = snapshot.connection || {}
   const stream = snapshot.stream || {}
   const runtime = snapshot.runtime || {}
-  const linux = snapshot.linux || {}
   const metrics = snapshot.metrics || {}
   const counters = snapshot.counters || {}
   const running = snapshot.active || []
@@ -146,12 +144,12 @@ export default function RuntimeDetailsPanel({ onBack }) {
             type="button"
             onClick={onBack}
             className="hdr-action chat-focus"
-            title="Back to chat"
-            aria-label="Back to chat"
+            title="Back"
+            aria-label="Back"
             style={S.back}
           >
             <Chevron size={14} dir="left" />
-            <span>Back to chat</span>
+            <span>Back</span>
           </button>
           <h2 ref={headingRef} tabIndex={-1} style={S.title}>Runtime details</h2>
           <button
@@ -207,19 +205,6 @@ export default function RuntimeDetailsPanel({ onBack }) {
           </div>
         </div>
 
-        {/* Linux capability — a verdict, never a console. */}
-        <div style={S.card}>
-          <h3 style={S.secTitle}>Capability</h3>
-          <div style={S.capRow}>
-            <span style={{ ...S.dot, background: linuxStateTone(linux) }} aria-hidden="true" />
-            <span style={S.capName}>Linux</span>
-            <span style={S.capValue}>{linuxStateLabel(linux)}</span>
-            {linux.reason && (
-              <span style={S.tag} title={linux.reasonLabel || ''}>{linux.reason}</span>
-            )}
-          </div>
-        </div>
-
         {/* Running */}
         <div style={S.card}>
           <h3 style={S.secTitle}>
@@ -234,7 +219,6 @@ export default function RuntimeDetailsPanel({ onBack }) {
                 <div key={row.taskId} style={S.taskRow}>
                   <span style={S.taskName} title={row.taskId}>{shortId(row.taskId)}</span>
                   <span style={S.taskService}>{row.service}</span>
-                  {row.executor === 'linux' && <span style={S.execTag} title="ran on the Linux executor">linux</span>}
                   <span
                     className={row.status === 'GENERATING' || row.status === 'STREAMING' ? 'bridge-dot-pulse' : undefined}
                     style={S.statusChip(row.status === 'QUEUED' ? 'var(--warning)' : 'var(--success)')}
@@ -267,7 +251,6 @@ export default function RuntimeDetailsPanel({ onBack }) {
               <div key={`${row.taskId}-${row.status}`} style={S.taskRow}>
                 <span style={S.taskName} title={row.taskId}>{shortId(row.taskId)}</span>
                 <span style={S.taskService}>{row.service}</span>
-                {row.executor === 'linux' && <span style={S.execTag} title="ran on the Linux executor">linux</span>}
                 <span style={S.statusChip(RECENT_TONE[row.status] || 'var(--muted)')}>{row.status}</span>
               </div>
             ))
@@ -336,9 +319,6 @@ const S = {
     color: 'var(--danger)', fontSize: 11.5, margin: '10px 0 0',
     padding: '6px 10px', borderRadius: 7, background: 'var(--danger-soft)',
   },
-  capRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  capName: { fontSize: 12.5, fontWeight: 800 },
-  capValue: { fontSize: 12.5, fontWeight: 600, color: 'var(--text-2)' },
   empty: { color: 'var(--muted)', fontSize: 12 },
   taskRow: {
     display: 'flex', alignItems: 'center', gap: 8,
@@ -350,11 +330,6 @@ const S = {
     maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
   taskService: { fontSize: 11, color: 'var(--muted)', flexShrink: 0, textTransform: 'uppercase' },
-  execTag: {
-    fontSize: 10, fontWeight: 700, letterSpacing: '.2px',
-    color: 'var(--warning)', border: '1px solid currentColor',
-    borderRadius: 999, padding: '0 6px', flexShrink: 0,
-  },
   statusChip: (color) => ({
     fontSize: 10, fontWeight: 800, letterSpacing: '.3px',
     color, background: 'transparent', border: '1px solid currentColor',

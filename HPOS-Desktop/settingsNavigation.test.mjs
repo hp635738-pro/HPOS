@@ -191,55 +191,44 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   section('rail footer is Collapse-only (no Settings button)')
 }
 
-/* 3. the Topbar Settings button exists — unchanged, unique, always rendered */
-let settingsButton = ''
+/* 3. Settings entry point: the notch pill's Settings tool (the standalone
+   Topbar gear was removed) */
 {
-  const marker = 'data-testid="settings-button"'
-  const at = topbar.indexOf(marker)
-  if (assert.ok(at !== -1, 'Topbar renders the Settings button (data-testid="settings-button")')) {
-    assert.equal(topbar.split(marker).length - 1, 1, 'exactly one Settings button in the Topbar (no duplicate was added)')
-    settingsButton = topbar.slice(topbar.lastIndexOf('<button', at), topbar.indexOf('</button>', at))
-    assert.ok(settingsButton.includes('aria-label="Settings"'), 'the button is accessibly labelled')
-    assert.ok(settingsButton.includes('title="Settings"'), 'the button keeps its tooltip')
-    assert.ok(settingsButton.includes('type="button"'), 'the button is type=button (never submits)')
-    assert.ok(settingsButton.includes('<Gear'), 'the button keeps the Gear icon')
-    assert.ok(settingsButton.includes("active === 'settings'"), 'the button reflects the settings view (on-state)')
+  assert.ok(!topbar.includes('data-testid="settings-button"'), 'the standalone Topbar gear is gone')
+  assert.ok(!topbar.includes('<Gear'), 'the Topbar renders no gear icon')
+  assert.ok(topbar.includes('prefs.barShowNotch && <Notch'), 'the notch stays behind prefs.barShowNotch')
 
-    // Always reachable: it must not sit inside the notch visibility guard.
-    const notchGuard = topbar.indexOf('prefs.barShowNotch && <Notch')
-    if (assert.ok(notchGuard !== -1, 'the notch stays behind prefs.barShowNotch')) {
-      assert.ok(at > topbar.indexOf('/>', notchGuard), 'the Settings button renders independently of prefs.barShowNotch')
-    }
-  }
-
-  // Layout preserved: still exactly three header buttons (settings, history,
-  // theme) in the same right cluster — nothing new was inserted.
-  assert.equal(topbar.split('<button').length - 1, 3, 'Topbar still renders exactly 3 buttons (no new Settings button)')
+  // Layout: the only button left in the Topbar itself is the theme toggle —
+  // the removed gear was the other one (the status chip is a separate
+  // component, the history toggle went with the chat page).
+  assert.equal(topbar.split('<button').length - 1, 1, 'Topbar renders exactly 1 button (theme toggle)')
   assert.ok(topbar.includes('<div style={{ ...S.right, gap: prefs.barGap }}>'), 'right cluster markup unchanged')
   assert.ok(topbar.includes('<RuntimeStatus'), 'runtime status chip preserved')
   assert.equal(
     TOOLS.map((t) => t.id).join(','), 'settings,files',
-    'the notch pill keeps its pre-existing Settings + File tools (unchanged)',
+    'the notch pill keeps its pre-existing Settings + File tools',
   )
-  section('Topbar Settings button exists, unique, always rendered, layout preserved')
+  section('Settings entry point is the notch pill tool; standalone gear removed')
 }
 
-/* 4. clicking it triggers the correct Settings navigation (real handler run) */
+/* 4. clicking the notch Settings tool triggers the correct navigation (real handler run) */
 {
-  const m = settingsButton.match(/onClick=\{(\(\) => [^\n]*)\}/)
-  if (assert.ok(!!m, 'the Settings button has an onClick handler')) {
+  const m = notch.match(/onClick=\{\(\) => ([^\n]*)\}/)
+  if (assert.ok(!!m, 'the notch tool has an onClick handler')) {
     const handlerSrc = m[1].trim()
     assert.equal(
-      handlerSrc, "() => onNavigate?.('settings')",
-      'the handler is the fixed navigation call (no URLs, no IPC, no dynamic view id)',
+      handlerSrc, 'onNavigate?.(id)',
+      'the handler is the shared navigation call (no URLs, no IPC, no dynamic view id)',
     )
     try {
       const calls = []
-      const handler = new Function('onNavigate', `return (${handlerSrc})`)((view) => calls.push(view))
+      const handler = new Function('onNavigate', 'id', `return (() => ${handlerSrc})`)(
+        (view) => calls.push(view), 'settings',
+      )
       handler()
-      assert.deepEqual(calls, ['settings'], "clicking the Topbar gear navigates to 'settings' exactly once")
+      assert.deepEqual(calls, ['settings'], "clicking the notch Settings tool navigates to 'settings' exactly once")
     } catch (err) {
-      assert.ok(false, `the Topbar Settings handler executes: ${err.message}`)
+      assert.ok(false, `the notch Settings handler executes: ${err.message}`)
     }
   }
 
@@ -249,7 +238,7 @@ let settingsButton = ''
       .test(topbar),
     'Topbar navigates only through the onNavigate prop',
   )
-  section("Topbar Settings button executes onNavigate('settings')")
+  section("Settings entry executes onNavigate('settings') via the notch tool")
 }
 
 /* 5. App wiring: the header owns the settings view (real expressions run) */
@@ -288,8 +277,8 @@ let settingsButton = ''
       const inRail = new Function('view', 'allNav', `return (${inRailMatch[1]})`)
       const hostileNav = [...allNav, { id: 'settings', label: 'Settings', Icon: 'Gear' }]
       assert.equal(inRail('settings', hostileNav), false, "inRail('settings') is false even if a rail item named settings is re-added")
-      assert.equal(inRail('aiagents', allNav), true, 'nested rail pages (AI chats) stay rail pages')
-      assert.equal(inRail('codearena', allNav), true, 'Code Arena stays a rail page')
+      assert.equal(inRail('aiagents', allNav), false, 'the AI chats view is no longer a rail page (removed)')
+      assert.equal(inRail('codearena', allNav), false, 'Code Arena is no longer a rail page (removed)')
       assert.equal(inRail('overview', allNav), true, 'top-level rail pages stay rail pages')
       assert.equal(inRail('bogus', allNav), false, 'unknown views are not rail pages')
     } catch (err) {
@@ -309,7 +298,7 @@ let settingsButton = ''
     try {
       const titleOf = new Function('view', 'allNav', 'TOOLS', `return (${titleMatch[1]})`)
       assert.equal(titleOf('settings', allNav, TOOLS), 'Settings', 'header title for the settings view is "Settings"')
-      assert.equal(titleOf('aiagents', allNav, TOOLS), 'AI chats', 'rail page titles are unchanged')
+      assert.equal(titleOf('overview', allNav, TOOLS), 'Input terminal', 'rail page titles are unchanged')
     } catch (err) {
       assert.ok(false, `title expression executes: ${err.message}`)
     }
@@ -378,19 +367,20 @@ let settingsButton = ''
   ]) {
     assert.ok(!re.test(sidebar), `Sidebar introduces no ${re} surface`)
   }
-  // Same rail view ids as before, minus settings: no route was invented.
+  // Rail view ids minus the removed settings entry and the removed AI
+  // section (AI tools / AI chats / Code Arena): no route was invented.
   assert.deepEqual(
     flatNav().map((n) => n.id),
-    ['overview', 'schedule', 'cards', 'reports', 'aianalyz', 'aiagents', 'codearena', 'messages', 'assistant', 'star'],
-    'rail view ids are unchanged apart from the removed settings entry',
+    ['overview', 'schedule', 'cards', 'reports', 'messages', 'assistant', 'star'],
+    'rail view ids are unchanged apart from the removed settings entry and AI section',
   )
   assert.ok(
     appJsx.includes("if (view === 'files') {") && appJsx.includes('<FilesWorkspace'),
     'unrelated navigation (files workspace) untouched',
   )
   assert.ok(
-    appJsx.includes("view === 'aiagents'") && appJsx.includes("view === 'codearena'"),
-    'chat / Code Arena routing untouched',
+    !appJsx.includes("view === 'aiagents'") && !appJsx.includes("view === 'codearena'"),
+    'chat / Code Arena routing is gone with the AI section',
   )
   section('navigation architecture and renderer security preserved (fixed literal view id only)')
 }

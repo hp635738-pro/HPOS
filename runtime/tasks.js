@@ -30,14 +30,13 @@
  * allowlisted before an event exists. Without a bus everything behaves exactly
  * as before; publishing failures are logged, never thrown.
  *
- * Executors (M1 — Step 5): a service declares which execution backend it runs on
+ * Executors: a service declares which execution backend it runs on
  * (`executor`, from the closed set in executors.js). When the registry is handed
  * a `backends` router it resolves service → executor → backend and launches
- * through that backend; otherwise it calls the supervisor exactly as it did in
- * Steps 1–4. The registry never learns what a Linux plan contains — only that a
- * backend was selected, is available, and returned the same `started` shape.
- * An unavailable executor is a refusal at enqueue time; a task is never silently
- * downgraded onto the native backend.
+ * through that backend; otherwise it calls the supervisor directly. The
+ * registry never learns what a backend plan contains — only that a backend was
+ * selected, is available, and returned the same `started` shape. An unavailable
+ * executor is a refusal at enqueue time; a task is never silently downgraded.
  *
  * No dependencies, Node 18+.
  */
@@ -69,8 +68,8 @@ const TERMINAL_STATES = new Set([TASK_STATE.COMPLETE, TASK_STATE.CANCELLED, TASK
 const TASK_ID_RE = /^task-[A-Za-z0-9._:-]{8,72}$/
 
 /** Service and mode allowlists live in executors/services.js. They include the
- * Step 5 Linux boundary stub and the fixed Step 6 browser provider route, and
- * are re-exported below for existing runtime consumers and tests. */
+ * lifecycle stub and the fixed browser provider route, and are re-exported
+ * below for existing runtime consumers and tests. */
 
 const MAX_TASKS_HELD = 512
 const DEFAULT_DURATION_MS = 50

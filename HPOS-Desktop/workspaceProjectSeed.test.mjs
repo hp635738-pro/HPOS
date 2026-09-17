@@ -128,7 +128,7 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   assert.equal(result.seeded, true, 'the empty workspace must be seeded')
   assert.equal(result.source, PROJECT_SOURCE, 'the real project payload must win over the starter demo')
   assert.equal(result.entrypoint, WORKSPACE_ENTRYPOINT, 'the seeded workspace must have a served entrypoint')
-  assert.ok(result.copied.length >= 150, 'the whole project must be seeded, got ' + result.copied.length)
+  assert.ok(result.copied.length >= 130, 'the whole project must be seeded, got ' + result.copied.length)
   assert.deepEqual(result.errors, [], 'no file may fail to seed')
 
   const seeded = listFiles(workspace)
@@ -138,7 +138,7 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   // The expected production project files are really there.
   for (const rel of [
     'package.json', 'README.md', 'vite.config.js',
-    'src/main.jsx', 'src/App.jsx', 'src/theme/ThemeContext.jsx', 'src/pages/CodeArena.jsx',
+    'src/main.jsx', 'src/App.jsx', 'src/theme/ThemeContext.jsx', 'src/components/Topbar.jsx',
     'HPOS-Desktop/main.js', 'HPOS-Desktop/preload.js', 'HPOS-Desktop/workspaceSeed.js',
     'runtime/daemon.js', 'runtime/bin/hpos-runtime.js',
     'extension/manifest.json', 'server/index.js', 'public/icon.ico',
@@ -326,7 +326,7 @@ function tempWorkspace(prefix = 'hpos-wsp-seed-') {
   assert.ok(!readFileSync(join(workspace, SERVED_ENTRYPOINT), 'utf8').includes('HPOS Code Arena'), 'the migrated entrypoint must not be the Code Arena shell')
   assert.ok(existsSync(join(workspace, 'src/App.jsx')), 'the real project source is present')
   assert.ok(existsSync(join(workspace, 'runtime/bin/hpos-runtime.js')), 'the runtime source is present')
-  assert.ok(listFiles(workspace).length >= 150, 'the whole project must be present')
+  assert.ok(listFiles(workspace).length >= 130, 'the whole project must be present')
 
   // A hidden leftover (e.g. .DS_Store) never blocks or is removed by the upgrade.
   const withHidden = tempWorkspace()

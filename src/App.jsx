@@ -1,25 +1,19 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
-import ChatPage from './pages/ChatPage'
-import CodeArena from './pages/CodeArena'
+import RuntimeDetailsPanel from './components/RuntimeDetailsPanel'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
-import { getBrowserBridge } from './lib/bridge'
-import { getDeepSeekConnector } from './lib/bridge/DeepSeekConnector.js'
 
 export default function App() {
   const [view, setView] = useState('overview')
   const [previousView, setPreviousView] = useState('overview')
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
-  // Chat history sidebar (right rail) visibility. Lives here so the header
-  // toggle and ChatPage stay in sync.
-  const [historyOpen, setHistoryOpen] = useState(true)
   // Full-panel runtime details overlay, opened by holding the header status
-  // container. Lives here so the header trigger and ChatPage stay in sync.
+  // container. Rendered above the main view so it works from any page.
   const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false)
   const runtimeStatusRef = useRef(null)
 
@@ -28,9 +22,7 @@ export default function App() {
     setView(nextView)
   }
 
-  // Details live in the chat area: opening from any page lands in chat.
   const openRuntimeDetails = () => {
-    if (view !== 'aiagents') navigate('aiagents')
     setRuntimeDetailsOpen(true)
   }
 
@@ -39,18 +31,6 @@ export default function App() {
     setRuntimeDetailsOpen(false)
     requestAnimationFrame(() => runtimeStatusRef.current?.focus())
   }
-
-  // Browser bridge handshake, then DeepSeek tab detect. Safe no-op if extension absent.
-  useEffect(() => {
-    const bridge = getBrowserBridge()
-    const ds = getDeepSeekConnector()
-    const off = bridge.onStatus((s) => {
-      if (s === 'connected') ds.connect().catch(() => {})
-      else ds.disconnect()
-    })
-    bridge.connect().catch(() => {})
-    return off
-  }, [])
 
   const allNav = useMemo(() => {
     const out = []
@@ -90,27 +70,18 @@ export default function App() {
           title={title}
           active={inRail ? null : view}
           onNavigate={navigate}
-          historyOpen={historyOpen}
-          onToggleHistory={view === 'aiagents' ? () => setHistoryOpen((v) => !v) : undefined}
           onOpenRuntimeDetails={openRuntimeDetails}
           runtimeStatusRef={runtimeStatusRef}
         />
 
-{view === 'settings'
-  ? <Settings
+{runtimeDetailsOpen
+  ? <RuntimeDetailsPanel onBack={closeRuntimeDetails} />
+  : view === 'settings'
+    ? <Settings
       jumpTo={advancedPage}
       onJumped={() => setAdvancedPage(null)}
     />
-  : view === 'aiagents'
-    ? <ChatPage
-        historyOpen={historyOpen}
-        onCloseHistory={() => setHistoryOpen(false)}
-        detailsOpen={runtimeDetailsOpen}
-        onBackFromDetails={closeRuntimeDetails}
-      />
-    : view === 'codearena'
-      ? <CodeArena />
-      : <Blank />}
+    : <Blank />}
       </main>
 
       <CommandPalette
