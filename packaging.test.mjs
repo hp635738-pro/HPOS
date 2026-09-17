@@ -336,4 +336,62 @@ console.log('packaging configuration tests...')
   console.log('ok: real project payload ships as extraResources; served entrypoint is the HPOS app, never the Code Arena shell')
 }
 
+/* ------------------------------------------------------------ Linux + AppImage/deb */
+{
+  /* Linux ships the same shell via AppImage (portable) and deb (Debian/
+     Ubuntu install). The icon source is a single square PNG ≥256px —
+     electron-builder resizes it into the hicolor set itself. */
+  const linux = pkg.build.linux
+  const pngPath = path.join(root, 'public', 'icon.png')
+  assert.ok(fs.existsSync(pngPath), 'public/icon.png must exist (Linux app icon)')
+  const png = fs.readFileSync(pngPath)
+  assert.equal(png.readUInt32BE(0), 0x89504e47, 'icon.png must be a real PNG')
+  assert.equal(png.readUInt32BE(12), 0x49484452, 'icon.png must start with an IHDR chunk')
+  const width = png.readUInt32BE(16)
+  const height = png.readUInt32BE(20)
+  assert.equal(width, height, 'icon.png must be square')
+  assert.ok(width >= 256, `icon.png must be at least 256px (got ${width})`)
+
+  assert.equal(linux.icon, 'public/icon.png', 'build.linux.icon must point at public/icon.png')
+  assert.equal(linux.category, 'Development', 'the Linux desktop entry category must stay Development')
+  assert.ok(typeof linux.maintainer === 'string' && linux.maintainer.includes('<'), 'deb packages need a maintainer with an email')
+  assert.deepEqual(
+    linux.target,
+    [
+      { target: 'AppImage', arch: ['x64'] },
+      { target: 'deb', arch: ['x64'] },
+    ],
+    'Linux targets must stay AppImage + deb on x64'
+  )
+  assert.ok(
+    pkg.build.files.includes('public/icon.png'),
+    'public/icon.png must ride in app.asar so Linux windows can set their icon'
+  )
+
+  for (const script of ['dist:linux', 'dist:linux:dir']) {
+    const value = pkg.scripts[script]
+    assert.ok(value.startsWith('npm run build:prod && '), `${script} must chain the production build before electron-builder`)
+    assert.ok(value.includes('npm run workspace:project'), `${script} must build the workspace project payload`)
+    assert.ok(
+      value.indexOf('npm run workspace:project') < value.indexOf('electron-builder'),
+      `${script} must build the payload BEFORE electron-builder runs`
+    )
+    assert.ok(value.includes('--linux'), `${script} must target Linux`)
+    assert.ok(value.includes('--publish never'), `${script} must never publish to the release source`)
+  }
+  assert.ok(pkg.scripts['dist:linux'].includes('appimage deb'), 'dist:linux must produce AppImage + deb')
+
+  /* The main process must hand Linux windows an explicit icon. */
+  const main = fs.readFileSync(path.join(root, 'HPOS-Desktop', 'main.js'), 'utf8')
+  assert.match(main, /function linuxWindowIcon\(/, 'main.js must resolve a Linux window icon')
+  assert.match(main, /process\.platform !== 'linux'/, 'the Linux window icon must stay Linux-only')
+  const iconWired = main.match(/new BrowserWindow\(\{[\s\S]*?\}\)/g) || []
+  assert.ok(iconWired.length >= 2, 'both Electron windows (shell + Code Arena) must be found')
+  for (const chunk of iconWired) {
+    assert.match(chunk, /icon: linuxWindowIcon\(\)/, 'every BrowserWindow must set the Linux icon')
+  }
+
+  console.log(`ok: Linux packaging (AppImage + deb x64, ${width}px icon, dist:linux scripts, window icon wired)`)
+}
+
 console.log('packaging configuration tests: all passed')

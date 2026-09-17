@@ -1,5 +1,9 @@
 # VS Code mein setup
 
+> Linux (Debian/Ubuntu/Mint) pe ka kar ke step-by-step guide:
+> **[SETUP-LINUX.md](SETUP-LINUX.md)** — install, dev mode, AppImage/deb
+> packaging aur troubleshooting sab usme hai.
+
 ## 1. Zip extract karo
 
 Kahin bhi rakh do, jaise `C:\Projects\hpos` ya `~/projects/hpos`.

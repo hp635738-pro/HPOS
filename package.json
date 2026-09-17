@@ -17,6 +17,8 @@
     "dist": "npm run build:prod && npm run workspace:project && electron-builder --publish never",
     "dist:win": "npm run build:prod && npm run workspace:project && electron-builder --win nsis --publish never",
     "dist:dir": "npm run build:prod && npm run workspace:project && electron-builder --win --dir --publish never",
+    "dist:linux": "npm run build:prod && npm run workspace:project && electron-builder --linux appimage deb --publish never",
+    "dist:linux:dir": "npm run build:prod && npm run workspace:project && electron-builder --linux --dir --publish never",
     "lint": "oxlint",
     "preview": "vite preview",
     "workspace:project": "node scripts/build-workspace-project.mjs",
@@ -54,6 +56,7 @@
       "!HPOS-Desktop/package-lock.json",
       "dist/**/*",
       "src/pages/CodeArena.html",
+      "public/icon.png",
       "!**/*.test.mjs",
       "!**/*.test.js",
       "!**/tests/**/*",
@@ -133,6 +136,21 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "HPOS"
+    },
+    "linux": {
+      "icon": "public/icon.png",
+      "category": "Development",
+      "maintainer": "HPOS Team <hp635738-pro@users.noreply.github.com>",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ]
     },
     "directories": {
       "output": "release",

@@ -81,6 +81,21 @@ function getDefaultPackagedWorkspacePath() {
   return null
 }
 
+/* Linux window managers ignore desktop-file icons in many setups (bare
+   binaries, minimal WMs, nested windows), so every HPOS window explicitly
+   sets its icon. public/icon.png rides inside app.asar (see build.files) in
+   packaged builds and lives in the repo in development — app.getAppPath()
+   resolves both. Other platforms keep their platform-managed icons. */
+function linuxWindowIcon() {
+  if (process.platform !== 'linux') return null
+  try {
+    const candidate = path.join(app.getAppPath(), 'public', 'icon.png')
+    return fs.existsSync(candidate) ? candidate : null
+  } catch {
+    return null
+  }
+}
+
 const workspaceResolution = resolveWorkspaceRoot({
   developmentRoot: path.resolve(__dirname, '..'),
   isPackaged: app.isPackaged,
@@ -760,6 +775,7 @@ function registerFsBridge() {
       minHeight: 650,
       title: 'HPOS Code Arena',
       parent,
+      icon: linuxWindowIcon(),
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
@@ -827,6 +843,7 @@ function createWindow() {
     title: devInstance ? 'HPOS · development workspace' : 'HPOS',
     backgroundColor: '#0f1013',
     show: false,
+    icon: linuxWindowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
