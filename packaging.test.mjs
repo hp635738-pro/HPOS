@@ -469,6 +469,15 @@ console.log('packaging configuration tests...')
   assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'publishing only happens for a v* tag')
   assert.match(workflow, /dry_run != 'true'/, 'a manual run only publishes when dry-run is switched off')
   assert.match(workflow, /needs: \[verify, validate\]/, 'the publish job runs only after the validation job succeeded')
+  /* Real finding from running the pipeline: GitHub rejects the whole workflow
+     file with "Unrecognized named-value: 'matrix'" if a JOB-level `if` uses
+     the matrix context — the run then fails without ever creating a job.
+     The publish gate therefore lives in per-platform jobs, not a matrix. */
+  assert.doesNotMatch(
+    workflow,
+    /^ {4}if:.*\bmatrix\b/m,
+    'a job-level if must not reference the matrix context (GitHub refuses the file)'
+  )
   assert.match(workflow, /npm run dist:linux/, 'the validation build uses --publish never (dist:linux)')
   assert.match(workflow, /npm run verify:artifacts/, 'the validation build asserts the artifacts + hashes')
   assert.match(workflow, /npm run verify:release/, 'a published release is verified (assets + metadata + sha512)')

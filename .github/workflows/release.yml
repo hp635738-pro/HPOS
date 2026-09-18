@@ -93,25 +93,20 @@ jobs:
             release/latest-linux.yml
           if-no-files-found: error
 
-  release:
-    name: Build + publish ${{ matrix.target }}
+  # NOTE: a job-level `if` cannot use the `matrix` context (GitHub rejects the
+  # file with "Unrecognized named-value: 'matrix'"), so the two platforms are
+  # separate jobs instead of a matrix.
+  release-linux:
+    name: Build + publish Linux (AppImage + deb + latest-linux.yml)
     needs: [verify, validate]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux
-          - os: windows-latest
-            target: win
+    runs-on: ubuntu-latest
     # Publish ONLY for a v* tag push, or a manual run with dry_run switched off.
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == matrix.target)) }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'linux')) }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # The release:* scripts run `release:check` again. The "is this version
       # newer than the published release?" gate already ran in `verify`,
-      # before anything was published; offline keeps the second run from
+      # before anything was published; offline keeps this second run from
       # tripping over the release this same run creates.
       HPOS_RELEASE_OFFLINE: '1'
     steps:
@@ -124,28 +119,50 @@ jobs:
         run: npm ci
 
       - name: Publish Linux (AppImage + deb + latest-linux.yml)
-        if: matrix.target == 'linux'
         run: npm run release:linux
 
-      - name: Publish Windows (NSIS + latest.yml)
-        if: matrix.target == 'win'
-        run: npm run release:win
-
       - name: The release must be published, never a draft
-        if: matrix.target == 'linux'
         run: gh release edit "v$(node -p "require('./package.json').version")" --draft=false --prerelease=false
 
       - name: Verify the published release (assets + metadata + sha512)
-        if: matrix.target == 'linux'
         run: npm run verify:release -- --wait --summary
 
       - name: Keep the published artifacts for inspection
         uses: actions/upload-artifact@v4
         with:
-          name: hpos-${{ matrix.target }}-${{ github.ref_name }}
+          name: hpos-linux-${{ github.ref_name }}
           path: |
             release/*.deb
             release/*.AppImage
+            release/latest-linux.yml
+          if-no-files-found: warn
+
+  release-win:
+    name: Build + publish Windows (NSIS + latest.yml)
+    needs: [verify, validate]
+    runs-on: windows-latest
+    # Publish ONLY for a v* tag push, or a manual run with dry_run switched off.
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'win')) }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HPOS_RELEASE_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish Windows (NSIS + latest.yml)
+        run: npm run release:win
+
+      - name: Keep the published artifacts for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpos-win-${{ github.ref_name }}
+          path: |
             release/*.exe
-            release/latest*.yml
+            release/latest.yml
           if-no-files-found: warn
