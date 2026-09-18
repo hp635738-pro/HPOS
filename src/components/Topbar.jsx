@@ -20,7 +20,11 @@ export default function Topbar({ title, active, onNavigate, onOpenRuntimeDetails
       height: prefs.barH,
       padding: `0 ${prefs.barPadX}px`,
       borderBottom: prefs.barBorder ? '1px solid var(--line)' : 'none',
-      borderRadius: prefs.barRadius,
+      /* Shares the rail's surface (var(--surface)). Rounded on the window
+         side only: the top-left meets the rail (stays square when flush so
+         the top edge reads as one connected band), and the bottom edge sits
+         on the content, so only the top-right window corner is rounded. */
+      borderRadius: `${prefs.railInset ? prefs.barRadius : 0}px ${prefs.barRadius}px 0 0`,
       position: prefs.barSticky ? 'sticky' : 'relative',
       top: 0, zIndex: 20,
     }}>

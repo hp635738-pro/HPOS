@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTheme } from '../theme/ThemeContext'
 import {
-  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, AssistantAgent,
+  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, NetworkAgent,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
@@ -14,11 +15,11 @@ import {
  */
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
-  { id: 'schedule',  label: 'Analyzing',      Icon: Analyzing },
+  { id: 'schedule',  label: 'Dashboard',      Icon: Analyzing },
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
-  { id: 'assistant', label: 'Assistant',      Icon: AssistantAgent, accent: true },
+  { id: 'assistant', label: 'Network',        Icon: NetworkAgent },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 
@@ -137,7 +138,14 @@ export default function Sidebar({ active, onChange }) {
       ...S.rail,
       width: mini ? prefs.railMini : prefs.railWidth,
       padding: `14px ${prefs.railPad}px`,
-      borderRadius: prefs.railSharp,
+      /* Same surface as the header (Topbar) so rail + header read as ONE
+         connected piece. When the rail is flush (no inset) the top-right
+         corner is squared — it butts against the header's top-left corner,
+         so the top edge runs as one continuous line. */
+      background: 'var(--surface)',
+      borderRadius: prefs.railInset
+        ? prefs.railSharp
+        : `${prefs.railSharp}px 0 ${prefs.railSharp}px ${prefs.railSharp}px`,
       margin: prefs.railInset,
       marginRight: prefs.railInset ? prefs.railInset : 0,
     }}>
@@ -209,43 +217,29 @@ export default function Sidebar({ active, onChange }) {
                 }}
                 onContextMenu={(e) => openMenu(e, id)}
                 title={mini ? label : undefined}
+                aria-label={label}
                 style={(() => {
-                  const isAssistant = id === 'assistant'
-                  const assistantOn = isAssistant && on
                   const baseBg = (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent'
-                  const assistantBg = assistantOn
-                    ? 'var(--accent-soft)'
-                    : isAssistant ? 'rgba(var(--accent-rgb), .07)' : baseBg
                   const baseColor = (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)'
-                  const assistantColor = isAssistant && !on ? 'var(--accent)' : baseColor
                   return {
                     ...S.item,
                     height: prefs.railItemH,
                     borderRadius: prefs.railRadius,
                     justifyContent: mini ? 'center' : 'flex-start',
                     padding: mini ? 0 : '0 8px 0 11px',
-                    background: isAssistant ? assistantBg : baseBg,
-                    color: isAssistant ? assistantColor : baseColor,
-                    border: isAssistant && !on ? '1px solid rgba(var(--accent-rgb), .14)' : '1px solid transparent',
-                    boxShadow: isAssistant && on ? '0 0 0 3px var(--accent-soft), 0 1px 6px rgba(var(--accent-rgb), .18)' : 'none',
+                    background: baseBg,
+                    color: baseColor,
+                    border: '1px solid transparent',
+                    boxShadow: 'none',
                     opacity: dragging ? 0.35 : 1,
                     cursor: 'pointer',
                     transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
                   }
                 })()}
               >
-                <span style={{
-                  ...S.iconBox,
-                  ...(id === 'assistant' ? {
-                    background: on ? 'var(--accent)' : 'rgba(var(--accent-rgb), .10)',
-                    borderRadius: Math.max(prefs.railRadius - 2, 6),
-                    color: on ? 'var(--accent-fg)' : 'var(--accent)',
-                    border: '1px solid rgba(var(--accent-rgb), .12)',
-                  } : {})
-                }}>
+                <span style={S.iconBox}>
                   <Icon size={prefs.railIcon} />
                   {dot && prefs.railDots && <span style={S.dot} />}
-                  {id === 'assistant' && !mini && <span style={S.assistantGlow} aria-hidden />}
                 </span>
 
                 {!mini && (
@@ -280,7 +274,7 @@ export default function Sidebar({ active, onChange }) {
 
               {/* Nested children */}
               {!mini && isParent && isOpen && (
-                <div style={S.subList}>
+                <div style={S.subList} className="sublist-in">
                   {children.map((child) => {
                     const childOn = active === child.id
                     const openChat = () => {
@@ -353,10 +347,19 @@ export default function Sidebar({ active, onChange }) {
         </button>
       </div>
 
-      {/* ------------------------------------------------------ CONTEXT MENU */}
-      {menu && (
+      {/* ------------------------------------------------------ CONTEXT MENU
+          Portaled to <body>: the rail is a scroll container, and a fixed
+          element must live outside it (viewport coordinates, no clipping,
+          not dragged along with rail scroll). Coordinates are clamped so
+          the menu never overflows the window edge. */}
+      {menu && typeof document !== 'undefined' && createPortal(
         <div
-          style={{ ...S.menu, left: menu.x + 2, top: menu.y + 2 }}
+          className="float-layer"
+          style={{
+            ...S.menu,
+            left: Math.max(4, Math.min(menu.x + 2, (window.innerWidth || 1280) - 200)),
+            top: Math.max(4, Math.min(menu.y + 2, (window.innerHeight || 800) - 190)),
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <span style={S.menuHead}>{menuItem?.label}</span>
@@ -395,7 +398,8 @@ export default function Sidebar({ active, onChange }) {
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </aside>
   )
@@ -404,9 +408,14 @@ export default function Sidebar({ active, onChange }) {
 const S = {
   rail: {
     position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
-    background: 'var(--rail)',
-    backdropFilter: 'blur(var(--rail-blur, 0px))',
-    WebkitBackdropFilter: 'blur(var(--rail-blur, 0px))',
+    /* background is set inline: var(--surface) — the SAME surface as the
+       header (Topbar), so rail + header connect as one piece. */
+    /* Glass blur is applied by index.css, scoped to the glass preset. Do NOT
+       set backdrop-filter inline here: any non-none value makes this <aside>
+       the containing block for position:fixed descendants (the context
+       menu), which then resolves its viewport coordinates against the rail
+       and gets clipped by the rail's overflow — the menu rendered as a cut
+       strip at the rail edge. */
     display: 'flex', flexDirection: 'column',
     transition: 'width .22s cubic-bezier(.4,0,.2,1), background .22s,\n                 border-radius .18s, margin .18s',
   },
@@ -491,17 +500,13 @@ const S = {
     background: 'var(--accent)', color: 'var(--accent-fg)',
     lineHeight: 1, flexShrink: 0, marginLeft: -4,
   },
-  assistantGlow: {
-    position: 'absolute', inset: -2, borderRadius: 'inherit',
-    background: 'radial-gradient(40% 60% at 50% 50%, rgba(var(--accent-rgb), .18), transparent 70%)',
-    pointerEvents: 'none', filter: 'blur(6px)', opacity: 0.6,
-  },
   foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, marginTop: 8 },
 
   menu: {
     position: 'fixed', zIndex: 90, minWidth: 186,
     padding: 5,
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 7,
     boxShadow: '0 12px 34px -10px rgba(0,0,0,.42)',

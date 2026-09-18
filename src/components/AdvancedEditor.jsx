@@ -12,18 +12,61 @@ import PalettePanel from './PalettePanel'
 import WorkspacePanel from './WorkspacePanel'
 import ComponentPanel from './ComponentPanel'
 import Notch from './Notch'
-import { Chevron, Check, Search, Wrench, Grid, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks } from './Icons'
+import { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel } from '../pages/Settings'
+import { Card, Row, Segmented, Toggle } from './ui/Bits'
+import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill, Sparkle } from './Icons'
 
 /**
- * Windows 11 style settings explorer for work-in-progress components.
+ * Advanced settings — the full settings explorer for everything that is not a
+ * quick setting (the main Settings page keeps only Quick settings: presets,
+ * theme, accent and basic layout).
  *
  * Layout mirrors the Settings app: a fixed nav pane on the left with a
- * search box, and a scrolling content pane on the right that opens with a
- * breadcrumb and a page header. Cancel restores the prefs snapshot taken
- * when the explorer opened.
+ * search box and category sections, and a scrolling content pane on the
+ * right that opens with a breadcrumb and a page header. Cancel restores the
+ * prefs snapshot taken when the explorer opened.
+ *
+ * The overlay slides + fades in from the right and runs the matching
+ * out-animation before unmount (`closing` prop, see src/lib/panelTransition
+ * which the Settings page drives).
  */
 
 const PAGES = [
+  {
+    id: 'updates',
+    related: [],
+    name: 'Updates',
+    group: 'App',
+    Icon: Refresh,
+    desc: 'Current version, update status and the check → download → restart flow.',
+    keywords: 'update check download install restart version release patch app updater github',
+    Panel: () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <GitHubUpdatePanel />
+        <UpdatesPanel />
+      </div>
+    ),
+  },
+  {
+    id: 'presets',
+    related: ['workspaces', 'colours', 'type'],
+    name: 'Presets',
+    group: 'Appearance',
+    Icon: Sparkle,
+    desc: 'Five distinct visual identities — pick one, then fine-tune afterwards with the other Appearance pages.',
+    keywords: 'preset identity look glass aurora minimal dark pro soft enterprise compact pick switch',
+    Panel: () => <Card style={{ padding: '14px 16px 10px' }}><PresetChooser /></Card>,
+  },
+  {
+    id: 'accent',
+    related: ['presets', 'colours'],
+    name: 'Accent colour',
+    group: 'Appearance',
+    Icon: Droplet,
+    desc: 'The highlight colour for controls, links and active states — swatches, custom hex, text-on-accent and tint strength.',
+    keywords: 'accent colour highlight tint strength hex custom contrast white black',
+    Panel: () => <Card style={{ padding: '14px 16px 10px' }}><AccentSection /></Card>,
+  },
   {
     id: 'workspaces',
     related: ['colours', 'type', 'backup'],
@@ -55,6 +98,26 @@ const PAGES = [
     Panel: TypePanel,
   },
   {
+    id: 'scale',
+    related: ['type', 'picker'],
+    name: 'Scale & typography',
+    group: 'Appearance',
+    Icon: Zoom,
+    desc: 'Global UI scale, typeface and control corner radius.',
+    keywords: 'scale ui font typeface size zoom radius interface type',
+    Panel: ScalePage,
+  },
+  {
+    id: 'surfaces',
+    related: ['colours', 'components', 'sidebar'],
+    name: 'Surfaces & style',
+    group: 'Appearance',
+    Icon: Surfaces,
+    desc: 'Background treatment, card appearance and the sidebar finish.',
+    keywords: 'surface background card glass border shadow elevated sidebar style finish',
+    Panel: SurfacesPage,
+  },
+  {
     id: 'picker',
     related: ['colours', 'type'],
     name: 'Colour picker',
@@ -75,25 +138,6 @@ const PAGES = [
     Panel: ComponentPanel,
   },
   {
-    id: 'notch',
-    related: ['header', 'colours', 'sidebar'],
-    name: 'Wide Notch',
-    group: 'Header',
-    Icon: Grid,
-    desc: 'The Settings and File pill that sits in the app header.',
-    keywords: 'notch pill header radius padding gap shadow labels icon',
-    Panel: NotchPanel,
-    Preview: () => (
-      <div style={S.fakeBar}>
-        <span style={S.fakeTitle}>Input terminal</span>
-        <span style={S.fakeRight}>
-          <Notch active="settings" />
-          <span style={S.fakeIcon} />
-        </span>
-      </div>
-    ),
-  },
-  {
     id: 'sidebar',
     related: ['header', 'notch', 'colours'],
     name: 'Sidebar',
@@ -108,10 +152,39 @@ const PAGES = [
     related: ['notch', 'sidebar', 'type'],
     name: 'Header',
     group: 'Navigation',
-    Icon: Grid,
+    Icon: TopBar,
     desc: 'Height, title, spacing and which controls appear in the top bar.',
     keywords: 'header topbar title height padding sticky border button',
     Panel: HeaderPanel,
+  },
+  {
+    id: 'notch',
+    related: ['header', 'colours', 'sidebar'],
+    name: 'Wide Notch',
+    group: 'Navigation',
+    Icon: Pill,
+    desc: 'The Settings and File pill that sits in the app header.',
+    keywords: 'notch pill header radius padding gap shadow labels icon',
+    Panel: NotchPanel,
+    Preview: () => (
+      <div style={S.fakeBar}>
+        <span style={S.fakeTitle}>Input terminal</span>
+        <span style={S.fakeRight}>
+          <Notch active="settings" />
+          <span style={S.fakeIcon} />
+        </span>
+      </div>
+    ),
+  },
+  {
+    id: 'motion',
+    related: ['components', 'sidebar'],
+    name: 'Motion & accessibility',
+    group: 'System',
+    Icon: Motion,
+    desc: 'Animation intensity, reduced motion and rail spacing.',
+    keywords: 'motion animation intensity reduced accessibility transition speed rail gap',
+    Panel: MotionPage,
   },
   {
     id: 'palette',
@@ -155,16 +228,156 @@ const PAGES = [
   },
 ]
 
-export default function AdvancedEditor({ onClose, initialPage }) {
+/** Category order for the nav pane (App first, Content last). */
+const GROUPS = ['App', 'Appearance', 'Navigation', 'System', 'Content']
+
+/* --------------------------------------------------------------- moved pages
+ * These three pages moved from the main Settings page (where they were quick
+ * sections) into Advanced settings. Controls and hints are unchanged. */
+
+function ScalePage() {
+  const { prefs, set } = useTheme()
+  return (
+    <Card>
+      <Row
+        label="UI scale"
+        hint={`${prefs.uiScale ?? prefs.fontScale}% — entire interface.`}
+      >
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="90" max="130" step="1"
+            value={prefs.uiScale ?? prefs.fontScale}
+            onChange={(e) => { set('uiScale', +e.target.value); set('fontScale', +e.target.value) }}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.uiScale ?? prefs.fontScale}</span>
+        </div>
+      </Row>
+      <Row label="Font" hint="Typeface for body and headings.">
+        <Segmented
+          value={prefs.fontId}
+          options={['system', 'inter', 'rounded', 'mono']}
+          labels={{ system: 'System', inter: 'Inter', rounded: 'Rounded', mono: 'Mono' }}
+          onChange={(v) => set('fontId', v)}
+        />
+      </Row>
+      <Row label="Card radius" hint={`${prefs.cmpRadius}px — buttons and inputs.`} last>
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="0" max="20" step="1"
+            value={prefs.cmpRadius}
+            onChange={(e) => set('cmpRadius', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.cmpRadius}</span>
+        </div>
+      </Row>
+    </Card>
+  )
+}
+
+function SurfacesPage() {
+  const { prefs, set } = useTheme()
+  return (
+    <Card>
+      <Row label="Background" hint={`${prefs.bgStyle === 'auto' ? 'Preset default' : prefs.bgStyle} — fallback is the preset's treatment.`}>
+        <Segmented
+          value={prefs.bgStyle}
+          options={['auto', 'solid', 'gradient', 'aurora', 'soft']}
+          labels={{ auto: 'Auto' }}
+          onChange={(v) => set('bgStyle', v)}
+        />
+      </Row>
+      <Row label="Card style" hint="How cards and panels feel.">
+        <Segmented
+          value={prefs.cardStyle}
+          options={['auto', 'bordered', 'elevated', 'glass', 'soft', 'sharp']}
+          labels={{ auto: 'Auto' }}
+          onChange={(v) => set('cardStyle', v)}
+        />
+      </Row>
+      <Row label="Sidebar style" hint="Rail finish — flat, translucent glass, high-contrast or soft.">
+        <Segmented
+          value={prefs.sidebarStyle}
+          options={['auto', 'flat', 'glass', 'contrast', 'soft']}
+          labels={{ auto: 'Auto' }}
+          onChange={(v) => set('sidebarStyle', v)}
+        />
+      </Row>
+      <Row label="Sidebar width" hint={`${prefs.railWidth}px — expanded rail.`}>
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="160" max="264" step="1"
+            value={prefs.railWidth}
+            onChange={(e) => set('railWidth', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.railWidth}</span>
+        </div>
+      </Row>
+      <Row label="Row height" hint={`${prefs.railItemH}px — navigation rows.`} last>
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="28" max="48" step="1"
+            value={prefs.railItemH}
+            onChange={(e) => set('railItemH', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.railItemH}</span>
+        </div>
+      </Row>
+    </Card>
+  )
+}
+
+function MotionPage() {
+  const { prefs, set } = useTheme()
+  return (
+    <Card>
+      <Row label="Animation intensity" hint={`${prefs.animationIntensity}% — scales every transition.`}>
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="0" max="100" step="5"
+            value={prefs.animationIntensity}
+            onChange={(e) => set('animationIntensity', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.animationIntensity}</span>
+        </div>
+      </Row>
+      <Row label="Reduced motion" hint="Disables non-essential animation for accessibility.">
+        <Toggle value={!!prefs.reducedMotion} onChange={(v) => set('reducedMotion', v)} />
+      </Row>
+      <Row label="Sidebar density" hint="Row gap — tighter rails feel more enterprise." last>
+        <div style={S.movedSlider}>
+          <input
+            type="range" min="1" max="8" step="1"
+            value={prefs.railGap}
+            onChange={(e) => set('railGap', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.movedVal}>{prefs.railGap}</span>
+        </div>
+      </Row>
+    </Card>
+  )
+}
+
+export default function AdvancedEditor({ onClose, initialPage, closing }) {
   const { prefs, set, undo, redo, canUndo, canRedo } = useTheme()
   // Uncover the real rail only while the Sidebar page is open, so its
   // edits are visible live. Every other page uses the full screen.
   const railW = prefs.sidebar === 'icons' ? prefs.railMini : prefs.railWidth
-  const [pick, setPick] = useState(initialPage || 'colours')
+  const [pick, setPick] = useState(initialPage || 'updates')
   const [query, setQuery] = useState('')
   const [snapshot, setBaseline] = useState(() => ({ ...prefs }))
   const [saved, setSaved] = useState(false)
   const scrollRef = useRef(null)
+
+  // A deep link can re-target an already-open editor (command palette).
+  useEffect(() => {
+    if (initialPage) setPick(initialPage)
+  }, [initialPage])
 
   // A related-settings jump should land at the top of the new page.
   useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }) }, [pick])
@@ -197,14 +410,28 @@ export default function AdvancedEditor({ onClose, initialPage }) {
     [q],
   )
 
+  // Group the (filtered) pages by category, preserving PAGES order.
+  const groups = useMemo(() => {
+    const out = []
+    list.forEach((p) => {
+      const g = out.find((x) => x.name === p.group)
+      if (g) g.pages.push(p)
+      else out.push({ name: p.group, pages: [p] })
+    })
+    return out.sort((a, b) => GROUPS.indexOf(a.name) - GROUPS.indexOf(b.name))
+  }, [list])
+
   const page = PAGES.find((p) => p.id === pick)
   const dirty = Object.keys(snapshot).some((k) => snapshot[k] !== prefs[k])
 
   return (
-    <div style={{ ...S.overlay, left: pick === 'sidebar' ? railW : 0 }}>
+    <div
+      className={closing ? 'panel-out' : 'panel-in'}
+      style={{ ...S.overlay, left: pick === 'sidebar' ? railW : 0 }}
+    >
       {/* --------------------------------------------------------- TITLE BAR */}
       <header style={S.titlebar}>
-        <button onClick={cancel} style={S.back} title="Back to Settings">
+        <button onClick={cancel} style={S.back} title="Back to Settings" aria-label="Back to Settings">
           <Chevron size={16} dir="left" />
         </button>
         <span style={S.appName}>Advanced settings</span>
@@ -235,40 +462,47 @@ export default function AdvancedEditor({ onClose, initialPage }) {
 
       <div style={S.body}>
         {/* -------------------------------------------------------- NAV PANE */}
-        <nav style={S.nav}>
+        <nav style={S.nav} aria-label="Advanced settings categories">
           <div style={S.searchWrap}>
-            <span style={S.searchIcon}><Search size={14} /></span>
+            <span style={S.searchIcon}><Search size={16} /></span>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Find a setting"
+              className="adv-search"
               style={S.search}
+              aria-label="Find a setting"
             />
           </div>
 
           <div style={S.navList}>
-            {list.map((p) => {
-              const on = p.id === pick
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setPick(p.id)}
-                  className="w11-nav"
-                  style={{
-                    ...S.navItem,
-                    background: on ? 'var(--surface-2)' : 'transparent',
-                  }}
-                >
-                  {on && <span style={S.navPip} />}
-                  <span style={{ ...S.navIcon, color: on ? 'var(--accent)' : 'var(--text-2)' }}>
-                    <p.Icon size={17} />
-                  </span>
-                  <span style={{ ...S.navText, fontWeight: on ? 700 : 500 }}>
-                    {p.name}
-                  </span>
-                </button>
-              )
-            })}
+            {groups.map((g) => (
+              <div key={g.name}>
+                <span style={S.navGroup}>{g.name}</span>
+                {g.pages.map((p) => {
+                  const on = p.id === pick
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => setPick(p.id)}
+                      className="w11-nav"
+                      style={{
+                        ...S.navItem,
+                        background: on ? 'var(--surface-2)' : 'transparent',
+                      }}
+                    >
+                      {on && <span style={S.navPip} />}
+                      <span style={{ ...S.navIcon, color: on ? 'var(--accent)' : 'var(--text-2)' }}>
+                        <p.Icon size={17} />
+                      </span>
+                      <span style={{ ...S.navText, fontWeight: on ? 700 : 500 }}>
+                        {p.name}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
 
             {!list.length && <p style={S.noResult}>No results for “{query}”.</p>}
           </div>
@@ -276,7 +510,7 @@ export default function AdvancedEditor({ onClose, initialPage }) {
 
         {/* ---------------------------------------------------- CONTENT PANE */}
         <div style={S.content} ref={scrollRef}>
-          <div style={S.contentInner}>
+          <div key={pick} className="page-transition" style={S.contentInner}>
             <div style={S.crumbs}>
               <button onClick={cancel} style={S.crumbLink}>Settings</button>
               <Chevron size={12} dir="right" />
@@ -410,21 +644,26 @@ const S = {
   },
   searchWrap: { position: 'relative', padding: '4px 6px 12px' },
   searchIcon: {
-    position: 'absolute', left: 18, top: 'calc(50% - 6px)',
+    position: 'absolute', left: 12, top: '50%',
     transform: 'translateY(-50%)',
     color: 'var(--muted)', pointerEvents: 'none',
     display: 'grid', placeItems: 'center',
   },
   search: {
-    width: '100%', height: 32,
-    padding: '0 10px 0 32px',
+    width: '100%', height: 38,
+    padding: '0 14px 0 38px',
     background: 'var(--surface)',
-    border: '1px solid var(--line)',
-    borderRadius: 4,
-    fontSize: 12.5, fontWeight: 500, outline: 'none',
+    borderRadius: 10,
+    fontSize: 13, fontWeight: 500, outline: 'none',
     color: 'var(--text)',
   },
-  navList: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 },
+  navList: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
+  navGroup: {
+    display: 'block',
+    fontSize: 10, fontWeight: 800, letterSpacing: '.5px',
+    textTransform: 'uppercase', color: 'var(--muted)',
+    padding: '12px 12px 5px',
+  },
   navItem: {
     position: 'relative', width: '100%',
     display: 'flex', alignItems: 'center', gap: 13,
@@ -497,6 +736,17 @@ const S = {
   fakeIcon: {
     width: 34, height: 34, borderRadius: 5,
     border: '1px solid var(--line)', background: 'var(--surface-2)',
+  },
+
+  /* moved-settings pages (from the main Settings page) */
+  movedSlider: { display: 'flex', alignItems: 'center', gap: 12, width: 220 },
+  movedVal: {
+    minWidth: 40, textAlign: 'center',
+    fontSize: 12, fontWeight: 700, color: 'var(--text-2)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--line)',
+    borderRadius: 4,
+    padding: '5px 0',
   },
 
   relWrap: {

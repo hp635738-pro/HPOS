@@ -7,8 +7,8 @@ import { Chevron } from '../Icons'
  * of the same Row/Slider/Toggle copied into each file.
  */
 
-export function Card({ children }) {
-  return <section style={S.card}>{children}</section>
+export function Card({ children, style }) {
+  return <section style={{ ...S.card, ...style }}>{children}</section>
 }
 
 export function Expander({ title, hint, defaultOpen = false, children }) {
@@ -85,13 +85,13 @@ export function Toggle({ value, onChange }) {
       onClick={() => onChange(!value)} role="switch" aria-checked={!!value}
       style={{
         ...S.track,
-        background: value ? 'var(--accent)' : 'transparent',
-        borderColor: value ? 'var(--accent)' : 'var(--text-2)',
+        /* macOS-style: solid accent when on, soft neutral grey when off,
+           white knob in both states. */
+        background: value ? 'var(--accent)' : 'rgba(128,128,136,.35)',
       }}
     >
       <span style={{
         ...S.knob,
-        background: value ? 'var(--accent-fg)' : 'var(--text-2)',
         transform: value ? 'translateX(18px)' : 'translateX(0)',
       }} />
     </button>
@@ -178,14 +178,16 @@ export const S = {
   },
 
   track: {
-    width: 40, height: 20, borderRadius: 99,
-    border: '1px solid', padding: 2,
+    width: 44, height: 26, borderRadius: 13,
+    border: 'none', padding: 2,
     display: 'flex', alignItems: 'center',
-    transition: 'background .18s, border-color .18s',
+    transition: 'background .2s',
   },
   knob: {
-    width: 12, height: 12, borderRadius: '50%',
-    transition: 'transform .18s cubic-bezier(.4,0,.2,1), background .18s',
+    width: 22, height: 22, borderRadius: '50%',
+    background: '#fff',
+    boxShadow: '0 1px 2px rgba(0,0,0,.28), 0 0 1px rgba(0,0,0,.2)',
+    transition: 'transform .25s cubic-bezier(.4,0,.2,1)',
   },
 
   btn: {

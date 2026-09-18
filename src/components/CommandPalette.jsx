@@ -72,10 +72,13 @@ export default function CommandPalette({ onNavigate, onOpenAdvanced }) {
     }))
 
     const panels = [
+      ['updates', 'Updates'],
       ['workspaces', 'Workspaces'],
       ['colours', 'Theme colours'], ['type', 'System text'],
-      ['picker', 'Colour picker'], ['notch', 'Wide Notch'],
-      ['sidebar', 'Sidebar'], ['header', 'Header'],
+      ['scale', 'Scale & typography'], ['surfaces', 'Surfaces & style'],
+      ['picker', 'Colour picker'], ['components', 'Component edit'],
+      ['sidebar', 'Sidebar'], ['header', 'Header'], ['notch', 'Wide Notch'],
+      ['motion', 'Motion & accessibility'],
       ['shortcuts', 'Keyboard shortcuts'], ['backup', 'Backup and reset'],
     ]
     panels.forEach(([id, name]) => out.push({
@@ -236,7 +239,7 @@ export default function CommandPalette({ onNavigate, onOpenAdvanced }) {
     <div style={S.scrim} onMouseDown={(e) => {
       if (e.target === e.currentTarget) setOpen(false)
     }}>
-      <div style={S.box} role="dialog" aria-modal="true">
+      <div className="float-layer" style={S.box} role="dialog" aria-modal="true">
         <div style={S.searchRow}>
           <span style={S.icon}><Search size={16} /></span>
           <input
@@ -314,7 +317,8 @@ const S = {
   box: {
     width: 560, maxWidth: 'calc(100vw - 32px)',
     maxHeight: '62vh', display: 'flex', flexDirection: 'column',
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 12, overflow: 'hidden',
     boxShadow: '0 30px 80px -20px rgba(0,0,0,.55)',

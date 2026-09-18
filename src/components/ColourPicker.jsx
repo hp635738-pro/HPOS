@@ -94,7 +94,7 @@ export default function ColourPicker({ value, onChange, onClose, anchor }) {
   const left = Math.min(anchor?.left ?? 80, window.innerWidth - 300)
 
   return (
-    <div ref={ref} style={{ ...S.pop, top: top + 6, left }}>
+    <div ref={ref} className="float-layer" style={{ ...S.pop, top: top + 6, left }}>
       {/* ---------------------------------------------------------- SV PLANE */}
       <div
         ref={svRef}
@@ -259,7 +259,8 @@ export default function ColourPicker({ value, onChange, onClose, anchor }) {
 const S = {
   pop: {
     position: 'fixed', zIndex: 120, width: 274,
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 10, overflow: 'hidden',
     boxShadow: '0 18px 48px -14px rgba(0,0,0,.45)',

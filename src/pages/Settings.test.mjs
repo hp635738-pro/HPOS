@@ -247,8 +247,12 @@ assert(
   assert(/Frontend build/.test(gh), '5: the step list shows the build step')
   assert(/App restart|Windows reload/.test(gh), '5: the step list shows the restart/reload outcome')
 
-  // It is actually rendered in the App section.
-  assert(settings.includes('<GitHubUpdatePanel />'), '5: GitHubUpdatePanel is rendered in Settings')
+  // It is actually rendered — now by the dedicated Updates page inside
+  // Advanced settings (the panel itself is defined + exported from
+  // Settings.jsx, so there is exactly one implementation).
+  const advanced = readFileSync(join(dir, '..', 'components', 'AdvancedEditor.jsx'), 'utf8')
+  assert(advanced.includes('<GitHubUpdatePanel />'), '5: GitHubUpdatePanel is rendered by the Advanced settings Updates page')
+  assert(settings.includes('export { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel }'), '5: Settings.jsx exports the shared panels (updater, preset + accent choosers)')
 }
 
 /* 6. update-mechanism reporting (Linux .deb vs AppImage vs NSIS) --------- */
