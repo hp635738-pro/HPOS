@@ -46,6 +46,22 @@
   --gap: 14px;
   --row-h: 44px;
   --font: 13.5px;
+
+  /* --- preset + motion (overwritten by ThemeProvider) --- */
+  --app-bg: var(--bg);
+  --preset: minimal;
+  --bg-style: solid;
+  --card-style: bordered;
+  --sidebar-style: flat;
+  --card-blur: 0px;
+  --rail-blur: 0px;
+  --glass-blur: 0px;
+  --card-shadow: var(--shadow);
+  --card-border: var(--line);
+  --motion-duration: 160ms;
+  --motion-easing: cubic-bezier(.2,.8,.3,1);
+  --motion-intensity: 100%;
+  --motion-scale: 1;
 }
 
 * { box-sizing: border-box; }
@@ -57,10 +73,10 @@ body {
   font-weight: var(--font-weight, 500);
   letter-spacing: var(--tracking, 0);
   line-height: var(--line-height, 1.5);
-  background: var(--bg);
+  background: var(--app-bg, var(--bg));
   color: var(--text);
   -webkit-font-smoothing: var(--font-smooth, antialiased);
-  transition: background .22s ease, color .22s ease;
+  transition: background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing);
 }
 
 /* Component sizes are in px, so the scale is applied as a page zoom —
@@ -567,4 +583,221 @@ button:hover > .rail-grip { opacity: .45; }
 @keyframes rt-details-in {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
+}
+
+/* ========================================================================
+   HPOS Modern Animation System — respects reduced motion, preset motion
+   ======================================================================== */
+
+/* Page transitions — main content fades/slides on view change */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes page-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-4px); }
+}
+.page-transition {
+  animation: page-in var(--motion-duration) var(--motion-easing);
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-transition { animation: none; }
+}
+
+/* Sidebar rail — smooth width + hover lift */
+aside {
+  transition: width var(--motion-duration) var(--motion-easing),
+              background var(--motion-duration) var(--motion-easing),
+              border-radius var(--motion-duration) var(--motion-easing),
+              margin var(--motion-duration) var(--motion-easing),
+              backdrop-filter var(--motion-duration) var(--motion-easing);
+}
+.nav-item-enter {
+  animation: nav-in calc(var(--motion-duration) * 1.1) var(--motion-easing);
+}
+@keyframes nav-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Buttons — hover lift + active press + focus ring */
+button, .cmp-btn, .notch-btn {
+  transition: background var(--motion-duration) var(--motion-easing),
+              color var(--motion-duration) var(--motion-easing),
+              border-color var(--motion-duration) var(--motion-easing),
+              box-shadow var(--motion-duration) var(--motion-easing),
+              transform var(--motion-duration) var(--motion-easing),
+              opacity var(--motion-duration) var(--motion-easing);
+}
+.cmp-btn:hover { transform: translateY(-1px); }
+.cmp-btn:active { transform: translateY(0px) scale(.98); }
+button:active:not(:disabled) { transform: scale(.98); }
+
+/* Cards — hover elevation + border accent */
+section[class*="card"], div[class*="card"] {
+  transition: border-color var(--motion-duration) var(--motion-easing),
+              box-shadow var(--motion-duration) var(--motion-easing),
+              background var(--motion-duration) var(--motion-easing),
+              transform var(--motion-duration) var(--motion-easing);
+}
+
+/* Preset-aware card treatment */
+[data-preset="aurora"] section[style*="--surface"] {
+  backdrop-filter: blur(var(--card-blur));
+  -webkit-backdrop-filter: blur(var(--card-blur));
+}
+[data-preset="aurora"] aside {
+  backdrop-filter: blur(var(--rail-blur));
+  -webkit-backdrop-filter: blur(var(--rail-blur));
+}
+[data-preset="soft"] section {
+  border-radius: calc(var(--radius-lg) + 2px);
+}
+[data-preset="enterprise"] section {
+  border-radius: calc(var(--radius-sm) + 1px);
+}
+
+/* Inputs — focus glow + hover border */
+input, textarea, select, .cmp-input {
+  transition: border-color var(--motion-duration) var(--motion-easing),
+              box-shadow var(--motion-duration) var(--motion-easing),
+              background var(--motion-duration) var(--motion-easing);
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--cmp-ring);
+}
+
+/* Dropdowns / menus — scale + fade */
+@keyframes dropdown-in {
+  from { opacity: 0; transform: translateY(4px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dropdown-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(4px) scale(.98); }
+}
+.dropdown-enter {
+  animation: dropdown-in var(--motion-duration) var(--motion-easing);
+  transform-origin: top left;
+}
+.kit-menu-item, .ctx-item {
+  transition: background var(--motion-duration) var(--motion-easing),
+              color var(--motion-duration) var(--motion-easing);
+}
+
+/* Modals — scrim fade + box scale */
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes modal-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(8px) scale(.97); }
+}
+[data-modal="open"] {
+  animation: scrim-in var(--motion-duration) var(--motion-easing);
+}
+[data-modal-box="open"] {
+  animation: modal-in var(--motion-duration) var(--motion-easing);
+}
+
+/* Toasts — improved with motion vars */
+.toast-in {
+  animation: toast-in var(--motion-duration) var(--motion-easing);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Loading states — shimmer + pulse */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
+}
+.loading-shimmer {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.loading-pulse { animation: pulse 1.6s ease-in-out infinite; }
+
+/* Hover states — consistent across presets */
+.hover-lift:hover { transform: translateY(-1px); }
+.hover-scale:hover { transform: scale(1.02); }
+.hover-bright:hover { filter: brightness(1.05); }
+
+/* Assistant interactions — subtle glow pulse */
+@keyframes assistant-glow {
+  0%, 100% { opacity: .5; transform: scale(1); }
+  50% { opacity: .85; transform: scale(1.04); }
+}
+.assistant-glow {
+  animation: assistant-glow 2.8s ease-in-out infinite;
+}
+
+/* Sidebar assistant entry — special hover */
+button:hover .assistant-glow { opacity: 1; }
+
+/* Reduced motion — disable all */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+[data-reduced-motion="true"] *, [data-reduced-motion="true"] *::before, [data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Preset-specific background treatments (fallback if --app-bg not used elsewhere) */
+[data-preset="aurora"][data-theme="light"] { --preset-accent-glow: rgba(139,92,246,.08); }
+[data-preset="aurora"][data-theme="dark"]  { --preset-accent-glow: rgba(139,92,246,.15); }
+[data-preset="darkPro"][data-theme="dark"] { --preset-accent-glow: rgba(59,130,246,.06); }
+[data-preset="soft"] { --preset-soft-warm: rgba(251,113,133,.04); }
+
+/* Card variants */
+.card-glass {
+  background: var(--surface);
+  backdrop-filter: blur(var(--card-blur));
+  -webkit-backdrop-filter: blur(var(--card-blur));
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow);
+}
+.card-elevated {
+  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+}
+.card-bordered {
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.card-soft {
+  border-radius: calc(var(--radius-lg) + 4px);
+  box-shadow: 0 4px 20px -8px rgba(0,0,0,.08);
+}
+
+/* Animation intensity scaling — subtle vs full */
+[data-motion="subtle"] { --motion-duration-factor: 0.5; }
+[data-motion="standard"] { --motion-duration-factor: 0.75; }
+[data-motion="full"] { --motion-duration-factor: 1; }
+
+/* Ensure all preset transitions use motion vars by default */
+* {
+  --default-transition: background var(--motion-duration) var(--motion-easing),
+                        color var(--motion-duration) var(--motion-easing),
+                        border-color var(--motion-duration) var(--motion-easing);
 }

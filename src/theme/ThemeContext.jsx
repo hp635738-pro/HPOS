@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { DARK_TOKENS, LIGHT_TOKENS } from './tokens.js'
+import { PRESETS, presetTokens as getPresetTokens } from './presets.js'
 
 const KEY = 'nexa.prefs'
 
@@ -63,6 +64,7 @@ export const DENSITY = {
 }
 
 export const DEFAULTS = {
+  preset: 'minimal',      // minimal | aurora | darkPro | soft | enterprise
   theme: 'system',        // light | dark | system
   accent: 'blue',         // an ACCENTS id, or 'custom'
   accentCustom: '#2383e2',
@@ -72,6 +74,13 @@ export const DEFAULTS = {
   customDark: {},         // token overrides for the dark palette
   density: 'Comfortable',
   radius: 14,
+  // ---- UI personalization ----
+  animationIntensity: 100, // 0-100 — scales motion duration
+  reducedMotion: false,    // respects prefers-reduced-motion when true
+  bgStyle: 'auto',         // auto | solid | gradient | aurora | soft
+  cardStyle: 'auto',       // auto | flat | bordered | elevated | glass | soft | sharp
+  sidebarStyle: 'auto',    // auto | flat | glass | contrast | soft
+  uiScale: 100,            // alias for fontScale but exposed as UI scale (kept in sync)
   sidebar: 'expanded',    // expanded | icons
   navOrder: null,         // array of nav ids; null = use the source order
   navPinned: [],          // ids pinned to the top of the rail
@@ -325,8 +334,12 @@ export function ThemeProvider({ children }) {
   // paint every preference onto :root as CSS variables
   useEffect(() => {
     const r = document.documentElement
+    const presetId = prefs.preset || 'minimal'
+    const preset = PRESETS[presetId] || PRESETS.minimal
+    const presetPal = getPresetTokens(presetId, resolved) || {}
     const overrides = (resolved === 'dark' ? prefs.customDark : prefs.customLight) || {}
-    const pal = { ...PALETTE[resolved], ...overrides }
+    // Preset tokens sit between base and custom overrides — custom always wins.
+    const pal = { ...PALETTE[resolved], ...presetPal, ...overrides }
     Object.entries(pal).forEach(([k, v]) => r.style.setProperty(k, v))
 
     // keep the derived status tints in step with custom status colours
@@ -443,6 +456,91 @@ export function ThemeProvider({ children }) {
     r.style.setProperty('--row-h', `${d.row}px`)
     r.style.setProperty('--font', `${d.font}px`)
 
+    // ---- preset identity + effects ----
+    r.dataset.preset = presetId
+    r.style.setProperty('--preset', presetId)
+    const eff = preset.effects || {}
+    const bgStyle = prefs.bgStyle !== 'auto' ? prefs.bgStyle : eff.bgStyle || 'solid'
+    const cardStyle = prefs.cardStyle !== 'auto' ? prefs.cardStyle : eff.cardStyle || 'bordered'
+    const sidebarStyle = prefs.sidebarStyle !== 'auto' ? prefs.sidebarStyle : eff.sidebarStyle || 'flat'
+    r.style.setProperty('--bg-style', bgStyle)
+    r.style.setProperty('--card-style', cardStyle)
+    r.style.setProperty('--sidebar-style', sidebarStyle)
+    // background treatment
+    if (bgStyle === 'aurora' || presetId === 'aurora') {
+      if (resolved === 'dark') {
+        r.style.setProperty('--app-bg',
+          'radial-gradient(900px 500px at 18% 0%, rgba(139,92,246,.18), transparent 60%), radial-gradient(700px 400px at 88% 12%, rgba(59,130,246,.16), transparent 60%), var(--bg)')
+        r.style.setProperty('--glass-blur', '16px')
+      } else {
+        r.style.setProperty('--app-bg',
+          'radial-gradient(900px 520px at 12% -6%, rgba(139,92,246,.10), transparent 60%), radial-gradient(700px 420px at 92% 0%, rgba(59,130,246,.08), transparent 55%), var(--bg)')
+        r.style.setProperty('--glass-blur', '14px')
+      }
+    } else if (bgStyle === 'soft' || presetId === 'soft') {
+      r.style.setProperty('--app-bg',
+        resolved === 'dark'
+          ? 'radial-gradient(800px 400px at 50% 0%, rgba(251,113,133,.06), transparent 60%), var(--bg)'
+          : 'radial-gradient(800px 400px at 50% 0%, rgba(251,113,133,.04), transparent 60%), var(--bg)')
+      r.style.setProperty('--glass-blur', '0px')
+    } else if (bgStyle === 'gradient') {
+      r.style.setProperty('--app-bg',
+        resolved === 'dark'
+          ? 'linear-gradient(180deg, rgba(255,255,255,.02), transparent 40%), var(--bg)'
+          : 'linear-gradient(180deg, rgba(0,0,0,.015), transparent 40%), var(--bg)')
+      r.style.setProperty('--glass-blur', '0px')
+    } else {
+      r.style.setProperty('--app-bg', 'var(--bg)')
+      r.style.setProperty('--glass-blur', eff.blur ? `${eff.blur}px` : '0px')
+    }
+    r.style.setProperty('--card-style', cardStyle)
+    r.style.setProperty('--sidebar-style', sidebarStyle)
+
+    // ---- motion / animation ----
+    const sysReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    const reduce = prefs.reducedMotion || sysReduced
+    const intensity = Math.max(0, Math.min(100, prefs.animationIntensity ?? 100))
+    const baseDur = preset.motion?.duration ?? 160
+    const scaled = reduce ? 0 : (baseDur * (intensity / 100))
+    const easing = preset.motion?.easing ?? 'cubic-bezier(.2,.8,.3,1)'
+    r.style.setProperty('--motion-duration', `${scaled}ms`)
+    r.style.setProperty('--motion-easing', easing)
+    r.style.setProperty('--motion-intensity', `${intensity}%`)
+    r.style.setProperty('--motion-scale', reduce ? '0' : '1')
+    r.dataset.motion = reduce ? 'reduced' : intensity < 30 ? 'subtle' : intensity < 70 ? 'standard' : 'full'
+    r.dataset.reducedMotion = reduce ? 'true' : 'false'
+
+    // ---- ui scale sync ----
+    const scale = prefs.uiScale ?? prefs.fontScale ?? 100
+    r.style.setProperty('--font-scale', scale / 100)
+    // keep fontScale in sync for backward compat
+    if (scale !== prefs.fontScale) {
+      // quiet sync without history will be handled by setPreset etc; here we just paint
+    }
+
+    // ---- card & sidebar appearance vars ----
+    const cardBlur = cardStyle === 'glass' ? '12px' : '0px'
+    const railBlur = sidebarStyle === 'glass' ? '12px' : '0px'
+    r.style.setProperty('--card-blur', cardBlur)
+    r.style.setProperty('--rail-blur', railBlur)
+    // shadow refinement per cardStyle
+    if (cardStyle === 'glass') {
+      r.style.setProperty('--card-shadow', '0 8px 32px -12px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.06)')
+      r.style.setProperty('--card-border', 'rgba(255,255,255,.5)')
+    } else if (cardStyle === 'elevated') {
+      r.style.setProperty('--card-shadow', 'var(--shadow)')
+      r.style.setProperty('--card-border', 'var(--line)')
+    } else if (cardStyle === 'soft') {
+      r.style.setProperty('--card-shadow', '0 4px 20px -8px rgba(0,0,0,.08)')
+      r.style.setProperty('--card-border', 'var(--line)')
+    } else if (cardStyle === 'sharp') {
+      r.style.setProperty('--card-shadow', '0 1px 2px rgba(0,0,0,.05)')
+      r.style.setProperty('--card-border', 'var(--line)')
+    } else {
+      r.style.setProperty('--card-shadow', 'var(--shadow)')
+      r.style.setProperty('--card-border', 'var(--line)')
+    }
+
     r.style.setProperty('color-scheme', resolved)
     r.dataset.theme = resolved
   }, [resolved, accentHex, prefs, d])
@@ -470,11 +568,39 @@ export function ThemeProvider({ children }) {
     if (hydrated.current) saveToDisk(prefs)
   }, [prefs])
 
+  const applyPreset = (presetId) => {
+    const preset = PRESETS[presetId] || PRESETS.minimal
+    commit((p) => ({
+      ...p,
+      preset: presetId,
+      accent: preset.accent || p.accent,
+      ...preset.prefs,
+      // keep user-driven overrides that preset shouldn't clobber
+      customLight: p.customLight,
+      customDark: p.customDark,
+      navOrder: p.navOrder,
+      navPinned: p.navPinned,
+      navLocked: p.navLocked,
+      workspaces: p.workspaces,
+      activeWorkspace: p.activeWorkspace,
+      fontCustom: p.fontCustom,
+      accentCustom: p.accentCustom,
+      accentFg: p.accentFg,
+      accentSoft: p.accentSoft,
+      // reset appearance overrides to auto so preset shows fully
+      bgStyle: 'auto',
+      cardStyle: 'auto',
+      sidebarStyle: 'auto',
+    }))
+  }
+
   const value = useMemo(() => ({
     prefs,
     resolved,
     accentHex,
     set: (k, v) => commit((p) => ({ ...p, [k]: v })),
+    setPreset: applyPreset,
+    presets: PRESETS,
     /** Base palette for the active theme, before user overrides. */
     basePalette: PALETTE[resolved],
     /** Read a token's current value (override first, then base). */
