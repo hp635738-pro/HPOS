@@ -90,7 +90,7 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          npm run verify:artifacts -- --json --summary > validated-artifacts.json
+          npm run verify:artifacts -- --json --summary --out validated-artifacts.json
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           cat validated-artifacts.json
@@ -150,7 +150,7 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          npm run verify:release -- --wait --json --summary > release-verification.json
+          npm run verify:release -- --wait --json --summary --out release-verification.json
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           cat release-verification.json

@@ -42,10 +42,12 @@ const API = `https://api.github.com/repos/${OWNER}/${REPO}`
 
 function parseArgs(argv) {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-  const args = { tag: `v${pkg.version}`, version: pkg.version, wait: false, summary: false, json: false, skipDownload: false }
+  const args = { tag: `v${pkg.version}`, version: pkg.version, wait: false, summary: false, json: false, skipDownload: false, out: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
-    if (arg === '--wait') args.wait = true
+    if (arg === '--out') args.out = path.resolve(root, argv[++i])
+    else if (arg.startsWith('--out=')) args.out = path.resolve(root, arg.slice('--out='.length))
+    else if (arg === '--wait') args.wait = true
     else if (arg === '--summary') args.summary = true
     else if (arg === '--json') args.json = true
     else if (arg === '--skip-download') args.skipDownload = true
@@ -223,6 +225,9 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 if (isMain) {
   const args = parseArgs(process.argv.slice(2))
   const result = await verifyRelease(args)
+  /* Written by the script itself — `npm run` prints its banner on stdout and
+     would corrupt a shell-redirected JSON file. */
+  if (args.out) fs.writeFileSync(args.out, JSON.stringify(result, null, 2) + '\n')
   if (args.json) {
     console.log(JSON.stringify(result, null, 2))
   } else {

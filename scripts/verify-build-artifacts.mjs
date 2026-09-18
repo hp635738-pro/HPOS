@@ -33,11 +33,13 @@ const OWNER = 'hp635738-pro'
 const REPO = 'HPOS'
 
 function parseArgs(argv) {
-  const args = { dir: path.join(root, 'release'), summary: false, json: false }
+  const args = { dir: path.join(root, 'release'), summary: false, json: false, out: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--summary') args.summary = true
     else if (arg === '--json') args.json = true
+    else if (arg === '--out') args.out = path.resolve(root, argv[++i])
+    else if (arg.startsWith('--out=')) args.out = path.resolve(root, arg.slice('--out='.length))
     else if (arg === '--dir') args.dir = path.resolve(root, argv[++i])
     else if (arg.startsWith('--dir=')) args.dir = path.resolve(root, arg.slice('--dir='.length))
   }
@@ -150,6 +152,9 @@ if (isMain) {
   const args = parseArgs(process.argv.slice(2))
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
   const result = await verifyBuildArtifacts({ dir: args.dir, version: pkg.version })
+  /* Written by the script itself, not by shell redirection: `npm run` prints
+     its banner on stdout, which would corrupt a redirected JSON file. */
+  if (args.out) fs.writeFileSync(args.out, JSON.stringify(result, null, 2) + '\n')
   if (args.json) {
     console.log(JSON.stringify(result, null, 2))
     process.exit(result.ok ? 0 : 1)
