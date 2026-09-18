@@ -19,7 +19,7 @@ export const NAV = [
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
-  { id: 'assistant', label: 'Network',        Icon: NetworkAgent, accent: true },
+  { id: 'assistant', label: 'Network',        Icon: NetworkAgent },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 
@@ -212,42 +212,27 @@ export default function Sidebar({ active, onChange }) {
                 title={mini ? label : undefined}
                 aria-label={label}
                 style={(() => {
-                  const isNetwork = id === 'assistant'
-                  const networkOn = isNetwork && on
                   const baseBg = (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent'
-                  const networkBg = networkOn
-                    ? 'var(--accent-soft)'
-                    : isNetwork ? 'rgba(var(--accent-rgb), .07)' : baseBg
                   const baseColor = (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)'
-                  const networkColor = isNetwork && !on ? 'var(--accent)' : baseColor
                   return {
                     ...S.item,
                     height: prefs.railItemH,
                     borderRadius: prefs.railRadius,
                     justifyContent: mini ? 'center' : 'flex-start',
                     padding: mini ? 0 : '0 8px 0 11px',
-                    background: isNetwork ? networkBg : baseBg,
-                    color: isNetwork ? networkColor : baseColor,
-                    border: isNetwork && !on ? '1px solid rgba(var(--accent-rgb), .14)' : '1px solid transparent',
-                    boxShadow: isNetwork && on ? '0 0 0 3px var(--accent-soft), 0 1px 6px rgba(var(--accent-rgb), .18)' : 'none',
+                    background: baseBg,
+                    color: baseColor,
+                    border: '1px solid transparent',
+                    boxShadow: 'none',
                     opacity: dragging ? 0.35 : 1,
                     cursor: 'pointer',
                     transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
                   }
                 })()}
               >
-                <span style={{
-                  ...S.iconBox,
-                  ...(id === 'assistant' ? {
-                    background: on ? 'var(--accent)' : 'rgba(var(--accent-rgb), .10)',
-                    borderRadius: Math.max(prefs.railRadius - 2, 6),
-                    color: on ? 'var(--accent-fg)' : 'var(--accent)',
-                    border: '1px solid rgba(var(--accent-rgb), .12)',
-                  } : {})
-                }}>
+                <span style={S.iconBox}>
                   <Icon size={prefs.railIcon} />
                   {dot && prefs.railDots && <span style={S.dot} />}
-                  {id === 'assistant' && !mini && <span style={S.networkGlow} aria-hidden />}
                 </span>
 
                 {!mini && (
@@ -506,11 +491,6 @@ const S = {
     padding: '2px 5px', borderRadius: 4,
     background: 'var(--accent)', color: 'var(--accent-fg)',
     lineHeight: 1, flexShrink: 0, marginLeft: -4,
-  },
-  networkGlow: {
-    position: 'absolute', inset: -2, borderRadius: 'inherit',
-    background: 'radial-gradient(40% 60% at 50% 50%, rgba(var(--accent-rgb), .18), transparent 70%)',
-    pointerEvents: 'none', filter: 'blur(6px)', opacity: 0.6,
   },
   foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, marginTop: 8 },
 

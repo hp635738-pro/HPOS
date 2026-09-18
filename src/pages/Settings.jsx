@@ -400,7 +400,7 @@ const THEMES = [
 ]
 
 function PresetChooser() {
-  const { prefs, resolved, setPreset } = useTheme()
+  const { prefs, resolved, setPreset, set } = useTheme()
   const active = prefs.preset || 'minimal'
   const accentHex = (() => {
     const a = ACCENTS.find(x => x.id === prefs.accent)
@@ -408,7 +408,8 @@ function PresetChooser() {
   })()
 
   return (
-    <div style={P.grid}>
+    <>
+      <div style={P.grid}>
       {PRESET_ORDER.map(id => {
         const preset = PRESETS[id]
         const isActive = active === id
@@ -487,7 +488,21 @@ function PresetChooser() {
           </button>
         )
       })}
-    </div>
+      </div>
+
+      {/* Status + reset (moved here with the section — Presets is now
+          Advanced-settings only, this is its single render site). */}
+      <div style={P.resetRow}>
+        <span style={P.resetText}>
+          Preset: <b style={{ color: 'var(--text)' }}>{PRESETS[active]?.label || 'Minimal'}</b> · {PRESETS[active]?.character}
+        </span>
+        <span style={{ flex: 1 }} />
+        <button
+          onClick={() => { set('preset', 'minimal'); set('bgStyle', 'auto'); set('cardStyle', 'auto'); set('sidebarStyle', 'auto') }}
+          style={P.resetBtn}
+        >Reset to Minimal</button>
+      </div>
+    </>
   )
 }
 
@@ -523,6 +538,13 @@ const P = {
   meta: { display: 'flex', gap: 6, padding: '2px 2px 0' },
   metaChip: { fontSize: 9, fontWeight: 800, letterSpacing: '.3px', padding: '3px 6px', borderRadius: 4, border: '1px solid' },
   metaChip2: { fontSize: 9, fontWeight: 600, color: 'var(--muted)', padding: '3px 6px' },
+  resetRow: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  resetText: { fontSize: 11, color: 'var(--muted)', fontWeight: 500 },
+  resetBtn: {
+    fontSize: 11, fontWeight: 700, color: 'var(--muted)',
+    background: 'var(--surface-2)', border: '1px solid var(--line)',
+    padding: '5px 10px', borderRadius: 6,
+  },
 }
 
 /**
@@ -539,9 +561,8 @@ const ADV_CATEGORIES = [
 
 /**
  * Accent colour picker — swatches, custom hex, text-on-accent and tint
- * strength. Rendered from BOTH the Quick settings page (inside its
- * "Accent colour" section) and the Advanced settings "Accent colour" page:
- * one implementation, two entry points (same pattern as PresetChooser and
+ * strength. Advanced settings only (Appearance → "Accent colour" page):
+ * one implementation, one render site (same pattern as PresetChooser and
  * the shared updater panels).
  */
 function AccentSection() {
@@ -649,27 +670,15 @@ export default function Settings({ jumpTo, onJumped }) {
           <div>
             <h2 style={S.h2}>Quick settings</h2>
             <p style={S.sub}>
-              The everyday look — preset, theme, accent colour and basic
-              layout. Every change applies instantly and is saved to this
-              browser. Everything else lives in Advanced settings.
+              The everyday look — theme and basic layout. Every change
+              applies instantly and is saved to this browser. Presets,
+              accent colour and everything else live in Advanced settings.
             </p>
           </div>
         </header>
 
-        {/* -------------------------------------------------- PRESETS */}
-        <Section title="Presets" desc="Five distinct visual identities — pick one, then fine-tune below. Each preset has its own palette, spacing, borders, shadows, typography and motion.">
-          <PresetChooser />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>
-              Preset: <b style={{ color: 'var(--text)' }}>{PRESETS[prefs.preset || 'minimal']?.label || 'Minimal'}</b> · {PRESETS[prefs.preset || 'minimal']?.character}
-            </span>
-            <span style={{ flex: 1 }} />
-            <button
-              onClick={() => { set('preset', 'minimal'); set('bgStyle','auto'); set('cardStyle','auto'); set('sidebarStyle','auto') }}
-              style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', padding: '5px 10px', borderRadius: 6 }}
-            >Reset to Minimal</button>
-          </div>
-        </Section>
+        {/* Presets and Accent colour live in Advanced settings only
+            (Appearance group) — shared PresetChooser / AccentSection. */}
 
         {/* ------------------------------------------------------------ THEME */}
         <Section title="Theme" desc="Light, dark, or follow your operating system.">
@@ -732,11 +741,6 @@ export default function Settings({ jumpTo, onJumped }) {
               Following your OS — currently <b>{resolved}</b>.
             </p>
           )}
-        </Section>
-
-        {/* ----------------------------------------------------------- ACCENT */}
-        <Section title="Accent colour" desc="Used for highlights, controls and the active state.">
-          <AccentSection />
         </Section>
 
         {/* ----------------------------------------------------------- LAYOUT */}
@@ -1056,5 +1060,5 @@ const S = {
 }
 
 /* Shared with the dedicated pages inside Advanced settings
-   (components/AdvancedEditor.jsx) — one implementation, two entry points. */
+   (components/AdvancedEditor.jsx) — one implementation, rendered only there. */
 export { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel }

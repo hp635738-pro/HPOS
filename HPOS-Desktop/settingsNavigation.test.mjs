@@ -34,9 +34,9 @@
  *   4. Topbar: clicking the gear calls onNavigate('settings') — the real
  *      handler is executed against a spy
  *   5. App: navigate()/inRail/title/route wiring — real expressions executed
- *   6. Settings structure: Quick settings on the main page (presets, theme,
- *      accent, layout), Advanced settings entry, updater panels shared with
- *      the dedicated Updates page (behavior and copy untouched)
+ *   6. Settings structure: Quick settings on the main page (theme, layout);
+ *      presets + accent are Advanced-settings-only, updater panels shared
+ *      with the dedicated Updates page (behavior and copy untouched)
  *   7. updater IPC stays safe (no arbitrary URLs, argument-free bridge)
  *   8. navigation architecture/security: fixed literal view id only — no
  *      URLs, no IPC, no shell, no renderer filesystem/Git access
@@ -331,9 +331,13 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
 {
   assert.ok(settings.includes('export default function Settings({ jumpTo, onJumped })'), 'Settings page signature untouched')
   assert.ok(settings.includes('Quick settings'), 'the main page is the Quick settings page')
-  for (const s of ['Presets', 'Theme', 'Accent colour', 'Layout']) {
+  for (const s of ['Theme', 'Layout']) {
     assert.ok(settings.includes(`title="${s}"`), `Quick settings keeps its ${s} section`)
   }
+  // Presets + Accent colour moved to Advanced settings only (Appearance
+  // group, one shared component each) — no section left on the quick page.
+  assert.ok(!settings.includes('title="Presets"'), 'Presets is Advanced-only (no quick-page section)')
+  assert.ok(!settings.includes('title="Accent colour"'), 'Accent colour is Advanced-only (no quick-page section)')
   assert.ok(settings.includes('Advanced settings'), 'the main page keeps the Advanced settings entry')
   assert.ok(settings.includes('AdvancedEditor'), 'Settings still opens the advanced editor')
 
@@ -409,9 +413,9 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   const combined = settings + '\n' + advanced
 
   // Each moved setting row lives in exactly one place (quick OR advanced).
-  // Note: accent rows (e.g. Tint strength) appear exactly once in source
-  // because ONE shared AccentSection component is rendered from BOTH the
-  // quick page and the advanced "Accent colour" page — by request.
+  // Note: accent rows (e.g. Tint strength) appear exactly once in source —
+  // ONE shared AccentSection component, rendered from the advanced
+  // "Accent colour" page only (Advanced-only by request).
   for (const label of [
     'Density', 'Tint strength', 'Corner radius',
     'Animation intensity', 'Sidebar density', 'UI scale', 'Card radius',
