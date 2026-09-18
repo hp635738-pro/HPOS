@@ -1,17 +1,25 @@
-> # ⚠️ RELEASE STATUS: **nothing has been published yet — PR #36 is END-TO-END NOT VERIFIED**
+> # ✅ Release 0.1.1 is PUBLISHED — ⚠️ the installed-app test is still NOT VERIFIED
 >
-> **No release and no tag have been created for 0.1.1.** `hp635738-pro/HPOS`
-> still has **0 releases / 0 tags**. Deliberately so: publishing a release
-> without the real `hpos_0.1.1_amd64.deb` **and** `latest-linux.yml` would put
-> every installed HPOS into exactly the failure this work fixes, and creating
-> the tag `v0.1.1` would make `release:check` refuse that version forever.
+> **Published:** `v0.1.1` (tag → commit `d3798b2` on `arena/01a0b2b5-hpos`),
+> 2026-09-18T05:46:21Z — <https://github.com/hp635738-pro/HPOS/releases/tag/v0.1.1>
 >
-> The workflow below is **verified structurally and by integration test only**
-> (real electron-updater parsing of electron-builder-shaped metadata, see
-> `HPOS-Desktop/releaseMetadata.integration.test.mjs`). It has **not** produced
-> a real release yet, because the sandbox cannot download the Electron binary
-> needed to build the artifacts. Run step 1–3 on a normal machine, then
-> `TESTING-UPDATES.md` §1–§9, before merging PR #36.
+> | asset | bytes | sha512 (verified by downloading the published asset) |
+> | --- | --- | --- |
+> | `hpos_0.1.1_amd64.deb` | 84,763,828 | `JcFOMg2D/ylQR1cQuf75zn98q3I8Y17TyelJhywCnSbe1WEmIQ0mtNn24wqZm0bbdzCltVcMl0CM2TmOQBjmLA==` |
+> | `HPOS-0.1.1.AppImage` | 108,100,152 | `CpszNIVgbWlpjc5d+OD6N1E2vQHm6LMcGTY2fOcDftcqdBvN1AL0ers57MAgrsPPnkRXlsj98PBrNmyFGQqEmQ==` |
+> | `latest-linux.yml` | 510 | (metadata: version 0.1.1, one entry per artifact) |
+> | `HPOS-Setup-0.1.1.exe` / `.exe.blockmap` / `latest.yml` | 77,889,238 / 82,318 / 336 | Windows |
+>
+> The release is **not a draft and not a pre-release**, and
+> `GET /releases/latest` resolves to `v0.1.1`. A CI job downloaded every asset
+> listed in `latest-linux.yml` back from the release and compared its sha512
+> with the metadata — that is the integrity check the updater performs before
+> `dpkg` ever sees the file.
+>
+> **What has NOT been verified:** no installed HPOS has ever run
+> Settings → App → Check for Updates against this release. That single test is
+> performed on the machine that has HPOS 0.1.0 installed from the `.deb`.
+> PR #36 stays NOT VERIFIED until it is done. See `TESTING-UPDATES.md` §0.
 
 # Releasing HPOS (the in-app updater's source of truth)
 

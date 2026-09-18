@@ -1,23 +1,31 @@
-> # ⚠️ STATUS: **END-TO-END NOT VERIFIED**
+> # ⚠️ STATUS: **the installed-app test is NOT VERIFIED** (the release is real)
 >
-> **PR #36 has NOT been validated end to end.** The flow
-> *installed 0.1.0 → Check for Updates → 0.1.1 detected → Download → Restart →
-> running 0.1.1* **has never been executed**, on any machine, because:
+> **Release 0.1.1 is published** (`v0.1.1`, commit `d3798b2`):
+> <https://github.com/hp635738-pro/HPOS/releases/tag/v0.1.1> — with
+> `hpos_0.1.1_amd64.deb`, `HPOS-0.1.1.AppImage` and `latest-linux.yml`, all
+> sha512-verified by a CI job that downloaded the published assets back.
 >
-> 1. **No published release exists.** `hp635738-pro/HPOS` has **0 releases and
->    0 tags** (`gh release list` / `gh api …/releases` → empty). There is
->    nothing for an installed app to detect.
-> 2. **The 0.1.1 artifacts cannot be built in the agent sandbox** — see
->    *§12 Why the agent could not run this*.
-> 3. **The agent machine has no installed HPOS** (`dpkg-query -W hpos` → not
->    installed, `/opt/HPOS` does not exist) and is **not root**, so it cannot
->    install one either.
+> **What is still NOT verified:** the flow
+> *installed 0.1.0 → Settings → App → Check for Updates → 0.1.1 detected →
+> Download → Restart to Update → running 0.1.1* has **never been executed**.
+> The agent machine has no HPOS installed (`dpkg-query -W hpos` → not
+> installed, `/opt/HPOS` does not exist) and is not root, so it cannot run it.
+> **Nothing in §1–§9 has been run.** PR #36 stays NOT VERIFIED until the
+> machine that has HPOS 0.1.0 installed has run §1–§9.
 >
-> What *has* been verified is listed in **§11 (automated coverage)** plus the
-> real-`electron-updater` integration test and the real `dpkg` install run
-> described there. **Nothing below §0 has been executed on real hardware.**
-> Do not merge on the basis of unit tests alone — run §1–§9 on a machine with
-> HPOS 0.1.0 installed.
+> **Read this before judging the result** — the two sides are different code:
+>
+> | | HPOS **0.1.0** (installed now) | HPOS **0.1.1** (this release) |
+> | --- | --- | --- |
+> | updater object | `require('electron-updater').autoUpdater`, which reads `resources/package-type` and resolves to the library's own `DebUpdater` | `DebUpdater` (deb) / `AppImageUpdater` (AppImage), chosen explicitly in `main.js` |
+> | install | library: `dpkg -i` (fallback `apt-get install -f -y`) through `runCommandWithSudoIfNeeded` (pkexec) | `linuxUpdate.js`: re-verify sha512 → `pkexec --disable-internal-agent dpkg -i` → apt repair → `app.relaunch()` |
+> | failure reporting | a generic "The update check failed." | categorised (`ERELEASE`/`EINTEGRITY`/`EPRIV`/…) |
+>
+> So a successful §1–§9 run on 0.1.0 proves the **release metadata, artifact
+> naming and sha512** are right, and that the library's own deb path works.
+> The PR #36 install backend (`linuxUpdate.js`) only ships *inside* 0.1.1 and
+> is exercised by the **next** update (0.1.1 → 0.1.2). Both matter; they are
+> different tests.
 
 # End-to-end updater test plan (installed Linux `.deb`)
 
@@ -181,7 +189,7 @@ silent failure. Installing `policykit-1` makes the normal flow work.
 | The sandbox cannot build the .deb | `npm run dist:linux` reaches `packaging platform=linux arch=x64 electron=31.0.0` and then fails with `RequestError: unable to verify the first certificate`. Electron is downloaded from `objects.githubusercontent.com`, which this sandbox's egress proxy hard-blocks (`curl` → `SSL_ERROR_SYSCALL`); `npmmirror.com` is blocked too. |
 | No installed HPOS here | `node scripts/verify-deb-install.mjs` → `dpkg reports package hpos — not installed`, `/opt/HPOS/hpos — ENOENT`. This machine is **not** the machine described in the task. |
 | No root, no Polkit here | `id -u` → `1001`, no `sudo`, no `pkexec` — a real `dpkg -i` into `/` and a real Polkit prompt are both impossible. |
-| No release may be published yet | Publishing a release **without** the real `hpos_0.1.1_amd64.deb` + `latest-linux.yml` would push every installed HPOS into exactly the failure this PR fixes (`ERELEASE`), and tagging `v0.1.1` would make `release:check` refuse that version forever. **Therefore no release and no tag were created.** |
+| ~~No release may be published yet~~ — **solved with GitHub Actions** | The sandbox cannot build (Electron download blocked), so CI became the build environment: workflow run [35311956443](https://github.com/hp635738-pro/HPOS/actions/runs/35311956443) built AppImage + deb + `latest-linux.yml`, published release `v0.1.1`, re-downloaded every asset from the release and compared its sha512 with the metadata. |
 
 What the agent *did* run, for real (no mocks of the library):
 
@@ -205,9 +213,27 @@ What the agent *did* run, for real (no mocks of the library):
   `/opt/HPOS/resources/` → `dpkg -l hpos` → `0.1.1`. So the install command
   this PR issues really installs a package.
 
+**Plus, in GitHub Actions (real machines, real Electron, real network):**
+
+* `verify` — `npm run lint`, `npm test` (637 assertions, 31 suites) and
+  `npm run release:check`.
+* `validate` — `npm run dist:linux` really built `hpos_0.1.1_amd64.deb` and
+  `HPOS-0.1.1.AppImage`, and `npm run verify:artifacts` asserted that every
+  `sha512`/`size` in `latest-linux.yml` is the hash of the file that gets
+  uploaded and resolves to `…/releases/download/v0.1.1/<file>`.
+* `release-linux` — `npm run release:linux` published the release, then
+  `npm run verify:release` proved it is not a draft, that
+  `/releases/latest` → `v0.1.1`, that `latest-linux.yml` is downloadable at
+  the URL the updater requests, that **every entry points at an asset that
+  really exists**, and that the downloaded asset's sha512 equals the metadata.
+  The report is published as commit statuses (`hpos/verify/release/*`) on
+  commit `d3798b2`.
+* `release-win` — published `HPOS-Setup-0.1.1.exe` + `latest.yml` into the
+  same release.
+
 None of that exercises: the installed 0.1.0 app, the Settings → App buttons,
-the real download from GitHub, the real Polkit dialog, or the restart.
-**Those are still untested.**
+the download as seen by a real installed app, the real Polkit dialog, or the
+restart. **Those are still untested — they are §1–§9 below.**
 
 ---
 
