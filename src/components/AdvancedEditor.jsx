@@ -12,7 +12,7 @@ import PalettePanel from './PalettePanel'
 import WorkspacePanel from './WorkspacePanel'
 import ComponentPanel from './ComponentPanel'
 import Notch from './Notch'
-import { GitHubUpdatePanel, PresetChooser, UpdatesPanel } from '../pages/Settings'
+import { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel } from '../pages/Settings'
 import { Card, Row, Segmented, Toggle } from './ui/Bits'
 import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill, Sparkle } from './Icons'
 
@@ -56,6 +56,16 @@ const PAGES = [
     desc: 'Five distinct visual identities — the same picker as the Quick settings page; fine-tune afterwards with the other Appearance pages.',
     keywords: 'preset identity look glass aurora minimal dark pro soft enterprise compact pick switch',
     Panel: () => <Card><PresetChooser /></Card>,
+  },
+  {
+    id: 'accent',
+    related: ['presets', 'colours'],
+    name: 'Accent colour',
+    group: 'Appearance',
+    Icon: Droplet,
+    desc: 'The highlight colour for controls, links and active states — the same picker as the Quick settings page.',
+    keywords: 'accent colour highlight tint strength hex custom contrast white black',
+    Panel: () => <Card><AccentSection /></Card>,
   },
   {
     id: 'workspaces',

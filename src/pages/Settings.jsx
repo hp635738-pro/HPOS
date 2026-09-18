@@ -537,6 +537,93 @@ const ADV_CATEGORIES = [
   { name: 'Content', page: 'pages' },
 ]
 
+/**
+ * Accent colour picker — swatches, custom hex, text-on-accent and tint
+ * strength. Rendered from BOTH the Quick settings page (inside its
+ * "Accent colour" section) and the Advanced settings "Accent colour" page:
+ * one implementation, two entry points (same pattern as PresetChooser and
+ * the shared updater panels).
+ */
+function AccentSection() {
+  const { prefs, set } = useTheme()
+  return (
+    <>
+      <div style={S.swatches}>
+        {ACCENTS.map((a) => {
+          const on = prefs.accent === a.id
+          return (
+            <button
+              key={a.id}
+              onClick={() => set('accent', a.id)}
+              title={a.name}
+              style={{
+                ...S.swatch,
+                background: a.hex,
+                boxShadow: on ? `0 0 0 3px var(--surface), 0 0 0 5px ${a.hex}` : 'none',
+              }}
+            >
+              {on && <Check size={17} style={{ color: isLight(a.hex) ? '#101114' : '#fff' }} />}
+            </button>
+          )
+        })}
+
+        {/* Custom sits in the same row, opening the OS colour picker. */}
+        <label
+          title="Custom colour"
+          style={{
+            ...S.swatch,
+            position: 'relative', overflow: 'hidden', cursor: 'pointer',
+            background: prefs.accent === 'custom'
+              ? prefs.accentCustom
+              : 'conic-gradient(from .25turn, #f43f5e, #f59e0b, #10b981, #06b6d4, #2383e2, #8b5cf6, #f43f5e)',
+            boxShadow: prefs.accent === 'custom'
+              ? `0 0 0 3px var(--surface), 0 0 0 5px ${prefs.accentCustom}`
+              : 'none',
+          }}
+        >
+          <input
+            type="color"
+            value={prefs.accentCustom}
+            onChange={(e) => { set('accentCustom', e.target.value); set('accent', 'custom') }}
+            style={S.hiddenColor}
+          />
+          {prefs.accent === 'custom'
+            ? <Check size={17} style={{ color: isLight(prefs.accentCustom) ? '#101114' : '#fff' }} />
+            : <span style={S.plus}>+</span>}
+        </label>
+      </div>
+
+      <Row label="Custom hex" hint="Any colour you like — applies instantly.">
+        <ColourField
+          value={prefs.accentCustom}
+          onChange={(v) => { set('accentCustom', v); set('accent', 'custom') }}
+        />
+      </Row>
+
+      <Row label="Text on accent" hint="Auto picks black or white for contrast.">
+        <Segmented
+          value={prefs.accentFg}
+          options={['auto', 'light', 'dark']}
+          labels={{ light: 'White', dark: 'Black' }}
+          onChange={(v) => set('accentFg', v)}
+        />
+      </Row>
+
+      <Row label="Tint strength" hint={`${prefs.accentSoft}% — soft accent backgrounds.`}>
+        <div style={S.sliderWrap}>
+          <input
+            type="range" min="4" max="40" step="1"
+            value={prefs.accentSoft}
+            onChange={(e) => set('accentSoft', +e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <span style={S.radiusVal}>{prefs.accentSoft}</span>
+        </div>
+      </Row>
+    </>
+  )
+}
+
 export default function Settings({ jumpTo, onJumped }) {
   const { prefs, resolved, accentHex, set } = useTheme()
   // The Advanced settings overlay is a slide + fade panel: it stays mounted
@@ -649,78 +736,7 @@ export default function Settings({ jumpTo, onJumped }) {
 
         {/* ----------------------------------------------------------- ACCENT */}
         <Section title="Accent colour" desc="Used for highlights, controls and the active state.">
-          <div style={S.swatches}>
-            {ACCENTS.map((a) => {
-              const on = prefs.accent === a.id
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => set('accent', a.id)}
-                  title={a.name}
-                  style={{
-                    ...S.swatch,
-                    background: a.hex,
-                    boxShadow: on ? `0 0 0 3px var(--surface), 0 0 0 5px ${a.hex}` : 'none',
-                  }}
-                >
-                  {on && <Check size={17} style={{ color: isLight(a.hex) ? '#101114' : '#fff' }} />}
-                </button>
-              )
-            })}
-
-            {/* Custom sits in the same row, opening the OS colour picker. */}
-            <label
-              title="Custom colour"
-              style={{
-                ...S.swatch,
-                position: 'relative', overflow: 'hidden', cursor: 'pointer',
-                background: prefs.accent === 'custom'
-                  ? prefs.accentCustom
-                  : 'conic-gradient(from .25turn, #f43f5e, #f59e0b, #10b981, #06b6d4, #2383e2, #8b5cf6, #f43f5e)',
-                boxShadow: prefs.accent === 'custom'
-                  ? `0 0 0 3px var(--surface), 0 0 0 5px ${prefs.accentCustom}`
-                  : 'none',
-              }}
-            >
-              <input
-                type="color"
-                value={prefs.accentCustom}
-                onChange={(e) => { set('accentCustom', e.target.value); set('accent', 'custom') }}
-                style={S.hiddenColor}
-              />
-              {prefs.accent === 'custom'
-                ? <Check size={17} style={{ color: isLight(prefs.accentCustom) ? '#101114' : '#fff' }} />
-                : <span style={S.plus}>+</span>}
-            </label>
-          </div>
-
-          <Row label="Custom hex" hint="Any colour you like — applies instantly.">
-            <ColourField
-              value={prefs.accentCustom}
-              onChange={(v) => { set('accentCustom', v); set('accent', 'custom') }}
-            />
-          </Row>
-
-          <Row label="Text on accent" hint="Auto picks black or white for contrast.">
-            <Segmented
-              value={prefs.accentFg}
-              options={['auto', 'light', 'dark']}
-              labels={{ light: 'White', dark: 'Black' }}
-              onChange={(v) => set('accentFg', v)}
-            />
-          </Row>
-
-          <Row label="Tint strength" hint={`${prefs.accentSoft}% — soft accent backgrounds.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="4" max="40" step="1"
-                value={prefs.accentSoft}
-                onChange={(e) => set('accentSoft', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.accentSoft}</span>
-            </div>
-          </Row>
+          <AccentSection />
         </Section>
 
         {/* ----------------------------------------------------------- LAYOUT */}
@@ -1041,4 +1057,4 @@ const S = {
 
 /* Shared with the dedicated pages inside Advanced settings
    (components/AdvancedEditor.jsx) — one implementation, two entry points. */
-export { GitHubUpdatePanel, PresetChooser, UpdatesPanel }
+export { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel }

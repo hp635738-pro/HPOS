@@ -252,7 +252,7 @@ assert(
   // Settings.jsx, so there is exactly one implementation).
   const advanced = readFileSync(join(dir, '..', 'components', 'AdvancedEditor.jsx'), 'utf8')
   assert(advanced.includes('<GitHubUpdatePanel />'), '5: GitHubUpdatePanel is rendered by the Advanced settings Updates page')
-  assert(settings.includes('export { GitHubUpdatePanel, PresetChooser, UpdatesPanel }'), '5: Settings.jsx exports the shared panels (updater + preset chooser)')
+  assert(settings.includes('export { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel }'), '5: Settings.jsx exports the shared panels (updater, preset + accent choosers)')
 }
 
 /* 6. update-mechanism reporting (Linux .deb vs AppImage vs NSIS) --------- */

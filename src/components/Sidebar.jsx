@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTheme } from '../theme/ThemeContext'
 import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, NetworkAgent,
@@ -354,11 +355,19 @@ export default function Sidebar({ active, onChange }) {
         </button>
       </div>
 
-      {/* ------------------------------------------------------ CONTEXT MENU */}
-      {menu && (
+      {/* ------------------------------------------------------ CONTEXT MENU
+          Portaled to <body>: the rail is a scroll container, and a fixed
+          element must live outside it (viewport coordinates, no clipping,
+          not dragged along with rail scroll). Coordinates are clamped so
+          the menu never overflows the window edge. */}
+      {menu && typeof document !== 'undefined' && createPortal(
         <div
           className="float-layer"
-          style={{ ...S.menu, left: menu.x + 2, top: menu.y + 2 }}
+          style={{
+            ...S.menu,
+            left: Math.max(4, Math.min(menu.x + 2, (window.innerWidth || 1280) - 200)),
+            top: Math.max(4, Math.min(menu.y + 2, (window.innerHeight || 800) - 190)),
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <span style={S.menuHead}>{menuItem?.label}</span>
@@ -397,7 +406,8 @@ export default function Sidebar({ active, onChange }) {
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </aside>
   )
@@ -407,8 +417,12 @@ const S = {
   rail: {
     position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
     background: 'var(--rail)',
-    backdropFilter: 'blur(var(--rail-blur, 0px))',
-    WebkitBackdropFilter: 'blur(var(--rail-blur, 0px))',
+    /* Glass blur is applied by index.css, scoped to the glass preset. Do NOT
+       set backdrop-filter inline here: any non-none value makes this <aside>
+       the containing block for position:fixed descendants (the context
+       menu), which then resolves its viewport coordinates against the rail
+       and gets clipped by the rail's overflow — the menu rendered as a cut
+       strip at the rail edge. */
     display: 'flex', flexDirection: 'column',
     transition: 'width .22s cubic-bezier(.4,0,.2,1), background .22s,\n                 border-radius .18s, margin .18s',
   },

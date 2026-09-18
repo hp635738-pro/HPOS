@@ -409,6 +409,9 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   const combined = settings + '\n' + advanced
 
   // Each moved setting row lives in exactly one place (quick OR advanced).
+  // Note: accent rows (e.g. Tint strength) appear exactly once in source
+  // because ONE shared AccentSection component is rendered from BOTH the
+  // quick page and the advanced "Accent colour" page — by request.
   for (const label of [
     'Density', 'Tint strength', 'Corner radius',
     'Animation intensity', 'Sidebar density', 'UI scale', 'Card radius',
