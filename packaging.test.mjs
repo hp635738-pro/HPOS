@@ -89,10 +89,21 @@ console.log('packaging configuration tests...')
   /* The in-app updater (task §6) uses a PINNED release source: the GitHub
      provider for exactly this repo. No token or secret may live in the
      config (release-time auth comes from the CI environment). */
+  assert.equal(pkg.build.publish.provider, 'github', 'the updater only trusts the GitHub provider')
+  assert.equal(pkg.build.publish.owner, 'hp635738-pro', 'the release source is pinned to this repository owner')
+  assert.equal(pkg.build.publish.repo, 'HPOS', 'the release source is pinned to this repository')
+  /* electron-builder defaults to a DRAFT release, and electron-updater reads
+     `/releases/latest`, which skips drafts — a draft would be invisible to
+     every installed app. `releaseType: release` is what makes the release
+     real, so it is part of the pinned contract. */
+  assert.equal(pkg.build.publish.releaseType, 'release', 'the release must be published (never a draft/pre-release)')
+  for (const secret of ['token', 'password', 'privateKey']) {
+    assert.equal(pkg.build.publish[secret], undefined, `no ${secret} in the config — auth comes from the environment`)
+  }
   assert.deepEqual(
-    pkg.build.publish,
-    { provider: 'github', owner: 'hp635738-pro', repo: 'HPOS' },
-    'build.publish must pin the controlled GitHub release source with no secrets'
+    Object.keys(pkg.build.publish).sort(),
+    ['owner', 'provider', 'releaseType', 'repo'],
+    'build.publish pins the controlled GitHub release source with no secrets'
   )
   console.log('ok: release metadata (name/productName/appId/author/version) + pinned release source')
 }
@@ -451,7 +462,16 @@ console.log('packaging configuration tests...')
   const workflow = fs.readFileSync(workflowPath, 'utf8')
   assert.match(workflow, /tags:\s*\n\s*- 'v\*'/, 'releases are cut by pushing a v* tag')
   assert.match(workflow, /workflow_dispatch/, 'a manual release is possible on purpose')
-  assert.doesNotMatch(workflow, /on:\s*push:\s*\n\s*branches/, 'an ordinary branch push must NOT publish')
+  /* Branch pushes ARE allowed to run the pipeline — they only ever validate
+     (the publish job is gated on a v* tag or a non-dry manual run). That is
+     what makes "the workflow configuration is validated" a real gate instead
+     of a claim. */
+  assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'publishing only happens for a v* tag')
+  assert.match(workflow, /dry_run != 'true'/, 'a manual run only publishes when dry-run is switched off')
+  assert.match(workflow, /needs: \[verify, validate\]/, 'the publish job runs only after the validation job succeeded')
+  assert.match(workflow, /npm run dist:linux/, 'the validation build uses --publish never (dist:linux)')
+  assert.match(workflow, /npm run verify:artifacts/, 'the validation build asserts the artifacts + hashes')
+  assert.match(workflow, /npm run verify:release/, 'a published release is verified (assets + metadata + sha512)')
   assert.match(workflow, /secrets\.GITHUB_TOKEN/, 'publish auth comes from the CI secret')
   assert.doesNotMatch(workflow, /(ghp_|github_pat_)[A-Za-z0-9_]+/, 'no hardcoded token in the workflow')
 

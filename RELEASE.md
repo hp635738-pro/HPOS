@@ -59,6 +59,8 @@ git push origin main --tags
 | `npm run release:linux` | gate → `build:prod` → workspace payload → `electron-builder --linux appimage deb --publish always` |
 | `npm run release:win` | gate → `build:prod` → workspace payload → `electron-builder --win nsis --publish always` |
 | `npm run release` | `release:linux` then `release:win` |
+| `npm run verify:artifacts` | **Local/CI gate, no network, no publish.** Checks `release/` really contains `hpos_<v>_amd64.deb` + `HPOS-<v>.AppImage` + `latest-linux.yml`, that every `sha512`/`size` in that file is the real hash of the file that will be uploaded, and that each entry resolves to `…/releases/download/v<v>/<file>`. |
+| `npm run verify:release` | Checks a **published** release: not a draft, `/releases/latest` resolves to it, the assets exist, `latest-linux.yml` is downloadable, every entry points at a real asset, and the downloaded asset's sha512 equals the one in the metadata. `--wait` polls, `--summary` writes a GitHub job summary. |
 
 Authentication comes from the environment only — never from `package.json`:
 
@@ -70,15 +72,44 @@ npm run release:linux
 `build.publish` stays a bare pin with no secrets:
 
 ```json
-"publish": { "provider": "github", "owner": "hp635738-pro", "repo": "HPOS" }
+"publish": { "provider": "github", "owner": "hp635738-pro", "repo": "HPOS", "releaseType": "release" }
 ```
+
+`releaseType: "release"` is not decoration: electron-builder defaults to a
+**draft** release, and `electron-updater` reads `GET /releases/latest`, which
+skips drafts and pre-releases. A draft release is invisible to every installed
+app.
 
 ### CI (recommended path)
 
-`.github/workflows/release.yml` runs on **pushed `v*` tags** and on a manual
-`workflow_dispatch`. Ordinary branch pushes and pull requests only build and
-test — they never publish. The job runs `verify` (lint + tests) first, then
-`npm run release:check` and the publish step with `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`.
+`.github/workflows/release.yml` has three jobs; **publishing can only happen
+after the first two succeeded**:
+
+| Job | Runs on | Does |
+| --- | --- | --- |
+| `verify` | every run | `npm run lint`, `npm test`, `npm run release:check` (version increment + pinned source + token) |
+| `validate` | every run | `npm run dist:linux` (**`--publish never`**) and `npm run verify:artifacts` — proves, in CI, that the exact artifacts and hashes the updater needs are produced, then uploads them for inspection |
+| `release` | **`v*` tag push**, or `workflow_dispatch` with `dry_run` switched off | `npm run release:linux` / `release:win`, then `gh release edit … --draft=false --prerelease=false`, then `npm run verify:release -- --wait --summary` |
+
+Triggers:
+
+* `git push origin v0.1.1` — the normal release path. The workflow file is read
+  from the **pushed commit**, so a tag pushed on any branch (not just `main`)
+  runs the pipeline as it exists in that commit.
+* `workflow_dispatch` — manual, from the Actions UI / `gh workflow run`, with
+  `dry_run` (default **true**: validation only) and `target`
+  (`all` / `linux` / `win`). GitHub resolves `workflow_dispatch` against the
+  **default branch**, so this only becomes available once the workflow is
+  merged to `main`.
+* ordinary branch pushes (`main`, `arena/**`) — `verify` + `validate` only,
+  never a publish. This is what makes "the workflow configuration is
+  validated" a gate rather than a claim.
+
+Auth: `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` with
+`permissions: contents: write`. The `release` job sets
+`HPOS_RELEASE_OFFLINE=1` because the version-increment gate already ran in
+`verify` — otherwise the second platform job would trip over the release this
+same run creates.
 
 ## 3. What ends up in the release
 
@@ -102,6 +133,7 @@ release/
 Verify a published release before announcing it:
 
 ```bash
+npm run verify:release -- --tag v0.1.1        # assets + metadata + sha512, fails loudly
 curl -sSL https://github.com/hp635738-pro/HPOS/releases/latest/download/latest-linux.yml
 ```
 

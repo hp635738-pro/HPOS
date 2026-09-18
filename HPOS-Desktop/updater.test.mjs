@@ -288,7 +288,12 @@ function makeTestUpdater({ autoUpdater = true, isPackaged = true } = {}) {
 
   // The release source is pinned in package.json and the dist scripts
   // never publish from a developer machine.
-  assert.deepEqual(pkg.build.publish, { provider: 'github', owner: 'hp635738-pro', repo: 'HPOS' })
+  assert.equal(pkg.build.publish.provider, 'github')
+  assert.equal(pkg.build.publish.owner, 'hp635738-pro')
+  assert.equal(pkg.build.publish.repo, 'HPOS')
+  // electron-builder would otherwise create a DRAFT release, which the updater
+  // never sees (`/releases/latest` skips drafts).
+  assert.equal(pkg.build.publish.releaseType, 'release')
   for (const script of ['dist', 'dist:win', 'dist:dir']) {
     assert.ok(pkg.scripts[script].includes('--publish never'), `${script} never publishes`)
   }
