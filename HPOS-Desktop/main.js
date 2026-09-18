@@ -8,6 +8,10 @@ const { seedWorkspaceIfNeeded } = require('./workspaceSeed')
 const { createTerminalManager } = require('./terminalSession')
 const { createDevLauncher, DEV_WORKSPACE_FLAG } = require('./devLaunch')
 const { createUpdater } = require('./updater')
+const {
+  describeUpdateMechanism,
+  createLinuxPackageBackend,
+} = require('./linuxUpdate')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -516,32 +520,131 @@ function pushUpdaterEvent(payload) {
   }
 }
 
+/* Where electron-builder puts the `package-type` / `app-update.yml` markers
+   that tell a packaged Linux install how it was installed. */
+function packagedResourceDir() {
+  try {
+    return typeof process.resourcesPath === 'string' ? process.resourcesPath : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The electron-updater engine that matches THIS installation.
+ *
+ * Windows/macOS keep using the library singleton exactly as before. On Linux
+ * we select the class explicitly instead of relying on the singleton's
+ * `package-type` sniffing, because that sniffing silently falls back to
+ * AppImageUpdater (which then reports itself as inactive) whenever the
+ * marker is missing — the state the installed .deb was stuck in.
+ */
+function createElectronUpdater(kind) {
+  // electron-updater is a production dependency in the packaged app.
+  // Dev trees never need it (require is lazy, packaged branch only).
+  const eu = require('electron-updater')
+  if (process.platform === 'linux') {
+    if (kind === 'appimage' && typeof eu.AppImageUpdater === 'function') return new eu.AppImageUpdater()
+    if (kind === 'deb' && typeof eu.DebUpdater === 'function') return new eu.DebUpdater()
+    if (kind === 'rpm' && typeof eu.RpmUpdater === 'function') return new eu.RpmUpdater()
+    if (kind === 'pacman' && typeof eu.PacmanUpdater === 'function') return new eu.PacmanUpdater()
+    return null
+  }
+  const au = eu.autoUpdater
+  return au
+}
+
 function createAppUpdater() {
+  const mechanism = describeUpdateMechanism({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    env: process.env,
+    resourceDir: packagedResourceDir(),
+    execPath: process.execPath,
+  })
+
   if (!app.isPackaged) {
     return createUpdater({
       autoUpdater: null,
       version: app.getVersion(),
       platform: process.platform,
       isPackaged: false,
+      mechanism: mechanism,
       onEvent: pushUpdaterEvent,
     })
   }
+
   let au = null
   try {
-    // electron-updater is a production dependency in the packaged app.
-    // Dev trees never need it (require is lazy, packaged branch only).
-    au = require('electron-updater').autoUpdater
-    au.autoDownload = false
-    au.autoInstallAppAtExit = false
-    au.autoRunAppAfterInstall = true
+    au = createElectronUpdater(mechanism.kind)
   } catch (err) {
     au = null
   }
+  if (au) {
+    au.autoDownload = false
+    au.autoInstallAppAtExit = false
+    // Linux package installs are restarted by HPOS itself (after the package
+    // manager reports success); other platforms keep the library behaviour.
+    au.autoRunAppAfterInstall = mechanism.isPackage !== true
+  }
+
+  /* Linux packages (deb/rpm/pacman) install into a root-owned prefix, so the
+     verified artifact is handed to the package manager through pkexec and the
+     app restarts only after the package manager succeeded. Check + download
+     stay 100% electron-updater (pinned GitHub release source, SHA-512
+     verified) — only the install step is ours. */
+  let backend = au
+  if (au && mechanism.isPackage) {
+    backend = createLinuxPackageBackend({
+      updater: au,
+      kind: mechanism.kind,
+      currentVersion: app.getVersion(),
+      notify: function (message) {
+        pushUpdaterEvent({ type: 'install-progress', state: 'installing', message: message })
+      },
+      logger: function (message) {
+        // eslint-disable-next-line no-console
+        console.log('[hpos-updater]', message)
+      },
+      /* Nothing from the installed app may hold the files dpkg replaces, and
+         the new instance must be able to start its own runtime daemon. */
+      prepareForInstall: async function () {
+        try {
+          terminalManager.disposeAll()
+        } catch {
+          // best effort
+        }
+        try {
+          devLauncher.dispose()
+        } catch {
+          // best effort
+        }
+        try {
+          await runtimeManager.stop()
+        } catch {
+          // best effort
+        }
+      },
+      resumeAfterFailure: async function () {
+        try {
+          await runtimeManager.start()
+        } catch {
+          // the user can restart HPOS manually
+        }
+      },
+      relaunch: function () {
+        app.relaunch()
+        app.quit()
+      },
+    })
+  }
+
   return createUpdater({
-    autoUpdater: au,
+    autoUpdater: backend,
     version: app.getVersion(),
     platform: process.platform,
     isPackaged: true,
+    mechanism: mechanism,
     onEvent: pushUpdaterEvent,
   })
 }
@@ -549,6 +652,7 @@ function createAppUpdater() {
 const appUpdater = createAppUpdater()
 
 function readAppInfo() {
+  const updaterStatus = appUpdater.status()
   return {
     version: app.getVersion(),
     platform: process.platform,
@@ -558,6 +662,15 @@ function readAppInfo() {
     electron: process.versions.electron || null,
     chrome: process.versions.chrome || null,
     node: process.versions.node || null,
+    /* Settings → App shows this verbatim: a deb install must never claim the
+       AppImage update behaviour (and vice versa). */
+    updateMechanism: {
+      id: updaterStatus.mechanism,
+      label: updaterStatus.mechanismLabel,
+      description: updaterStatus.mechanismDescription,
+      installKind: updaterStatus.installKind,
+      supported: updaterStatus.supported,
+    },
   }
 }
 

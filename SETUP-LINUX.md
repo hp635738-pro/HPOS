@@ -138,8 +138,8 @@ electron-builder (AppImage + deb, x64).
 
 | File | Kya hai |
 |---|---|
-| `release/HPOS-0.1.0.AppImage` | Portable app — double-click/direct run, install ki zarurat nahi |
-| `release/hpos_0.1.0_amd64.deb` | System install — apps menu, icons, uninstall support |
+| `release/HPOS-0.1.1.AppImage` | Portable app — double-click/direct run, install ki zarurat nahi |
+| `release/hpos_0.1.1_amd64.deb` | System install — apps menu, icons, uninstall support |
 | `release/linux-unpacked/` | Raw unpacked app (smoke test ke liye) |
 
 Sirf unpacked dir chahiye toh:
@@ -151,8 +151,8 @@ npm run dist:linux:dir     # release/linux-unpacked/HPOS
 ### AppImage chalana
 
 ```bash
-chmod +x release/HPOS-0.1.0.AppImage
-./release/HPOS-0.1.0.AppImage
+chmod +x release/HPOS-0.1.1.AppImage
+./release/HPOS-0.1.1.AppImage
 ```
 
 > Debian 12 / Ubuntu 22.04+ pe ek baar `sudo apt install libfuse2` lagana
@@ -161,9 +161,9 @@ chmod +x release/HPOS-0.1.0.AppImage
 ### deb install karna
 
 ```bash
-sudo apt install ./release/hpos_0.1.0_amd64.deb
+sudo apt install ./release/hpos_0.1.1_amd64.deb
 # ya
-sudo dpkg -i release/hpos_0.1.0_amd64.deb && sudo apt-get install -f
+sudo dpkg -i release/hpos_0.1.1_amd64.deb && sudo apt-get install -f
 ```
 
 Install ke baad **HPOS** apps menu mein mil jayega (category: Development),
@@ -206,6 +206,36 @@ running app mein apply ho jata hai. Kuch manually nahi karna padta.
 > panel hidden hai — wahan app updates **Check for Updates** (Releases) se
 > aate hain. Code Arena ke andar workspace pull wala button pehle se hai —
 > ye Settings wala uska app-updating bada bhai hai.
+
+---
+
+## 6b. Installed app (deb / AppImage) updates — Check for Updates
+
+Repo se chalane wala dev shell alag cheez hai. **Installed** app (deb ya
+AppImage) update **Settings → App → Check for Updates** se leta hai — pinned
+GitHub release (`hp635738-pro/HPOS`) se, git se nahi.
+
+| Installation | Kaise update hoti hai | Kaun install karta hai |
+| --- | --- | --- |
+| **deb** (`/opt/HPOS`) | release metadata (`latest-linux.yml`) se `.deb` download → SHA-512 verify → `pkexec … dpkg -i …` (dependency error pe `apt-get install -f -y`) → HPOS restart | Polkit dialog (admin permission) — koi password HPOS ke paas nahi |
+| **AppImage** | release metadata se naya AppImage (delta download jab possible ho) → purani file replace → restart | electron-updater khud (koi prompt nahi) |
+| Snap / Flatpak / unpacked | **support nahi** — updater reason ke saath "unsupported" batata hai, koi fake flow nahi | — |
+
+Settings → App har installation ka **"Update method"** likh kar batata hai ki
+us install pe update kaise chalega (deb aur AppImage alag-alag hain).
+
+- User data safe: prefs, theme, workspace (`~/.config/HPOS/`) install prefix se
+  bahar hain, isliye dpkg unhe chhuta tak nahi.
+- Update tabhi dikhega jab release **publish** hua ho (`latest-linux.yml` ke
+  saath). Local `npm run dist:linux` build publish nahi karta — release karne
+  ka tarika **[RELEASE.md](RELEASE.md)** mein hai, end-to-end test plan
+  **[TESTING-UPDATES.md](TESTING-UPDATES.md)** mein.
+
+```bash
+# release (maintainer): version bump → tag → CI publish
+export GH_TOKEN=ghp_xxx
+npm run release:linux          # gate + build + publish (AppImage + deb + latest-linux.yml)
+```
 
 ---
 
@@ -267,7 +297,7 @@ sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 Electron 31 default XWayland use karta hai — normally theek hai. Native Wayland
 chahiye toh:
 ```bash
-./HPOS-0.1.0.AppImage --ozone-platform-hint=auto
+./HPOS-0.1.1.AppImage --ozone-platform-hint=auto
 ```
 
 **`npm install` / `dist:linux` Electron download pe atka**
@@ -309,8 +339,9 @@ npm install && (cd runtime && npm install)
 npm run dev                       # browser mein turant
 npm run build:prod && npx electron HPOS-Desktop   # desktop window
 npm run dist:linux                # AppImage + deb banao
-sudo apt install ./release/hpos_0.1.0_amd64.deb   # system mein install
+sudo apt install ./release/hpos_0.1.1_amd64.deb   # system mein install
 ```
 
-App update? App ke andar **Settings → App → Update from GitHub → Update** —
-bas ek click (section 6 dekho).
+App update?
+- Repo/dev shell: **Settings → App → Update from GitHub → Update** (section 6).
+- Installed deb/AppImage: **Settings → App → Check for Updates** (section 6b).

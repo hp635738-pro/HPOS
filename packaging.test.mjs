@@ -89,10 +89,21 @@ console.log('packaging configuration tests...')
   /* The in-app updater (task §6) uses a PINNED release source: the GitHub
      provider for exactly this repo. No token or secret may live in the
      config (release-time auth comes from the CI environment). */
+  assert.equal(pkg.build.publish.provider, 'github', 'the updater only trusts the GitHub provider')
+  assert.equal(pkg.build.publish.owner, 'hp635738-pro', 'the release source is pinned to this repository owner')
+  assert.equal(pkg.build.publish.repo, 'HPOS', 'the release source is pinned to this repository')
+  /* electron-builder defaults to a DRAFT release, and electron-updater reads
+     `/releases/latest`, which skips drafts — a draft would be invisible to
+     every installed app. `releaseType: release` is what makes the release
+     real, so it is part of the pinned contract. */
+  assert.equal(pkg.build.publish.releaseType, 'release', 'the release must be published (never a draft/pre-release)')
+  for (const secret of ['token', 'password', 'privateKey']) {
+    assert.equal(pkg.build.publish[secret], undefined, `no ${secret} in the config — auth comes from the environment`)
+  }
   assert.deepEqual(
-    pkg.build.publish,
-    { provider: 'github', owner: 'hp635738-pro', repo: 'HPOS' },
-    'build.publish must pin the controlled GitHub release source with no secrets'
+    Object.keys(pkg.build.publish).sort(),
+    ['owner', 'provider', 'releaseType', 'repo'],
+    'build.publish pins the controlled GitHub release source with no secrets'
   )
   console.log('ok: release metadata (name/productName/appId/author/version) + pinned release source')
 }
@@ -392,6 +403,92 @@ console.log('packaging configuration tests...')
   }
 
   console.log(`ok: Linux packaging (AppImage + deb x64, ${width}px icon, dist:linux scripts, window icon wired)`)
+}
+
+/* ------------------------------------------- release process + Linux updates */
+{
+  /* The in-app updater only sees a release that electron-builder PUBLISHED,
+     because that is what writes the update metadata (latest-linux.yml /
+     latest.yml) next to the artifacts. Developer builds must stay offline. */
+  const scripts = pkg.scripts
+  for (const name of Object.keys(scripts)) {
+    if (name.startsWith('dist')) {
+      assert.ok(
+        scripts[name].includes('--publish never'),
+        `${name} must keep --publish never (an ordinary developer build never publishes)`
+      )
+    }
+  }
+  for (const name of ['release', 'release:linux', 'release:win', 'release:check']) {
+    assert.ok(typeof scripts[name] === 'string' && scripts[name].length > 0, `script ${name} must exist`)
+  }
+  for (const name of ['release:linux', 'release:win']) {
+    assert.ok(scripts[name].includes('--publish always'), `${name} must publish (the updater needs the metadata)`)
+    assert.ok(
+      scripts[name].indexOf('npm run release:check') < scripts[name].indexOf('electron-builder'),
+      `${name} must run the release gate BEFORE publishing`
+    )
+    assert.ok(scripts[name].includes('npm run build:prod'), `${name} must build the production frontend`)
+  }
+  assert.ok(scripts['release:linux'].includes('appimage deb'), 'release:linux publishes AppImage + deb')
+  assert.ok(fs.existsSync(path.join(root, 'scripts', 'release-check.mjs')), 'the release gate script must exist')
+  assert.equal(pkg.scripts['release:check'], 'node scripts/release-check.mjs', 'release:check runs the gate')
+
+  /* The gate itself must never accept a non-increment: version semantics are
+     what makes an installed 0.1.0 see a 0.1.1 release. */
+  const gateSrc = fs.readFileSync(path.join(root, 'scripts', 'release-check.mjs'), 'utf8')
+  assert.match(gateSrc, /not newer than the newest published release/, 'the gate refuses a non-increment')
+  assert.match(gateSrc, /const OWNER = 'hp635738-pro'/, 'the gate checks the pinned owner')
+  assert.match(gateSrc, /const REPO = 'HPOS'/, 'the gate checks the pinned repo')
+  assert.match(gateSrc, /--publish never/, 'the gate verifies developer builds never publish')
+  assert.doesNotMatch(gateSrc, /process\.env\.GH_TOKEN\s*\|\|\s*['"][^'"]+['"]/, 'the gate never falls back to a hardcoded token')
+
+  /* The Linux update path itself. */
+  const linuxUpdatePath = path.join(root, 'HPOS-Desktop', 'linuxUpdate.js')
+  assert.ok(fs.existsSync(linuxUpdatePath), 'HPOS-Desktop/linuxUpdate.js must exist (deb/rpm install path)')
+  const linuxUpdate = fs.readFileSync(linuxUpdatePath, 'utf8')
+  assert.match(linuxUpdate, /pkexec/, 'privilege escalation goes through pkexec (Polkit)')
+  assert.doesNotMatch(linuxUpdate, /sudo\s+-S|shell\s*:\s*true/, 'no sudo-with-password, no shell')
+  const main = fs.readFileSync(path.join(root, 'HPOS-Desktop', 'main.js'), 'utf8')
+  assert.match(main, /require\('\.\/linuxUpdate'\)/, 'the main process wires the Linux update module')
+  assert.match(main, /new eu\.DebUpdater\(\)/, 'deb installs use electron-updater DebUpdater')
+  assert.match(main, /new eu\.AppImageUpdater\(\)/, 'AppImage installs use AppImageUpdater')
+  assert.match(main, /createLinuxPackageBackend\(/, 'Linux package installs run the controlled install backend')
+  assert.match(main, /updateMechanism/, 'appInfo reports the update mechanism to the UI')
+
+  /* Deliberate release publishing: workflow-triggered, never on every push. */
+  const workflowPath = path.join(root, '.github', 'workflows', 'release.yml')
+  assert.ok(fs.existsSync(workflowPath), '.github/workflows/release.yml must exist')
+  const workflow = fs.readFileSync(workflowPath, 'utf8')
+  assert.match(workflow, /tags:\s*\n\s*- 'v\*'/, 'releases are cut by pushing a v* tag')
+  assert.match(workflow, /workflow_dispatch/, 'a manual release is possible on purpose')
+  /* Branch pushes ARE allowed to run the pipeline — they only ever validate
+     (the publish job is gated on a v* tag or a non-dry manual run). That is
+     what makes "the workflow configuration is validated" a real gate instead
+     of a claim. */
+  assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'publishing only happens for a v* tag')
+  assert.match(workflow, /dry_run != 'true'/, 'a manual run only publishes when dry-run is switched off')
+  assert.match(workflow, /needs: \[verify, validate\]/, 'the publish job runs only after the validation job succeeded')
+  /* Real finding from running the pipeline: GitHub rejects the whole workflow
+     file with "Unrecognized named-value: 'matrix'" if a JOB-level `if` uses
+     the matrix context — the run then fails without ever creating a job.
+     The publish gate therefore lives in per-platform jobs, not a matrix. */
+  assert.doesNotMatch(
+    workflow,
+    /^ {4}if:.*\bmatrix\b/m,
+    'a job-level if must not reference the matrix context (GitHub refuses the file)'
+  )
+  assert.match(workflow, /npm run dist:linux/, 'the validation build uses --publish never (dist:linux)')
+  assert.match(workflow, /npm run verify:artifacts/, 'the validation build asserts the artifacts + hashes')
+  assert.match(workflow, /npm run verify:release/, 'a published release is verified (assets + metadata + sha512)')
+  assert.match(workflow, /secrets\.GITHUB_TOKEN/, 'publish auth comes from the CI secret')
+  assert.doesNotMatch(workflow, /(ghp_|github_pat_)[A-Za-z0-9_]+/, 'no hardcoded token in the workflow')
+
+  /* Every new contract is part of npm test. */
+  for (const file of ['node HPOS-Desktop/linuxUpdate.test.mjs', 'node scripts/release-check.test.mjs']) {
+    assert.ok(pkg.scripts.test.includes(file), `npm test must run ${file}`)
+  }
+  console.log('ok: deliberate release process (gated publish, CI on tags) + Linux deb/AppImage update wiring')
 }
 
 console.log('packaging configuration tests: all passed')
