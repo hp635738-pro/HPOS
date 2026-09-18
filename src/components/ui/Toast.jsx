@@ -82,7 +82,7 @@ function Toast({ toast, onClose }) {
   const conf = TONES[tone] || TONES.info
 
   return (
-    <div style={S.toast} className="toast-in">
+    <div style={S.toast} className="toast-in float-layer">
       <span style={{ ...S.dot, background: conf.ring }}>
         {tone === 'success' && <Check size={10} />}
       </span>
@@ -117,7 +117,8 @@ const S = {
     display: 'flex', alignItems: 'center', gap: 11,
     minWidth: 260, maxWidth: 380,
     padding: '11px 12px 11px 14px',
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 8,
     boxShadow: '0 14px 40px -12px rgba(0,0,0,.4)',

@@ -81,7 +81,7 @@ function Dialog({ modal, depth, onClose }) {
         if (dismissible && e.target === e.currentTarget) onClose(false)
       }}
     >
-      <div style={{ ...S.box, width, zIndex: 201 + depth * 2 }} role="dialog" aria-modal="true">
+      <div className="float-layer" style={{ ...S.box, width, zIndex: 201 + depth * 2 }} role="dialog" aria-modal="true">
         {title && (
           <header style={S.head}>
             <h3 style={{ ...S.title, color: tone === 'danger' ? 'var(--danger)' : 'var(--text)' }}>
@@ -124,7 +124,8 @@ const S = {
   box: {
     maxWidth: '100%', maxHeight: '84vh',
     display: 'flex', flexDirection: 'column',
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 10, overflow: 'hidden',
     boxShadow: '0 28px 70px -20px rgba(0,0,0,.55)',

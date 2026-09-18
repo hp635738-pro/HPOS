@@ -11,7 +11,7 @@
  *      reload vs relaunch finish
  *   3. the boundary contract: run() takes NO arguments, every spawned
  *      argv is one of the fixed constants, cwd is the workspace root
- *   4. main.js/preload.js/Settings.jsx wiring stays source-level honest
+ *   4. main.js/preload.js/Settings.jsx/AdvancedEditor.jsx wiring stays source-level honest
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -401,6 +401,7 @@ console.log('appUpdate service tests...')
   const preload = readFileSync(join(repoRoot, 'HPOS-Desktop', 'preload.js'), 'utf8')
   const main = readFileSync(join(repoRoot, 'HPOS-Desktop', 'main.js'), 'utf8')
   const settings = readFileSync(join(repoRoot, 'src', 'pages', 'Settings.jsx'), 'utf8')
+  const advanced = readFileSync(join(repoRoot, 'src', 'components', 'AdvancedEditor.jsx'), 'utf8')
 
   assert.ok(preload.includes('appUpdateRun()'), 'preload exposes appUpdateRun')
   assert.ok(preload.includes('onAppUpdateEvent') && preload.includes('offAppUpdateEvent'), 'preload exposes the event subscription pair')
@@ -411,12 +412,15 @@ console.log('appUpdate service tests...')
   assert.ok(main.includes('createAppUpdateService'), 'main wires the app update service')
   assert.match(main, /appUpdateService\.run\(\)/, 'main calls run() with no arguments')
 
-  assert.ok(settings.includes('<GitHubUpdatePanel />'), 'Settings renders GitHubUpdatePanel')
+  // The panel is defined in Settings.jsx (exported) and rendered by the
+  // dedicated Updates page inside Advanced settings — one implementation.
+  assert.ok(advanced.includes('<GitHubUpdatePanel />'), 'the Advanced settings Updates page renders GitHubUpdatePanel')
+  assert.ok(settings.includes('function GitHubUpdatePanel()'), 'Settings.jsx still defines GitHubUpdatePanel')
   assert.ok(settings.includes('bridge.appUpdateRun()'), 'the panel presses the argument-free button')
   assert.ok(settings.includes('if (appInfo && appInfo.isPackaged) return null'), 'the panel hides itself in packaged installs')
   assert.ok(settings.includes('bridge.offAppUpdateEvent(cb)'), 'the panel tears down its event subscription')
 
-  console.log('ok: main/preload/Settings wiring — argument-free run(), event pair, packaged gate')
+  console.log('ok: main/preload/Settings/Advanced wiring — argument-free run(), event pair, packaged gate')
 }
 
 console.log('appUpdate tests: all passed')

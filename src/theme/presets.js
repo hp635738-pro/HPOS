@@ -112,6 +112,10 @@ export const PRESETS = {
       light: {
         '--bg': '#f8fafc',
         '--surface': 'rgba(255,255,255,0.82)',
+        /* Near-opaque surface for floating layers (dropdowns, pickers,
+           modals, toasts): they sit over live text, so 0.82 alpha made the
+           page behind readable through them — doubled, unreadable text. */
+        '--surface-float': 'rgba(255,255,255,0.96)',
         '--surface-2': 'rgba(241,245,249,0.9)',
         '--elevated': 'rgba(255,255,255,0.92)',
         '--rail': 'rgba(248,250,252,0.75)',
@@ -133,6 +137,7 @@ export const PRESETS = {
       dark: {
         '--bg': '#0f172a',
         '--surface': 'rgba(30,41,59,0.78)',
+        '--surface-float': 'rgba(30,41,59,0.94)',
         '--surface-2': 'rgba(51,65,85,0.5)',
         '--elevated': 'rgba(51,65,85,0.85)',
         '--rail': 'rgba(15,23,42,0.75)',

@@ -34,10 +34,14 @@
  *   4. Topbar: clicking the gear calls onNavigate('settings') — the real
  *      handler is executed against a spy
  *   5. App: navigate()/inRail/title/route wiring — real expressions executed
- *   6. Settings page + updater panel preserved (behavior and copy untouched)
+ *   6. Settings structure: Quick settings on the main page (presets, theme,
+ *      accent, layout), Advanced settings entry, updater panels shared with
+ *      the dedicated Updates page (behavior and copy untouched)
  *   7. updater IPC stays safe (no arbitrary URLs, argument-free bridge)
  *   8. navigation architecture/security: fixed literal view id only — no
  *      URLs, no IPC, no shell, no renderer filesystem/Git access
+ *   9. Advanced settings categories; every moved setting present exactly
+ *      once (no quick/advanced duplicates); Assistant→Network rename
  */
 import strictAssert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -78,6 +82,7 @@ const sidebar = readFileSync(join(repoRoot, 'src', 'components', 'Sidebar.jsx'),
 const topbar = readFileSync(join(repoRoot, 'src', 'components', 'Topbar.jsx'), 'utf8')
 const appJsx = readFileSync(join(repoRoot, 'src', 'App.jsx'), 'utf8')
 const settings = readFileSync(join(repoRoot, 'src', 'pages', 'Settings.jsx'), 'utf8')
+const advanced = readFileSync(join(repoRoot, 'src', 'components', 'AdvancedEditor.jsx'), 'utf8')
 const notch = readFileSync(join(repoRoot, 'src', 'components', 'Notch.jsx'), 'utf8')
 const palette = readFileSync(join(repoRoot, 'src', 'components', 'CommandPalette.jsx'), 'utf8')
 const mainJs = readFileSync(join(desktopDir, 'main.js'), 'utf8')
@@ -320,27 +325,40 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   section('App wiring — header owns the settings view, route + title + palette preserved')
 }
 
-/* 6. Settings page and updater panel preserved */
+/* 6. Settings structure — Quick settings on the main page, everything else
+   in Advanced settings; the updater panels are shared (defined in
+   Settings.jsx, rendered by the dedicated Updates page) */
 {
   assert.ok(settings.includes('export default function Settings({ jumpTo, onJumped })'), 'Settings page signature untouched')
-  assert.ok(settings.includes('title="App"'), 'Settings still has the App section')
-  assert.ok(settings.includes('UpdatesPanel'), 'Settings still renders UpdatesPanel')
-  assert.ok(settings.includes('AdvancedEditor'), 'Settings still opens the advanced editor')
-  assert.ok(settings.includes('Danger zone'), 'Settings still has the danger zone')
-  for (const s of ['Theme', 'Accent', 'Layout', 'Appearance']) {
-    assert.ok(settings.includes(s), `Settings still has its ${s} content`)
+  assert.ok(settings.includes('Quick settings'), 'the main page is the Quick settings page')
+  for (const s of ['Presets', 'Theme', 'Accent colour', 'Layout']) {
+    assert.ok(settings.includes(`title="${s}"`), `Quick settings keeps its ${s} section`)
   }
+  assert.ok(settings.includes('Advanced settings'), 'the main page keeps the Advanced settings entry')
+  assert.ok(settings.includes('AdvancedEditor'), 'Settings still opens the advanced editor')
+
+  // One updater implementation, shared by the dedicated Updates page.
+  assert.ok(settings.includes('function UpdatesPanel()'), 'Settings.jsx still defines UpdatesPanel')
+  assert.ok(settings.includes('function GitHubUpdatePanel()'), 'Settings.jsx still defines GitHubUpdatePanel')
+  assert.ok(
+    advanced.includes('<UpdatesPanel />') && advanced.includes('<GitHubUpdatePanel />'),
+    'the Advanced settings Updates page renders the shared updater panels',
+  )
+  assert.ok(
+    advanced.includes("id: 'updates'") && advanced.includes("group: 'App'"),
+    'the dedicated Updates page lives in the App category',
+  )
 
   for (const s of [
     'Check for Updates', 'Download Update', 'Restart to Update', 'up to date',
     'Downloading', 'downloaded and verified', 'development instance',
   ]) {
-    assert.ok(settings.toLowerCase().includes(s.toLowerCase()), `Settings UpdatesPanel must contain UI for: ${s}`)
+    assert.ok(settings.toLowerCase().includes(s.toLowerCase()), `UpdatesPanel must contain UI for: ${s}`)
   }
   assert.ok(settings.includes('appInfo'), 'Settings reads appInfo for the version')
   assert.ok(settings.includes('isPackaged'), 'Settings handles packaged vs dev')
   assert.ok(settings.includes('bridge.updater') || settings.includes('updater.check'), 'Settings uses the updater bridge')
-  section('Settings page + UpdatesPanel preserved (version, check, available, download, progress, ready, error, dev)')
+  section('Quick settings on top; updater panels shared with the dedicated Updates page')
 }
 
 /* 7. updater IPC is safe (no arbitrary URLs) */
@@ -385,8 +403,46 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   section('navigation architecture and renderer security preserved (fixed literal view id only)')
 }
 
+/* 9. Advanced settings structure — every former Settings section moved into
+   a clean category, nothing duplicated, and the Assistant→Network rename */
+{
+  const combined = settings + '\n' + advanced
+
+  // Each moved setting row lives in exactly one place (quick OR advanced).
+  for (const label of [
+    'Density', 'Tint strength', 'Corner radius',
+    'Animation intensity', 'Sidebar density', 'UI scale', 'Card radius',
+    'Sidebar width', 'Row height',
+  ]) {
+    const count = (combined.match(new RegExp(`label="${label}"`, 'g')) || []).length
+    assert.equal(count, 1, `the ${label} setting appears exactly once (quick + advanced, no duplicates)`)
+  }
+
+  // The moved rows still edit the same prefs keys in Advanced settings.
+  for (const key of [
+    'bgStyle', 'cardStyle', 'sidebarStyle', 'railWidth', 'railItemH',
+    'animationIntensity', 'reducedMotion', 'railGap', 'uiScale', 'cmpRadius',
+  ]) {
+    assert.ok(advanced.includes(`set('${key}'`), `Advanced settings still edits ${key}`)
+  }
+  assert.ok(advanced.includes("set('fontId'"), 'Advanced settings still edits the quick-page font choice')
+  assert.ok(settings.includes(`set('density'`), 'Quick settings still edits density')
+
+  // The advanced nav is grouped into clean categories.
+  for (const g of ['App', 'Appearance', 'Navigation', 'System', 'Content']) {
+    assert.ok(advanced.includes(`group: '${g}'`), `Advanced settings has the ${g} category`)
+  }
+
+  // Assistant → Network: the rail label/tooltip/aria-label now say Network,
+  // the route id stays stable ('assistant') so saved prefs survive the rename.
+  assert.ok(!/label:\s*'Assistant'/.test(sidebar), 'the rail no longer labels the agent page Assistant')
+  assert.ok(sidebar.includes("label: 'Network'"), 'the rail labels the agent page Network')
+  assert.ok(sidebar.includes('aria-label={label}'), 'rail items carry an accessible label')
+  section('Advanced settings categories, moved settings (no duplicates), Network rename')
+}
+
 if (failed) {
   console.error(`\n${failed} settings navigation test(s) failed`)
   process.exit(1)
 }
-console.log('\nsettings navigation: all passed (rail has no Settings; the Topbar gear is the working entry point)')
+console.log('\nsettings navigation: all passed (rail has no Settings; Quick settings + Advanced settings + Network)')

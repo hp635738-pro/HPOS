@@ -4,7 +4,8 @@ import { DARK_TOKENS, LIGHT_TOKENS } from '../theme/tokens.js'
 import { PRESETS, PRESET_ORDER } from '../theme/presets.js'
 import ColourField from '../components/ColourField'
 import AdvancedEditor from '../components/AdvancedEditor'
-import { Sun, Moon, Monitor, Check, Chevron, Sparkle, Layers, Palette, Grip } from '../components/Icons'
+import { usePanelExit } from '../lib/panelTransition'
+import { Sun, Moon, Monitor, Check, Chevron, Sliders } from '../components/Icons'
 
 /**
  * Settings → App → "Update from GitHub" (one-click self-update).
@@ -524,25 +525,46 @@ const P = {
   metaChip2: { fontSize: 9, fontWeight: 600, color: 'var(--muted)', padding: '3px 6px' },
 }
 
+/**
+ * Categories of the Advanced settings area, in nav order. The chips on the
+ * quick page deep-link straight into each category's first page.
+ */
+const ADV_CATEGORIES = [
+  { name: 'App', page: 'updates' },
+  { name: 'Appearance', page: 'workspaces' },
+  { name: 'Navigation', page: 'sidebar' },
+  { name: 'System', page: 'motion' },
+  { name: 'Content', page: 'pages' },
+]
+
 export default function Settings({ jumpTo, onJumped }) {
   const { prefs, resolved, accentHex, set } = useTheme()
-  const [advanced, setAdvanced] = useState(false)
+  // The Advanced settings overlay is a slide + fade panel: it stays mounted
+  // while its exit animation plays (see lib/panelTransition.js).
+  const [advOpen, setAdvOpen] = useState(false)
+  const [advTarget, setAdvTarget] = useState(null)   // deep-linked page, or null
+  const adv = usePanelExit(advOpen)
+
+  const openAdvanced = (page = null) => {
+    setAdvTarget(page)
+    setAdvOpen(true)
+  }
 
   // The command palette can deep-link straight into an advanced panel.
   useEffect(() => {
-    if (jumpTo) setAdvanced(true)
+    if (jumpTo) openAdvanced(jumpTo)
   }, [jumpTo])
-
 
   return (
     <div style={S.scroll}>
       <div style={S.inner}>
         <header style={S.head}>
           <div>
-            <h2 style={S.h2}>Appearance</h2>
+            <h2 style={S.h2}>Quick settings</h2>
             <p style={S.sub}>
-              Theme, accent colour and layout. Every change applies instantly
-              and is saved to this browser.
+              The everyday look — preset, theme, accent colour and basic
+              layout. Every change applies instantly and is saved to this
+              browser. Everything else lives in Advanced settings.
             </p>
           </div>
         </header>
@@ -559,17 +581,6 @@ export default function Settings({ jumpTo, onJumped }) {
               onClick={() => { set('preset', 'minimal'); set('bgStyle','auto'); set('cardStyle','auto'); set('sidebarStyle','auto') }}
               style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', padding: '5px 10px', borderRadius: 6 }}
             >Reset to Minimal</button>
-          </div>
-        </Section>
-
-        {/* ------------------------------------------------------------ APP */}
-        <Section
-          title="App"
-          desc="Version and updates. Checking is explicit — nothing downloads or installs without you asking."
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <GitHubUpdatePanel />
-            <UpdatesPanel />
           </div>
         </Section>
 
@@ -744,157 +755,49 @@ export default function Settings({ jumpTo, onJumped }) {
           </Row>
         </Section>
 
-        {/* --------------------------------------------------- SURFACES */}
-        <Section title="Surfaces & Style" desc="Background treatment, card appearance and sidebar finish. Live — try each preset first, then tweak.">
-          <Row label="Background" hint={`${prefs.bgStyle === 'auto' ? 'Preset default' : prefs.bgStyle} — fallback is the preset's treatment.`}>
-            <Segmented
-              value={prefs.bgStyle}
-              options={['auto', 'solid', 'gradient', 'aurora', 'soft']}
-              labels={{ auto: 'Auto' }}
-              onChange={(v) => set('bgStyle', v)}
-            />
-          </Row>
-          <Row label="Card style" hint="How cards and panels feel.">
-            <Segmented
-              value={prefs.cardStyle}
-              options={['auto', 'bordered', 'elevated', 'glass', 'soft', 'sharp']}
-              labels={{ auto: 'Auto' }}
-              onChange={(v) => set('cardStyle', v)}
-            />
-          </Row>
-          <Row label="Sidebar style" hint="Rail finish — flat, translucent glass, high-contrast or soft.">
-            <Segmented
-              value={prefs.sidebarStyle}
-              options={['auto', 'flat', 'glass', 'contrast', 'soft']}
-              labels={{ auto: 'Auto' }}
-              onChange={(v) => set('sidebarStyle', v)}
-            />
-          </Row>
-          <Row label="Sidebar width" hint={`${prefs.railWidth}px — expanded rail.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="160" max="264" step="1"
-                value={prefs.railWidth}
-                onChange={(e) => set('railWidth', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.railWidth}</span>
+        {/* ------------------------------------------------ ADVANCED SETTINGS */}
+        <section style={S.card} className="page-transition">
+          <div style={S.advHead}>
+            <span style={S.advBadge}><Sliders size={17} /></span>
+            <div style={{ minWidth: 0 }}>
+              <h3 style={S.advTitle}>Advanced settings</h3>
+              <p style={S.advDesc}>
+                Updates, colours, typography, surfaces, motion, navigation and
+                backup — every setting that is not a quick one.
+              </p>
             </div>
-          </Row>
-          <Row label="Row height" hint={`${prefs.railItemH}px — navigation rows.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="28" max="48" step="1"
-                value={prefs.railItemH}
-                onChange={(e) => set('railItemH', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.railItemH}</span>
-            </div>
-          </Row>
-        </Section>
-
-        {/* --------------------------------------------------- MOTION */}
-        <Section title="Motion & Accessibility" desc="Animation personality and reduced-motion support. All motion respects your preference.">
-          <Row label="Animation intensity" hint={`${prefs.animationIntensity}% — scales every transition.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="0" max="100" step="5"
-                value={prefs.animationIntensity}
-                onChange={(e) => set('animationIntensity', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.animationIntensity}</span>
-            </div>
-          </Row>
-          <Row label="Reduced motion" hint="Disables non-essential animation for accessibility.">
-            <button
-              onClick={() => set('reducedMotion', !prefs.reducedMotion)}
-              role="switch" aria-checked={!!prefs.reducedMotion}
-              style={{
-                ...S.toggle,
-                background: prefs.reducedMotion ? 'var(--accent)' : 'transparent',
-                borderColor: prefs.reducedMotion ? 'var(--accent)' : 'var(--text-2)',
-              }}
-            >
-              <span style={{
-                ...S.toggleKnob,
-                background: prefs.reducedMotion ? 'var(--accent-fg)' : 'var(--text-2)',
-                transform: prefs.reducedMotion ? 'translateX(18px)' : 'translateX(0)',
-              }} />
-            </button>
-          </Row>
-          <Row label="Sidebar density" hint="Row gap — tighter rails feel more enterprise.">
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="1" max="8" step="1"
-                value={prefs.railGap}
-                onChange={(e) => set('railGap', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.railGap}</span>
-            </div>
-          </Row>
-        </Section>
-
-        {/* --------------------------------------------------- SCALE */}
-        <Section title="Scale & Typography" desc="Global size and type — kept in proportion via page zoom.">
-          <Row label="UI scale" hint={`${prefs.uiScale ?? prefs.fontScale}% — entire interface.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="90" max="130" step="1"
-                value={prefs.uiScale ?? prefs.fontScale}
-                onChange={(e) => { set('uiScale', +e.target.value); set('fontScale', +e.target.value) }}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.uiScale ?? prefs.fontScale}</span>
-            </div>
-          </Row>
-          <Row label="Font" hint="Typeface for body and headings.">
-            <Segmented
-              value={prefs.fontId}
-              options={['system', 'inter', 'rounded', 'mono']}
-              labels={{ system: 'System', inter: 'Inter', rounded: 'Rounded', mono: 'Mono' }}
-              onChange={(v) => set('fontId', v)}
-            />
-          </Row>
-          <Row label="Card radius" hint={`${prefs.cmpRadius}px — buttons and inputs.`}>
-            <div style={S.sliderWrap}>
-              <input
-                type="range" min="0" max="20" step="1"
-                value={prefs.cmpRadius}
-                onChange={(e) => set('cmpRadius', +e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <span style={S.radiusVal}>{prefs.cmpRadius}</span>
-            </div>
-          </Row>
-        </Section>
-
-
-        {/* ------------------------------------------------------ DANGER ZONE */}
-        <section style={S.danger}>
-          <div style={S.cardHead}>
-            <h3 style={{ ...S.cardTitle, color: 'var(--danger)' }}>Danger zone</h3>
-            <p style={S.cardDesc}>
-              Work-in-progress tooling. These controls change unfinished
-              components and are removed once a component is signed off.
-            </p>
           </div>
 
-          <button className="danger-row" onClick={() => setAdvanced(true)} style={S.dangerRow}>
-            <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-              <div style={{ ...S.rowLabel, color: 'var(--danger)' }}>Advanced settings</div>
+          <div style={S.advRow}>
+            <div style={S.advChips}>
+              {ADV_CATEGORIES.map((c) => (
+                <button
+                  key={c.name}
+                  className="adv-chip"
+                  onClick={() => openAdvanced(c.page)}
+                  style={S.advChip}
+                >
+                  {c.name}
+                </button>
+              ))}
             </div>
-            <Chevron size={15} dir="right" style={{ color: 'var(--danger)', flexShrink: 0 }} />
-          </button>
+            <button
+              className="adv-open"
+              onClick={() => openAdvanced(null)}
+              style={S.advOpen}
+            >
+              Open Advanced settings
+              <Chevron size={15} dir="right" />
+            </button>
+          </div>
         </section>
       </div>
 
-      {advanced && (
+      {adv.mounted && (
         <AdvancedEditor
-          initialPage={jumpTo}
-          onClose={() => { setAdvanced(false); onJumped?.() }}
+          initialPage={advTarget || undefined}
+          closing={adv.exiting}
+          onClose={() => { setAdvOpen(false); onJumped?.() }}
         />
       )}
     </div>
@@ -984,20 +887,42 @@ const S = {
   cardTitle: { margin: 0, fontSize: 14.5, fontWeight: 800, letterSpacing: '-.2px' },
   cardDesc: { margin: '3px 0 0', fontSize: 11.5, color: 'var(--muted)', fontWeight: 500 },
 
-  danger: {
-    background: 'var(--surface)',
-    border: '1px solid var(--danger-line)',
-    borderRadius: 'var(--radius-lg)',
-    padding: 'var(--pad)',
-    transition: 'border-radius .18s, background .22s, border-color .22s',
+  advHead: {
+    display: 'flex', gap: 12, alignItems: 'flex-start',
+    marginBottom: 'var(--gap)',
   },
-  dangerRow: {
-    width: '100%',
-    display: 'flex', alignItems: 'center', gap: 16,
-    padding: '13px 10px 13px 12px', marginTop: 2,
-    borderTop: '1px solid var(--danger-line)',
+  advBadge: {
+    width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+    display: 'grid', placeItems: 'center',
+    color: 'var(--accent)', background: 'var(--accent-soft)',
+    transition: 'border-radius .18s, background var(--motion-duration) var(--motion-easing)',
+  },
+  advTitle: { margin: 0, fontSize: 14.5, fontWeight: 800, letterSpacing: '-.2px' },
+  advDesc: { margin: '3px 0 0', fontSize: 11.5, color: 'var(--muted)', fontWeight: 500, maxWidth: 520 },
+  advRow: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    flexWrap: 'wrap',
+  },
+  advChips: {
+    flex: 1, minWidth: 0,
+    display: 'flex', gap: 6, flexWrap: 'wrap',
+  },
+  advChip: {
+    fontSize: 11.5, fontWeight: 700,
+    color: 'var(--text-2)',
+    background: 'var(--surface-2)',
+    border: '1px solid var(--line)',
+    borderRadius: 99,
+    padding: '6px 12px',
+    transition: 'background .16s, color .16s, border-color .16s',
+  },
+  advOpen: {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    background: 'var(--accent)', color: 'var(--accent-fg)',
+    fontSize: 12.5, fontWeight: 700,
     borderRadius: 'var(--radius-sm)',
-    background: 'transparent',
+    padding: '9px 16px',
+    border: 'none',
     transition: 'background .16s, border-radius .18s',
   },
 
@@ -1113,3 +1038,8 @@ const S = {
   },
 
 }
+
+/* The updater panels are shared with the dedicated Updates page inside
+   Advanced settings (components/AdvancedEditor.jsx) — one implementation,
+   two entry points. */
+export { GitHubUpdatePanel, UpdatesPanel }

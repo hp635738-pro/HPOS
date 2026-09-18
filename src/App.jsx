@@ -6,6 +6,7 @@ import Blank from './pages/Blank'
 import RuntimeDetailsPanel from './components/RuntimeDetailsPanel'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
+import { usePanelExit } from './lib/panelTransition'
 
 export default function App() {
   const [view, setView] = useState('overview')
@@ -43,10 +44,24 @@ export default function App() {
     return out
   }, [])
 
+  // The File section is a full-panel destination that slides + fades in
+  // instead of appearing instantly. It stays mounted while its exit
+  // animation plays (see lib/panelTransition.js).
+  const filesPanel = usePanelExit(view === 'files')
+
+  const filesStage = (exiting) => (
+    <div className={exiting ? 'file-out' : 'file-in'} style={S.filesStage}>
+      <FilesWorkspace onBack={exiting ? () => {} : () => setView(previousView)} />
+    </div>
+  )
+
   // NOTE: all hooks must stay above this early return — otherwise React
   // throws "rendered fewer hooks" and unmounts the whole tree (blank screen).
   if (view === 'files') {
-    return <FilesWorkspace onBack={() => setView(previousView)} />
+    return filesStage(filesPanel.exiting)
+  }
+  if (filesPanel.exiting && filesPanel.mounted) {
+    return filesStage(true)
   }
 
   const title =
@@ -103,6 +118,12 @@ const S = {
   },
   main: {
     flex: 1, minWidth: 0,
+    display: 'flex', flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  filesStage: {
+    position: 'fixed', inset: 0, zIndex: 40,
+    background: 'var(--app-bg, var(--bg))',
     display: 'flex', flexDirection: 'column',
     overflow: 'hidden',
   },

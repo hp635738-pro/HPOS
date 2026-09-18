@@ -325,30 +325,28 @@ export const Bot = (p) => (
 
 
 /**
- * AssistantAgent — modern person/agent icon for the Assistant entry.
- * Clean human silhouette (head + shoulders) with a subtle AI sparkle badge.
- * Works at 18px sidebar size, respects currentColor, theme-agnostic.
+ * NetworkAgent — modern person/agent icon for the Network entry.
+ * Clean human silhouette (head + shoulders) with broadcast arcs, so it
+ * reads as a connected agent at a glance. Works at 18px sidebar size,
+ * respects currentColor, theme-agnostic.
  */
-export const AssistantAgent = (p) => (
+export const NetworkAgent = (p) => (
   <Svg {...p}>
     {/* head */}
-    <circle cx="12" cy="8.2" r="3.4" />
+    <circle cx="10" cy="8.6" r="3.4" />
     {/* shoulders */}
-    <path d="M5.8 18.8a6.2 6.2 0 0 1 12.4 0" />
-    {/* sparkle badge */}
-    <g fill="currentColor" stroke="none">
-      <path d="M17.2 14.2l1.15 2.05 2.05 1.15-2.05 1.15-1.15 2.05-1.15-2.05-2.05-1.15 2.05-1.15 1.15-2.05Z" opacity=".95" />
-    </g>
+    <path d="M3.8 19.4a6.6 6.6 0 0 1 12.4 0" />
+    {/* broadcast arcs */}
+    <path d="M17.4 11.2a4.6 4.6 0 0 1 2.7 2.9" />
+    <path d="M17.4 7.2a8.6 8.6 0 0 1 4.6 3.6" />
   </Svg>
 )
 
-export const AssistantAgentFilled = ({ size = 18, ...p }) => (
+export const NetworkAgentFilled = ({ size = 18, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" {...p}>
-    <circle cx="12" cy="8.2" r="3.4" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M5.8 18.8a6.2 6.2 0 0 1 12.4 0" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    <g fill="currentColor" stroke="none">
-      <path d="M17.2 14.2l1.15 2.05 2.05 1.15-2.05 1.15-1.15 2.05-1.15-2.05-2.05-1.15 2.05-1.15 1.15-2.05Z" />
-    </g>
+    <circle cx="10" cy="8.6" r="3.4" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M3.8 19.4a6.6 6.6 0 0 1 12.4 0" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M17.4 11.2a4.6 4.6 0 0 1 2.7 2.9M17.4 7.2a8.6 8.6 0 0 1 4.6 3.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 
@@ -428,4 +426,68 @@ export const History = (p) => (
 /** X — closes panels and dismisses menus. */
 export const X = (p) => (
   <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
+)
+
+/* ---- advanced-settings page icons (one consistent stroke family) ------ */
+
+/** Refresh — the Updates page: check for a newer version. */
+export const Refresh = (p) => (
+  <Svg {...p}>
+    <path d="M20.2 12a8.2 8.2 0 1 1-2.6-6" />
+    <path d="M20.4 3.6v4.2h-4.2" />
+  </Svg>
+)
+
+/** Sliders — the Advanced settings entry: fine-grained controls. */
+export const Sliders = (p) => (
+  <Svg {...p}>
+    <path d="M5.5 4v5.4M5.5 15.2V20M12 4v1.8M12 11.4V20M18.5 4v9.2M18.5 18.4V20" />
+    <circle cx="5.5" cy="12.1" r="1.9" />
+    <circle cx="12" cy="8.3" r="1.9" />
+    <circle cx="18.5" cy="15.6" r="1.9" />
+  </Svg>
+)
+
+/** Surfaces — overlapping panels, for Surfaces & Style. */
+export const Surfaces = (p) => (
+  <Svg {...p}>
+    <rect x="3.4" y="3.4" width="13.6" height="13.6" rx="3" />
+    <path d="M20.6 8.6v9A2.4 2.4 0 0 1 18.2 20H9.2" />
+    <circle cx="8.2" cy="8.2" r="1.3" fill="currentColor" stroke="none" />
+  </Svg>
+)
+
+/** Motion — a moving orb with speed lines, for Motion & Accessibility. */
+export const Motion = (p) => (
+  <Svg {...p}>
+    <circle cx="16.6" cy="12" r="4.4" />
+    <path d="M2.8 8.4h5.6M2.8 12h3.6M2.8 15.6h5.6" />
+  </Svg>
+)
+
+/** Zoom — scale + type, for Scale & Typography. */
+export const Zoom = (p) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20.2 20.2-3.8-3.8M11 8.2v5.6M8.2 11h5.6" />
+  </Svg>
+)
+
+/** TopBar — the Header page: a window with its bar highlighted. */
+export const TopBar = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="3" />
+    <path d="M3 9.6h18" />
+    <circle cx="6.6" cy="6.8" r=".85" fill="currentColor" stroke="none" />
+    <circle cx="10" cy="6.8" r=".85" fill="currentColor" stroke="none" />
+  </Svg>
+)
+
+/** Pill — the Wide Notch page: the Settings + File header pill. */
+export const Pill = (p) => (
+  <Svg {...p}>
+    <rect x="2.6" y="8" width="18.8" height="8" rx="4" />
+    <circle cx="7.4" cy="12" r="1.15" fill="currentColor" stroke="none" />
+    <path d="M12 12h4.4" />
+  </Svg>
 )

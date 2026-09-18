@@ -56,6 +56,11 @@
   --card-blur: 0px;
   --rail-blur: 0px;
   --glass-blur: 0px;
+  /* Floating layers (dropdowns, pickers, modals, toasts, drawers) sit over
+     live page text: they must never be the translucent card surface, or the
+     text behind shows through as a second, unreadable text layer. Glass
+     presets override this with a near-opaque tint. */
+  --surface-float: var(--surface);
   --card-shadow: var(--shadow);
   --card-border: var(--line);
   --motion-duration: 160ms;
@@ -70,14 +75,25 @@ html, body, #root { height: 100%; margin: 0; }
 
 body {
   font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  /* Base type size: the whole design grid (rows, paddings, chips) is built
+     around this value, so text without an explicit size inherits the design
+     size instead of the browser default (16px), which overflows the boxes. */
+  font-size: var(--font, 13.5px);
   font-weight: var(--font-weight, 500);
   letter-spacing: var(--tracking, 0);
   line-height: var(--line-height, 1.5);
+  /* Long unbroken strings (hex codes, paths, ids) wrap instead of escaping
+     their container and colliding with neighbouring text. Inherited by all
+     elements that do not set it themselves. */
+  overflow-wrap: break-word;
   background: var(--app-bg, var(--bg));
   color: var(--text);
   -webkit-font-smoothing: var(--font-smooth, antialiased);
   transition: background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing);
 }
+
+/* Descriptions/subtitles: never strand a single line at a break. */
+p { orphans: 2; widows: 2; }
 
 /* Component sizes are in px, so the scale is applied as a page zoom —
    this keeps type and spacing in proportion instead of breaking layouts. */
@@ -162,8 +178,18 @@ input[type="range"]::-moz-range-thumb {
 button:hover > .rail-grip { opacity: .45; }
 .rail-grip:hover { opacity: .9 !important; }
 
-/* Danger-zone row behaves like a link. */
-.danger-row:hover { background: var(--danger-line) !important; }
+/* Floating layers — near-opaque surface + glass blur (0px in solid presets).
+   Applied to dropdowns, pickers, palettes, modals, toasts so page text never
+   shows through them (see --surface-float). */
+.float-layer {
+  backdrop-filter: blur(var(--card-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--card-blur, 0px));
+}
+
+/* Advanced settings entry card (quick page) — chips + open button hovers. */
+.adv-chip:hover { border-color: var(--accent); color: var(--accent); }
+.adv-open:hover { filter: brightness(1.06); }
+.adv-open:active { filter: brightness(0.98); }
 
 /* Windows 11 nav-pane hover. */
 .w11-nav:hover { background: var(--surface-2) !important; }
@@ -466,7 +492,10 @@ button:hover > .rail-grip { opacity: .45; }
   min-height: 0;
   align-self: stretch;
   overflow: hidden;
-  background: var(--surface);
+  /* On narrow screens this drawer floats over page text — keep it opaque. */
+  background: var(--surface-float, var(--surface));
+  backdrop-filter: blur(var(--card-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--card-blur, 0px));
   border-left: 1px solid var(--line);
   opacity: 1;
   visibility: visible;
@@ -603,6 +632,46 @@ button:hover > .rail-grip { opacity: .45; }
 }
 @media (prefers-reduced-motion: reduce) {
   .page-transition { animation: none; }
+}
+
+/* Panel transitions — full-area panels (Files workspace, Advanced settings
+   overlay) slide + fade in from the right and run the matching out-animation
+   before unmount (see src/lib/panelTransition.js, which mirrors the
+   duration expression and skips the exit wait under reduced motion). */
+@keyframes panel-slide-in {
+  from { opacity: 0; transform: translateX(26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes panel-slide-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateX(26px); }
+}
+.panel-in {
+  animation: panel-slide-in min(calc(var(--motion-duration) + 90ms), 320ms) var(--motion-easing) both;
+}
+.panel-out {
+  animation: panel-slide-out min(calc(var(--motion-duration) + 90ms), 320ms) var(--motion-easing) both;
+}
+
+/* Files workspace — a lighter travel (it is a page, not an overlay). */
+@keyframes file-slide-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes file-slide-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateX(18px); }
+}
+.file-in {
+  animation: file-slide-in min(calc(var(--motion-duration) + 90ms), 320ms) var(--motion-easing) both;
+}
+.file-out {
+  animation: file-slide-out min(calc(var(--motion-duration) + 90ms), 320ms) var(--motion-easing) both;
+}
+
+/* Sidebar nested list — soft fade + slide when a section expands. */
+.sublist-in {
+  animation: nav-in min(calc(var(--motion-duration) + 60ms), 300ms) var(--motion-easing) both;
 }
 
 /* Sidebar rail — smooth width + hover lift */

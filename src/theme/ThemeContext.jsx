@@ -417,8 +417,11 @@ export function ThemeProvider({ children }) {
     r.style.setProperty('--font-scale', prefs.fontScale / 100)
     r.style.setProperty('--font-weight', prefs.fontWeight)
     r.style.setProperty('--heading-weight', prefs.headingWeight)
-    r.style.setProperty('--tracking', `${prefs.fontTracking / 100}em`)
-    r.style.setProperty('--heading-tracking', `${prefs.headingTracking / 100}em`)
+    /* Tracking sliders are in per-mille em (1 = 0.001em): -30 → -0.03em, the
+       normal range for tight display headings. Dividing by 100 produced
+       -0.3em — a 10x overlap on every heading that uses the global rule. */
+    r.style.setProperty('--tracking', `${prefs.fontTracking / 1000}em`)
+    r.style.setProperty('--heading-tracking', `${prefs.headingTracking / 1000}em`)
     r.style.setProperty('--line-height', prefs.lineHeight / 100)
     r.style.setProperty('--font-smooth', prefs.fontSmooth ? 'antialiased' : 'auto')
 

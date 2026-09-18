@@ -1,10 +1,10 @@
-import { AssistantAgent } from '../Icons'
+import { NetworkAgent } from '../Icons'
 
 /**
- * Reusable Assistant icon — person/agent style.
- * Wraps AssistantAgent with preset-aware container for consistent treatment.
+ * Reusable Network icon — person/agent style.
+ * Wraps NetworkAgent with a preset-aware container for consistent treatment.
  */
-export function AssistantIcon({ size = 18, active, variant = 'sidebar' }) {
+export function NetworkIcon({ size = 18, active, variant = 'sidebar' }) {
   if (variant === 'sidebar') {
     return (
       <span
@@ -20,11 +20,11 @@ export function AssistantIcon({ size = 18, active, variant = 'sidebar' }) {
           position: 'relative',
         }}
       >
-        <AssistantAgent size={size} />
+        <NetworkAgent size={size} />
       </span>
     )
   }
-  return <AssistantAgent size={size} />
+  return <NetworkAgent size={size} />
 }
 
-export default AssistantIcon
+export default NetworkIcon

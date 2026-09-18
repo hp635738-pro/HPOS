@@ -13,12 +13,13 @@ const METRICS = [
     hint: 'Scales the whole interface, not just text.' },
   { key: 'lineHeight', label: 'Line height', min: 110, max: 200, unit: '%' },
   { key: 'fontTracking', label: 'Letter spacing', min: -40, max: 60, unit: '',
-    hint: 'Body text tracking, in hundredths of an em.' },
+    hint: 'Body text tracking, in per-mille em (100 = 0.1em).' },
 ]
 
 const HEADING = [
   { key: 'headingWeight', label: 'Heading weight', min: 400, max: 900, step: 100, unit: '' },
-  { key: 'headingTracking', label: 'Heading spacing', min: -80, max: 40, unit: '' },
+  { key: 'headingTracking', label: 'Heading spacing', min: -80, max: 40, unit: '',
+    hint: 'Heading tracking, in per-mille em (100 = 0.1em). Negative tightens.' },
 ]
 
 const WEIGHTS = [400, 500, 600, 700]

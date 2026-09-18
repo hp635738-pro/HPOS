@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
-  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, AssistantAgent,
+  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, NetworkAgent,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
@@ -18,7 +18,7 @@ export const NAV = [
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
-  { id: 'assistant', label: 'Assistant',      Icon: AssistantAgent, accent: true },
+  { id: 'assistant', label: 'Network',        Icon: NetworkAgent, accent: true },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 
@@ -209,25 +209,26 @@ export default function Sidebar({ active, onChange }) {
                 }}
                 onContextMenu={(e) => openMenu(e, id)}
                 title={mini ? label : undefined}
+                aria-label={label}
                 style={(() => {
-                  const isAssistant = id === 'assistant'
-                  const assistantOn = isAssistant && on
+                  const isNetwork = id === 'assistant'
+                  const networkOn = isNetwork && on
                   const baseBg = (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent'
-                  const assistantBg = assistantOn
+                  const networkBg = networkOn
                     ? 'var(--accent-soft)'
-                    : isAssistant ? 'rgba(var(--accent-rgb), .07)' : baseBg
+                    : isNetwork ? 'rgba(var(--accent-rgb), .07)' : baseBg
                   const baseColor = (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)'
-                  const assistantColor = isAssistant && !on ? 'var(--accent)' : baseColor
+                  const networkColor = isNetwork && !on ? 'var(--accent)' : baseColor
                   return {
                     ...S.item,
                     height: prefs.railItemH,
                     borderRadius: prefs.railRadius,
                     justifyContent: mini ? 'center' : 'flex-start',
                     padding: mini ? 0 : '0 8px 0 11px',
-                    background: isAssistant ? assistantBg : baseBg,
-                    color: isAssistant ? assistantColor : baseColor,
-                    border: isAssistant && !on ? '1px solid rgba(var(--accent-rgb), .14)' : '1px solid transparent',
-                    boxShadow: isAssistant && on ? '0 0 0 3px var(--accent-soft), 0 1px 6px rgba(var(--accent-rgb), .18)' : 'none',
+                    background: isNetwork ? networkBg : baseBg,
+                    color: isNetwork ? networkColor : baseColor,
+                    border: isNetwork && !on ? '1px solid rgba(var(--accent-rgb), .14)' : '1px solid transparent',
+                    boxShadow: isNetwork && on ? '0 0 0 3px var(--accent-soft), 0 1px 6px rgba(var(--accent-rgb), .18)' : 'none',
                     opacity: dragging ? 0.35 : 1,
                     cursor: 'pointer',
                     transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
@@ -245,7 +246,7 @@ export default function Sidebar({ active, onChange }) {
                 }}>
                   <Icon size={prefs.railIcon} />
                   {dot && prefs.railDots && <span style={S.dot} />}
-                  {id === 'assistant' && !mini && <span style={S.assistantGlow} aria-hidden />}
+                  {id === 'assistant' && !mini && <span style={S.networkGlow} aria-hidden />}
                 </span>
 
                 {!mini && (
@@ -280,7 +281,7 @@ export default function Sidebar({ active, onChange }) {
 
               {/* Nested children */}
               {!mini && isParent && isOpen && (
-                <div style={S.subList}>
+                <div style={S.subList} className="sublist-in">
                   {children.map((child) => {
                     const childOn = active === child.id
                     const openChat = () => {
@@ -356,6 +357,7 @@ export default function Sidebar({ active, onChange }) {
       {/* ------------------------------------------------------ CONTEXT MENU */}
       {menu && (
         <div
+          className="float-layer"
           style={{ ...S.menu, left: menu.x + 2, top: menu.y + 2 }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -491,7 +493,7 @@ const S = {
     background: 'var(--accent)', color: 'var(--accent-fg)',
     lineHeight: 1, flexShrink: 0, marginLeft: -4,
   },
-  assistantGlow: {
+  networkGlow: {
     position: 'absolute', inset: -2, borderRadius: 'inherit',
     background: 'radial-gradient(40% 60% at 50% 50%, rgba(var(--accent-rgb), .18), transparent 70%)',
     pointerEvents: 'none', filter: 'blur(6px)', opacity: 0.6,
@@ -501,7 +503,8 @@ const S = {
   menu: {
     position: 'fixed', zIndex: 90, minWidth: 186,
     padding: 5,
-    background: 'var(--surface)',
+    /* floats over page text — near-opaque, see .float-layer */
+    background: 'var(--surface-float, var(--surface))',
     border: '1px solid var(--line)',
     borderRadius: 7,
     boxShadow: '0 12px 34px -10px rgba(0,0,0,.42)',
