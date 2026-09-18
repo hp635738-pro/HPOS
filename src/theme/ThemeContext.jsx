@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { DARK_TOKENS, LIGHT_TOKENS } from './tokens.js'
 import { PRESETS, presetTokens as getPresetTokens } from './presets.js'
+import { hexToRgb, mergePaletteVars } from './palettePaint.js'
 
 const KEY = 'nexa.prefs'
 
@@ -144,8 +145,8 @@ export const DEFAULTS = {
   fontScale: 100,         // global size multiplier, %
   fontWeight: 500,        // body weight
   headingWeight: 800,     // h1/h2/h3 weight
-  fontTracking: 0,        // body letter-spacing, in 1/100 em
-  headingTracking: -30,   // heading letter-spacing, in 1/100 em
+  fontTracking: 0,        // body letter-spacing, in per-mille em (1 = 0.001em)
+  headingTracking: -30,   // heading letter-spacing, in per-mille em (1 = 0.001em)
   lineHeight: 150,        // body line-height, %
   fontSmooth: true,       // antialiased rendering
   fontStarred: [],        // pinned font ids, shown first
@@ -187,13 +188,7 @@ const PALETTE = {
   dark: DARK_TOKENS,
 }
 
-function hexToRgb(hex) {
-  let h = String(hex || '').replace('#', '')
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
-  const n = parseInt(h, 16)
-  if (Number.isNaN(n)) return [35, 131, 226]
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
+/* hexToRgb lives in palettePaint.js (shared with the derived-tint pipeline). */
 
 /** Relative luminance, used to pick readable text on the accent. */
 export function isLight(hex) {
@@ -276,6 +271,9 @@ export function ThemeProvider({ children }) {
   const future = useRef([])
   const [, bump] = useState(0)          // re-render when the stacks change
   const skipHistory = useRef(false)
+  /* Custom properties painted by the last palette pass — the next paint
+     removes any of them the new palette does not define (see palettePaint.js). */
+  const paintedKeysRef = useRef(new Set())
 
   /** Record the current prefs before a change lands. */
   const remember = (current, next) => {
@@ -338,24 +336,25 @@ export function ThemeProvider({ children }) {
     const preset = PRESETS[presetId] || PRESETS.minimal
     const presetPal = getPresetTokens(presetId, resolved) || {}
     const overrides = (resolved === 'dark' ? prefs.customDark : prefs.customLight) || {}
-    // Preset tokens sit between base and custom overrides — custom always wins.
-    const pal = { ...PALETTE[resolved], ...presetPal, ...overrides }
-    Object.entries(pal).forEach(([k, v]) => r.style.setProperty(k, v))
-
-    // keep the derived status tints in step with custom status colours
-    if (overrides['--danger']) {
-      const [dr, dg, db] = hexToRgb(overrides['--danger'])
-      r.style.setProperty('--danger-line', `rgba(${dr},${dg},${db},.3)`)
-      r.style.setProperty('--danger-soft', `rgba(${dr},${dg},${db},.1)`)
+    /* One authoritative paint (palettePaint.js): base < preset < custom
+       overrides, plus the derived status tints recomputed from the
+       EFFECTIVE status colours. */
+    const palVars = mergePaletteVars({
+      palette: PALETTE[resolved],
+      presetTokens: presetPal,
+      overrides,
+    })
+    /* Remove every palette variable the previous paint set that this one
+       does not define, so preset-scoped tokens (the glass preset's
+       translucent --surface-float) can never outlive their preset — a
+       stale translucent surface made page text show through every floating
+       layer as a second, unreadable text layer. */
+    const nextKeys = new Set(Object.keys(palVars))
+    for (const key of paintedKeysRef.current) {
+      if (!nextKeys.has(key)) r.style.removeProperty(key)
     }
-    if (overrides['--success']) {
-      const [sr, sg, sb] = hexToRgb(overrides['--success'])
-      r.style.setProperty('--success-soft', `rgba(${sr},${sg},${sb},.14)`)
-    }
-    if (overrides['--warning']) {
-      const [wr, wg, wb] = hexToRgb(overrides['--warning'])
-      r.style.setProperty('--warning-soft', `rgba(${wr},${wg},${wb},.14)`)
-    }
+    paintedKeysRef.current = nextKeys
+    Object.entries(palVars).forEach(([k, v]) => r.style.setProperty(k, v))
 
     const [rr, gg, bb] = hexToRgb(accentHex)
     r.style.setProperty('--accent', accentHex)

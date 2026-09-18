@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTheme, ACCENTS, DENSITY, isLight } from '../theme/ThemeContext'
+import {
+  CHECK_TIMEOUT_MS,
+  failureStatus,
+  pressStatus,
+  statusFromAnswer,
+  timeoutStatus,
+} from '../lib/updaterStatus.js'
 import { DARK_TOKENS, LIGHT_TOKENS } from '../theme/tokens.js'
 import { PRESETS, PRESET_ORDER } from '../theme/presets.js'
 import ColourField from '../components/ColourField'
@@ -167,10 +174,20 @@ function GitHubUpdatePanel() {
  *
  * Explicit flow only: Check for Updates → (available) Download →
  * Restart to Update. The state machine lives in the main process
- * (updater.js over electron-updater); this panel only displays states
- * and calls the three argument-free actions. In a plain browser window
+ * (updater.js over electron-updater); this panel displays states and
+ * calls the three argument-free actions. In a plain browser window
  * (no preload bridge) it renders the version-less note instead of
  * faking anything.
+ *
+ * A press is never silent: it does not rely on the pushed event stream
+ * alone. Pressing a button shows the state it just started (checking /
+ * downloading / installing) immediately; the status the argument-free
+ * call resolves with is applied verbatim (the same payload the events
+ * carry), so up-to-date / update-available / error render even when no
+ * event reaches this window; a refused or rejected call becomes a
+ * visible error with its category, and a check that never answers
+ * becomes a visible timeout instead of an endless "Checking…"
+ * (see lib/updaterStatus.js).
  */
 function UpdatesPanel() {
   const bridge = (typeof window !== 'undefined' && window.hpos) || null
@@ -185,6 +202,13 @@ function UpdatesPanel() {
   const [appInfo, setAppInfo] = useState(null)
   const [u, setU] = useState(null)
   const [acting, setActing] = useState(false)
+  /* The click flow is async, so it reads the latest status from a ref —
+     the `u` captured by its own render would be one answer behind. */
+  const statusRef = useRef(null)
+  /* A check that is never answered must not leave the panel on "Checking…". */
+  const watchdogRef = useRef(null)
+
+  useEffect(() => { statusRef.current = u }, [u])
 
   useEffect(() => {
     if (bridge && typeof bridge.appInfo === 'function') {
@@ -195,11 +219,15 @@ function UpdatesPanel() {
       up.status().then(setU).catch(() => {})
     }
     const cb = (payload) => {
-      if (payload && typeof payload.state === 'string') setU(payload)
+      if (payload && typeof payload.state === 'string') {
+        statusRef.current = payload
+        setU(payload)
+      }
     }
     if (typeof up.onEvent === 'function') up.onEvent(cb)
     return () => {
       if (typeof up.offEvent === 'function') up.offEvent(cb)
+      if (watchdogRef.current) clearTimeout(watchdogRef.current)
     }
   }, [])
 
@@ -207,11 +235,55 @@ function UpdatesPanel() {
   const downloading = u && u.state === 'downloading'
   const progress = downloading ? Math.max(0, Math.min(100, Math.round(u.progress || 0))) : 0
 
-  const act = (fn) => {
+  /** Every status change goes through here, so the click flow sees the latest. */
+  const applyStatus = (next) => {
+    statusRef.current = next
+    setU(next)
+  }
+
+  const clearWatchdog = () => {
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current)
+      watchdogRef.current = null
+    }
+  }
+
+  const armWatchdog = () => {
+    clearWatchdog()
+    watchdogRef.current = setTimeout(() => {
+      watchdogRef.current = null
+      applyStatus(timeoutStatus(statusRef.current))
+      setActing(false)
+    }, CHECK_TIMEOUT_MS)
+  }
+
+  /**
+   * Run one of the three argument-free updater actions. Whatever happens,
+   * the press leaves a visible status behind: the started state right
+   * away, the answer when it arrives, an error when the call is refused
+   * or rejects, and a timeout when a check never answers.
+   */
+  const act = (kind, fn) => {
     if (!up || acting) return
+    clearWatchdog()
     setActing(true)
-    Promise.resolve(fn())
-      .catch(() => {})
+    applyStatus(pressStatus(kind, statusRef.current))
+    if (kind === 'check') armWatchdog()
+    Promise.resolve()
+      .then(fn)
+      .then((answer) => {
+        const next = statusFromAnswer(statusRef.current, answer)
+        /* The call answered while the updater still reports "checking":
+           no outcome has been reported yet, so let the watchdog keep
+           running rather than treating the silence as a final state. */
+        if (kind === 'check' && next.state === 'checking') return
+        clearWatchdog()
+        applyStatus(next)
+      })
+      .catch((err) => {
+        clearWatchdog()
+        applyStatus(failureStatus(statusRef.current, err))
+      })
       .then(() => setActing(false))
   }
 
@@ -258,7 +330,7 @@ function UpdatesPanel() {
           You’re up to date — {u.downloadedVersion || u.currentVersion}.
         </span>
       )
-      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Check for Updates</button>
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act('check', () => up.check())}>Check for Updates</button>
       break
 
     case 'available':
@@ -273,7 +345,7 @@ function UpdatesPanel() {
           <button
             style={{ ...U.btn, borderColor: 'var(--accent)', color: 'var(--accent)' }}
             disabled={busy}
-            onClick={() => act(() => up.download())}
+            onClick={() => act('download', () => up.download())}
           >
             Download Update
           </button>
@@ -306,7 +378,7 @@ function UpdatesPanel() {
           <button
             style={{ ...U.btn, borderColor: 'var(--accent)', color: 'var(--accent)' }}
             disabled={busy}
-            onClick={() => act(() => up.install())}
+            onClick={() => act('install', () => up.install())}
           >
             Restart to Update
           </button>
@@ -326,7 +398,7 @@ function UpdatesPanel() {
           {u.errorDetail ? ` (${u.errorCode || 'error'}: ${u.errorDetail})` : ''}
         </span>
       )
-      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Try Again</button>
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act('check', () => up.check())}>Try Again</button>
       break
 
     case 'unsupported':
@@ -336,7 +408,7 @@ function UpdatesPanel() {
 
     default:
       statusNode = <span style={U.note}>Check for a newer version from the pinned HPOS release source.</span>
-      actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Check for Updates</button>
+      actionNode = <button style={U.btn} disabled={busy} onClick={() => act('check', () => up.check())}>Check for Updates</button>
   }
 
   return (

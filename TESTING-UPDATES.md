@@ -92,6 +92,24 @@ Run **Check for Updates** again on 0.1.1 (with no newer release published):
 * green **"You're up to date — 0.1.1."**,
 * the button stays **Check for Updates** (never a download).
 
+## 2b. A press is never silent
+
+Every press of **Check for Updates / Download Update / Restart to Update**
+must leave a visible status behind — the panel never waits on the pushed
+event stream alone:
+
+* the press shows its state immediately (*Checking…* / *Downloading…* /
+  *Installing…*) before any IPC round-trip;
+* the status the argument-free call resolves with is rendered even when no
+  event reaches the window (up to date / update available / error);
+* a refused or rejected call becomes a categorised error with its code and
+  raw reason (e.g. `EUNTRUSTED`, `ENOHANDLER`) plus **Try Again**;
+* a check that never answers becomes *"The update check did not answer in
+  time…"* after 30 s instead of an endless **Checking…**.
+
+Executable contract: `node src/lib/updaterStatus.test.mjs` (part of
+`npm test`).
+
 ## 3. Network failure
 
 Disconnect the machine (or block `github.com` / `api.github.com`) and press
