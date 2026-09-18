@@ -177,7 +177,10 @@ jobs:
 
   release-win:
     name: Build + publish Windows (NSIS + latest.yml)
-    needs: [verify, validate]
+    # after release-linux: both jobs upload into the SAME GitHub release, and
+    # two electron-builder runs racing to create it can collide (422
+    # already_exists). Running second means the release already exists.
+    needs: [verify, validate, release-linux]
     runs-on: windows-latest
     # Publish ONLY for a v* tag push, or a manual run with dry_run switched off.
     if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'win')) }}
