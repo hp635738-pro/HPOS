@@ -251,6 +251,34 @@ assert(
   assert(settings.includes('<GitHubUpdatePanel />'), '5: GitHubUpdatePanel is rendered in Settings')
 }
 
+/* 6. update-mechanism reporting (Linux .deb vs AppImage vs NSIS) --------- */
+{
+  const footerStart = panel.indexOf('return (', panel.indexOf("switch (u ? u.state : "))
+  const footerText = panel.slice(footerStart)
+  assert(
+    footerText.includes('u.mechanismLabel') && footerText.includes('Update method:'),
+    '6: the panel reports the update mechanism of this installation',
+  )
+  const mechanismLine = footerText.split('\n').find((l) => l.includes('u.mechanismLabel'))
+  assert(
+    /^\s*\{u &&/.test(mechanismLine || ''),
+    '6: the mechanism line is null-safe (u === null initial render)',
+  )
+  assert(
+    /installing/.test(panel) && panel.includes('u.message'),
+    '6: the installing state shows the live install progress message',
+  )
+  assert(
+    panel.includes('u.errorDetail') && panel.includes('u.errorCode'),
+    '6: failures show the error category + detail, not only "The update check failed."',
+  )
+  assert(
+    panel.includes("u.error || 'The update check failed.'"),
+    '6: the documented fallback copy is preserved',
+  )
+  console.log('ok    6: mechanism label + categorised failure detail are reported')
+}
+
 if (failed) {
   console.error(`\n${failed} settings null-safety test(s) failed`)
   process.exit(1)

@@ -1,7 +1,7 @@
 {
   "name": "hpos",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HPOS \u2014 a fully themeable desktop app shell",
   "author": "HPOS Team",
   "repository": {
@@ -19,11 +19,15 @@
     "dist:dir": "npm run build:prod && npm run workspace:project && electron-builder --win --dir --publish never",
     "dist:linux": "npm run build:prod && npm run workspace:project && electron-builder --linux appimage deb --publish never",
     "dist:linux:dir": "npm run build:prod && npm run workspace:project && electron-builder --linux --dir --publish never",
+    "release:check": "node scripts/release-check.mjs",
+    "release:linux": "npm run release:check && npm run build:prod && npm run workspace:project && electron-builder --linux appimage deb --publish always",
+    "release:win": "npm run release:check && npm run build:prod && npm run workspace:project && electron-builder --win nsis --publish always",
+    "release": "npm run release:linux && npm run release:win",
     "lint": "oxlint",
     "preview": "vite preview",
     "workspace:project": "node scripts/build-workspace-project.mjs",
     "bridge:check": "node src/lib/bridge/validate.mjs",
-    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/gitConnect.test.mjs && node HPOS-Desktop/gitBridge.test.mjs && node HPOS-Desktop/appUpdate.test.mjs && node HPOS-Desktop/devLaunch.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node HPOS-Desktop/workspaceSeed.test.mjs && node HPOS-Desktop/terminalSession.test.mjs && node HPOS-Desktop/previewRemoval.test.mjs && node HPOS-Desktop/workspaceProjectSeed.test.mjs && node scripts/build-workspace-project.test.mjs && node HPOS-Desktop/settingsNavigation.test.mjs && node HPOS-Desktop/launchLifecycle.test.mjs && node HPOS-Desktop/updater.test.mjs && node packaging.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node vite-runtime-proxy.test.mjs && node src/lib/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/theme/tokens.test.mjs && node src/pages/Settings.test.mjs"
+    "test": "node HPOS-Desktop/workspaceRoot.test.mjs && node HPOS-Desktop/frontendEntry.test.mjs && node HPOS-Desktop/gitPull.test.mjs && node HPOS-Desktop/gitConnect.test.mjs && node HPOS-Desktop/gitBridge.test.mjs && node HPOS-Desktop/appUpdate.test.mjs && node HPOS-Desktop/devLaunch.test.mjs && node HPOS-Desktop/runtimeManager.test.mjs && node HPOS-Desktop/workspaceSeed.test.mjs && node HPOS-Desktop/terminalSession.test.mjs && node HPOS-Desktop/previewRemoval.test.mjs && node HPOS-Desktop/workspaceProjectSeed.test.mjs && node scripts/build-workspace-project.test.mjs && node HPOS-Desktop/settingsNavigation.test.mjs && node HPOS-Desktop/launchLifecycle.test.mjs && node HPOS-Desktop/updater.test.mjs && node HPOS-Desktop/linuxUpdate.test.mjs && node scripts/release-check.test.mjs && node packaging.test.mjs && node src/lib/bridge/validate.mjs && node src/lib/bridge/localRuntimeBridge.test.mjs && node src/lib/bridge/runtimeConnection.test.mjs && node src/lib/bridge/runtimeEventStream.test.mjs && node src/lib/bridge/runtimeActivity.test.mjs && node src/lib/bridge/runtimeEventParity.test.mjs && node vite-runtime-proxy.test.mjs && node src/lib/longPress.test.mjs && node src/components/RuntimeStatus.test.mjs && node src/theme/tokens.test.mjs && node src/pages/Settings.test.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
@@ -144,11 +148,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

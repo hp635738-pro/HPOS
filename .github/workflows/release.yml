@@ -1,0 +1,99 @@
+name: Release
+
+# Deliberate release process for the in-app updater (Settings → App → Check for
+# Updates). Publishing is what makes electron-builder write the update metadata
+# (latest-linux.yml, latest.yml) next to the artifacts — without it no installed
+# app can ever see a new version.
+#
+# Triggered ONLY by:
+#   · pushing a v*.*.* tag  (the normal release path)
+#   · a manual workflow_dispatch run
+# Ordinary branch pushes and pull requests build and test, and never publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to publish'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - linux
+          - win
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm test
+
+  release:
+    name: Build + publish
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: win
+    if: >
+      github.event_name == 'push' ||
+      github.event.inputs.target == 'all' ||
+      github.event.inputs.target == matrix.target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Release gate (version increment, pinned source, token present)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:check
+
+      - name: Build + publish Linux (AppImage + deb + latest-linux.yml)
+        if: matrix.target == 'linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:linux
+
+      - name: Build + publish Windows (NSIS + latest.yml)
+        if: matrix.target == 'win'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:win
+
+      - name: Upload artifacts for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: hpos-${{ matrix.target }}-${{ github.ref_name }}
+          path: |
+            release/*.deb
+            release/*.AppImage
+            release/*.exe
+            release/latest*.yml
+          if-no-files-found: warn

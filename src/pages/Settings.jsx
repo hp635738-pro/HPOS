@@ -314,12 +314,17 @@ function UpdatesPanel() {
       break
 
     case 'installing':
-      statusNode = <span style={U.note}>Installing the update — HPOS is restarting…</span>
+      statusNode = <span style={U.note}>{u.message || 'Installing the update — HPOS is restarting…'}</span>
       actionNode = null
       break
 
     case 'error':
-      statusNode = <span style={{ ...U.note, color: 'var(--danger)' }}>{u.error || 'The update check failed.'}</span>
+      statusNode = (
+        <span style={{ ...U.note, color: 'var(--danger)' }}>
+          {u.error || 'The update check failed.'}
+          {u.errorDetail ? ` (${u.errorCode || 'error'}: ${u.errorDetail})` : ''}
+        </span>
+      )
       actionNode = <button style={U.btn} disabled={busy} onClick={() => act(() => up.check())}>Try Again</button>
       break
 
@@ -343,6 +348,7 @@ function UpdatesPanel() {
         <p style={U.notes}>{u.releaseNotes}</p>
       )}
       {actionNode}
+      {u && u.mechanismLabel && <span style={U.note}>Update method: {u.mechanismDescription || u.mechanismLabel}</span>}
     </div>
   )
 }

@@ -39,7 +39,7 @@ HPOS Desktop uses **electron-builder** with an NSIS installer for Windows x64.
 build first, so one command is enough:
 
 ```bash
-# Windows installer (NSIS) – produces release/HPOS Setup 0.1.0.exe
+# Windows installer (NSIS) – produces release/HPOS Setup 0.1.1.exe
 npm run dist:win
 
 # Alternative – unpacked dir only (no installer, faster for smoke testing)
@@ -50,7 +50,7 @@ npm run build:prod
 ```
 
 **Output (gitignored via `release/` in `.gitignore`):**
-- Installer: `release/HPOS Setup 0.1.0.exe` (or versioned name)
+- Installer: `release/HPOS Setup 0.1.1.exe` (or versioned name)
 - Unpacked app: `release/win-unpacked/HPOS.exe`
 
 **Application icon:**
@@ -208,7 +208,7 @@ Same electron-builder pipeline, same payload — **AppImage (portable) + deb
 **Build frontend + package:**
 
 ```bash
-# AppImage + deb – produces release/HPOS-0.1.0.AppImage + release/hpos_0.1.0_amd64.deb
+# AppImage + deb – produces release/HPOS-0.1.1.AppImage + release/hpos_0.1.1_amd64.deb
 npm run dist:linux
 
 # Unpacked dir only (fast smoke test) – release/linux-unpacked/HPOS
@@ -216,9 +216,9 @@ npm run dist:linux:dir
 ```
 
 **Output (gitignored via `release/` in `.gitignore`):**
-- AppImage: `release/HPOS-0.1.0.AppImage` — portable, kisi bhi glibc ≥2.31
+- AppImage: `release/HPOS-0.1.1.AppImage` — portable, kisi bhi glibc ≥2.31
   (Debian 11+/Ubuntu 20.04+) Linux pe direct chalta hai
-- deb: `release/hpos_0.1.0_amd64.deb` — system install (`sudo apt install ./…`),
+- deb: `release/hpos_0.1.1_amd64.deb` — system install (`sudo apt install ./…`),
   menu entry + icons + uninstall support
 - Unpacked: `release/linux-unpacked/HPOS` — raw Electron app directory
 
@@ -232,9 +232,9 @@ npm run dist:linux:dir
   file ka icon tab tak ignore karte hain jab tak window khud icon set na kare)
 
 **Run/install:**
-- AppImage: `chmod +x HPOS-0.1.0.AppImage && ./HPOS-0.1.0.AppImage`
+- AppImage: `chmod +x HPOS-0.1.1.AppImage && ./HPOS-0.1.1.AppImage`
   (Debian 12/Ubuntu 22.04+ pe `libfuse2` chahiye: `sudo apt install libfuse2`)
-- deb: `sudo apt install ./hpos_0.1.0_amd64.deb` → apps menu mein **HPOS**
+- deb: `sudo apt install ./hpos_0.1.1_amd64.deb` → apps menu mein **HPOS**
 - Uninstall: `sudo apt remove hpos` (user data — `~/.config/HPOS/workspace` aur
   `~/.hpos/runtime` — deliberately delete nahi hoti)
 
@@ -249,7 +249,7 @@ npm run dist:linux:dir
   (electron-updater auto-update AppImage ke liye AppImageUpdate mangta hai jo
   abhi wired nahi) — update ka flow: naya build download karke replace kar do
 - AppImage pe `libfuse2` na ho toh: `sudo apt install libfuse2`, ya
-  `./HPOS-0.1.0.AppImage --appimage-extract && squashfs-root/AppRun`
+  `./HPOS-0.1.1.AppImage --appimage-extract && squashfs-root/AppRun`
 - Purane/locked-down distros (Ubuntu 24.04+) pe Electron ka sandbox na chale toh
   SETUP-LINUX.md ka **Troubleshooting** section dekho
 - Building needs network access to GitHub release assets — sandboxed networks jo
@@ -310,20 +310,45 @@ process.
 the pinned GitHub release source (`build.publish` →
 `hp635738-pro/HPOS`, no secrets in config) → **Download Update** →
 **Restart to Update**. `electron-updater` (the only production dependency)
-handles the download and verifies integrity/signatures; a failed
-verification is reported as *not installed* and can never reach install.
-Auto-download and auto-install are forced off; development instances show a
-structured "updates only in the installed app" state. Developer builds never
-publish: all `dist*` scripts pass `--publish never` — releases are cut by
-an explicit publish step against the pinned repo.
+does the release-metadata lookup, the download and the integrity check
+(SHA-512 from the published `latest*.yml`); a failed verification is
+reported as *not installed* and can never reach install. Auto-download and
+auto-install are forced off; development instances show a structured
+"updates only in the installed app" state. Developer builds never publish:
+all `dist*` scripts pass `--publish never` — releases are cut by an explicit
+publish step against the pinned repo (see **[RELEASE.md](RELEASE.md)**).
+
+**Per-install update mechanism (Settings → App shows it verbatim).** The
+installed app detects *how* it is installed and uses the mechanism that
+actually works for it — it never claims one mechanism while doing another:
+
+| Installation | Mechanism | Who installs it |
+| --- | --- | --- |
+| Windows (NSIS) | `nsis` | electron-updater runs the installer on restart |
+| Linux AppImage | `appimage` | electron-updater replaces the single AppImage file (delta download when possible) |
+| Linux **.deb** | `deb` | the verified `.deb` is installed with **dpkg** through **pkexec** (Polkit), then HPOS restarts |
+| Linux .rpm / pacman | `rpm` / `pacman` | same controlled path (`rpm -U` / `pacman -U`) |
+| Snap / Flatpak / unpacked | unsupported | shown as unsupported — the sandbox/store owns updates, HPOS never fakes it |
+
+The Linux package path lives in `HPOS-Desktop/linuxUpdate.js`. It re-verifies
+the downloaded package against the SHA-512 in the release metadata, hands it
+to the package manager with a fixed argv (no shell, no `sudo` password, no
+`curl | bash`), and only restarts HPOS after the package manager reported
+success. User data (`~/.config/HPOS` — prefs, workspace, runtime state) is
+outside the install prefix, so an update cannot lose it.
 
 **Dev vs production architecture.**
 - *Dev loop*: Code Arena inside any HPOS instance → workspace code →
   terminal + Launch HPOS (a dev instance, clearly marked) → commit → push.
   Nothing in this loop touches the installer.
-- *Release loop*: version bump → `npm run dist:win` (build + workspace
-  payload) → explicit publish to the pinned GitHub release → installed app
-  offers the update in Settings → user restarts → latest.
+- *Release loop*: semantic version bump in `package.json` **and**
+  `HPOS-Desktop/package.json` → commit → tag `vX.Y.Z` → push the tag → CI
+  (`.github/workflows/release.yml`) runs `npm run release:check` +
+  `npm run release:linux` / `release:win`, which publish the artifacts **and**
+  the updater metadata → the installed app offers the update in Settings →
+  user restarts → latest. Manual equivalent: `npm run release:linux`
+  (requires `GH_TOKEN`). End-to-end verification steps:
+  **[TESTING-UPDATES.md](TESTING-UPDATES.md)**.
 
 **Security preserved across all of the above:** `contextIsolation:true`,
 `sandbox:true`, `nodeIntegration:false`; every workspace operation is an
