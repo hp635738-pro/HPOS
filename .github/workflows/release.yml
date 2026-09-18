@@ -72,6 +72,9 @@ jobs:
     name: Validate the release artifacts (builds, never publishes)
     needs: verify
     runs-on: ubuntu-latest
+    env:
+      # the verification report is published as a check run, which needs a token
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
