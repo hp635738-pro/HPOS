@@ -44,6 +44,7 @@ on:
 
 permissions:
   contents: write
+  checks: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -82,11 +83,28 @@ jobs:
       - name: Build the Linux targets without publishing (--publish never)
         run: npm run dist:linux
       - name: Assert the artifacts + update metadata are exactly what the updater needs
-        run: npm run verify:artifacts -- --summary
+        id: artifacts
+        continue-on-error: true
+        run: |
+          set +e
+          npm run verify:artifacts -- --json --summary > validated-artifacts.json
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat validated-artifacts.json
+          exit $code
+      - name: Publish the validation report as a check run
+        if: always()
+        continue-on-error: true
+        run: node scripts/publish-verification.mjs --file validated-artifacts.json
+      - name: Fail the job when the artifacts are not valid (blocks publishing)
+        if: steps.artifacts.outputs.exit_code != '0'
+        run: |
+          echo "::error::the build artifacts failed validation - the publish job stays blocked"
+          exit 1
       - name: Keep the validated artifacts for inspection
         uses: actions/upload-artifact@v4
         with:
-          name: hpos-linux-validated-${{ github.ref_name }}
+          name: hpos-linux-validated-${{ github.run_id }}
           path: |
             release/*.deb
             release/*.AppImage
@@ -125,12 +143,29 @@ jobs:
         run: gh release edit "v$(node -p "require('./package.json').version")" --draft=false --prerelease=false
 
       - name: Verify the published release (assets + metadata + sha512)
-        run: npm run verify:release -- --wait --summary
+        id: verifyrelease
+        continue-on-error: true
+        run: |
+          set +e
+          npm run verify:release -- --wait --json --summary > release-verification.json
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat release-verification.json
+          exit $code
+      - name: Publish the verification report as a check run
+        if: always()
+        continue-on-error: true
+        run: node scripts/publish-verification.mjs --file release-verification.json
+      - name: Fail the job when the published release is incomplete
+        if: steps.verifyrelease.outputs.exit_code != '0'
+        run: |
+          echo "::error::the published release failed verification"
+          exit 1
 
       - name: Keep the published artifacts for inspection
         uses: actions/upload-artifact@v4
         with:
-          name: hpos-linux-${{ github.ref_name }}
+          name: hpos-linux-${{ github.run_id }}
           path: |
             release/*.deb
             release/*.AppImage
@@ -161,7 +196,7 @@ jobs:
       - name: Keep the published artifacts for inspection
         uses: actions/upload-artifact@v4
         with:
-          name: hpos-win-${{ github.ref_name }}
+          name: hpos-win-${{ github.run_id }}
           path: |
             release/*.exe
             release/latest.yml

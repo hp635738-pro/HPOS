@@ -158,4 +158,54 @@ function makeReleaseDir({ version = '0.1.1', breakSha = false, dropEntry = false
   console.log('ok: the streaming sha512 implementation matches a one-shot hash')
 }
 
+
+/* ------------------- 7. the CI verification report (check run) is well-formed */
+{
+  const { renderReport, publishCheckRun, parseArgs } = await import('./publish-verification.mjs')
+
+  const releaseResult = {
+    ok: true,
+    tag: 'v0.1.1',
+    version: '0.1.1',
+    releaseUrl: 'https://github.com/hp635738-pro/HPOS/releases/tag/v0.1.1',
+    latestTag: 'v0.1.1',
+    assets: ['HPOS-0.1.1.AppImage', 'hpos_0.1.1_amd64.deb', 'latest-linux.yml'],
+    metadataUrl: 'https://github.com/hp635738-pro/HPOS/releases/download/v0.1.1/latest-linux.yml',
+    errors: [],
+    rows: [{ file: 'hpos_0.1.1_amd64.deb', size: 42, sha512: hash('deb payload'), url: 'https://github.com/hp635738-pro/HPOS/releases/download/v0.1.1/hpos_0.1.1_amd64.deb', status: 'ok' }],
+  }
+  const markdown = renderReport(releaseResult, 'release')
+  assert.match(markdown, /hpos_0\.1\.1_amd64\.deb/, 'the report names the artifact')
+  assert.match(markdown, /releases\/download\/v0\.1\.1\/latest-linux\.yml/, 'the report names the metadata URL the updater reads')
+  assert.match(markdown, /\*\*verified\*\*/, 'a passing report says so')
+
+  const failedResult = { ...releaseResult, ok: false, errors: ['sha512 mismatch'] }
+  assert.match(renderReport(failedResult, 'release'), /sha512 mismatch/, 'a failing report carries the reason')
+
+  let posted = null
+  const fakeFetch = async (url, init) => {
+    posted = { url, body: JSON.parse(init.body) }
+    return { ok: true, status: 201, statusText: 'Created', text: async () => JSON.stringify({ html_url: 'https://github.com/check/1', conclusion: 'success' }) }
+  }
+  const created = await publishCheckRun({
+    result: releaseResult,
+    name: 'HPOS release verification (v0.1.1)',
+    headSha: 'deadbeef',
+    token: 'x-token',
+    fetchImpl: fakeFetch,
+  })
+  assert.equal(posted.url, 'https://api.github.com/repos/hp635738-pro/HPOS/check-runs', 'the report is posted to this repository')
+  assert.equal(posted.body.conclusion, 'success', 'a passing verification is a passing check')
+  assert.equal(posted.body.head_sha, 'deadbeef', 'the check is attached to the built commit')
+  assert.match(posted.body.output.summary, /verified/, 'the check carries the report')
+  assert.equal(created.html_url, 'https://github.com/check/1')
+
+  await publishCheckRun({ result: failedResult, name: 'x', headSha: 'y', token: 't', fetchImpl: fakeFetch })
+  assert.equal(posted.body.conclusion, 'failure', 'a failing verification is a failing check')
+
+  const args = parseArgs(['--file', 'a.json', '--name', 'n', '--dry-run'])
+  assert.deepEqual(args, { file: 'a.json', name: 'n', dryRun: true })
+  console.log('ok: the CI verification report is rendered and posted to this repository as a check run')
+}
+
 console.log('release verification tests: all passed')
