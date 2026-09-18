@@ -12,9 +12,9 @@ import PalettePanel from './PalettePanel'
 import WorkspacePanel from './WorkspacePanel'
 import ComponentPanel from './ComponentPanel'
 import Notch from './Notch'
-import { GitHubUpdatePanel, UpdatesPanel } from '../pages/Settings'
+import { GitHubUpdatePanel, PresetChooser, UpdatesPanel } from '../pages/Settings'
 import { Card, Row, Segmented, Toggle } from './ui/Bits'
-import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill } from './Icons'
+import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill, Sparkle } from './Icons'
 
 /**
  * Advanced settings — the full settings explorer for everything that is not a
@@ -46,6 +46,16 @@ const PAGES = [
         <UpdatesPanel />
       </div>
     ),
+  },
+  {
+    id: 'presets',
+    related: ['workspaces', 'colours', 'type'],
+    name: 'Presets',
+    group: 'Appearance',
+    Icon: Sparkle,
+    desc: 'Five distinct visual identities — the same picker as the Quick settings page; fine-tune afterwards with the other Appearance pages.',
+    keywords: 'preset identity look glass aurora minimal dark pro soft enterprise compact pick switch',
+    Panel: () => <Card><PresetChooser /></Card>,
   },
   {
     id: 'workspaces',

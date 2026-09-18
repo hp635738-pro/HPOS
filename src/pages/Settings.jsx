@@ -1039,7 +1039,6 @@ const S = {
 
 }
 
-/* The updater panels are shared with the dedicated Updates page inside
-   Advanced settings (components/AdvancedEditor.jsx) — one implementation,
-   two entry points. */
-export { GitHubUpdatePanel, UpdatesPanel }
+/* Shared with the dedicated pages inside Advanced settings
+   (components/AdvancedEditor.jsx) — one implementation, two entry points. */
+export { GitHubUpdatePanel, PresetChooser, UpdatesPanel }
