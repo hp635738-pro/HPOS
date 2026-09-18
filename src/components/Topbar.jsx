@@ -20,7 +20,13 @@ export default function Topbar({ title, active, onNavigate, onOpenRuntimeDetails
       height: prefs.barH,
       padding: `0 ${prefs.barPadX}px`,
       borderBottom: prefs.barBorder ? '1px solid var(--line)' : 'none',
-      borderRadius: prefs.barRadius,
+      /* Shares the rail's surface (var(--surface)). When the rail is flush
+         (no inset) the top-left corner is squared — it meets the rail's
+         top-right corner, so header + sidebar top reads as one connected,
+         rounded band. */
+      borderRadius: prefs.railInset
+        ? prefs.barRadius
+        : `0 ${prefs.barRadius}px ${prefs.barRadius}px ${prefs.barRadius}px`,
       position: prefs.barSticky ? 'sticky' : 'relative',
       top: 0, zIndex: 20,
     }}>

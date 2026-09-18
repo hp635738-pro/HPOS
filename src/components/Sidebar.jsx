@@ -15,7 +15,7 @@ import {
  */
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
-  { id: 'schedule',  label: 'Analyzing',      Icon: Analyzing },
+  { id: 'schedule',  label: 'Dashboard',      Icon: Analyzing },
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
@@ -138,7 +138,14 @@ export default function Sidebar({ active, onChange }) {
       ...S.rail,
       width: mini ? prefs.railMini : prefs.railWidth,
       padding: `14px ${prefs.railPad}px`,
-      borderRadius: prefs.railSharp,
+      /* Same surface as the header (Topbar) so rail + header read as ONE
+         connected piece. When the rail is flush (no inset) the top-right
+         corner is squared — it butts against the header's top-left corner,
+         so the top edge runs as one continuous line. */
+      background: 'var(--surface)',
+      borderRadius: prefs.railInset
+        ? prefs.railSharp
+        : `${prefs.railSharp}px 0 ${prefs.railSharp}px ${prefs.railSharp}px`,
       margin: prefs.railInset,
       marginRight: prefs.railInset ? prefs.railInset : 0,
     }}>
@@ -401,7 +408,8 @@ export default function Sidebar({ active, onChange }) {
 const S = {
   rail: {
     position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
-    background: 'var(--rail)',
+    /* background is set inline: var(--surface) — the SAME surface as the
+       header (Topbar), so rail + header connect as one piece. */
     /* Glass blur is applied by index.css, scoped to the glass preset. Do NOT
        set backdrop-filter inline here: any non-none value makes this <aside>
        the containing block for position:fixed descendants (the context

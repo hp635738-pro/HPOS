@@ -370,9 +370,11 @@ export const InputTerminal = (p) => (
   </Svg>
 )
 
-/** Analyzing — a clean ECG pulse sweeping left to right. */
+/** Dashboard — the ECG pulse as a SOLID filled band (highlight look). */
 export const Analyzing = (p) => (
-  <Svg line {...p}><path d="M2.5 12h4l2.2-7 4.3 14 2.2-7h6.3" /></Svg>
+  <Svg {...p} filled>
+    <path d="M2.5 10.7h4l2.2-7 4.3 14 2.2-7h6.3v2.6h-6.3l-2.2 7-4.3-14-2.2 7h-4Z" />
+  </Svg>
 )
 
 /** Topics — a modern slanted hash, like channels. */
