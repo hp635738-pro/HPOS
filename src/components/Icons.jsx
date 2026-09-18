@@ -1,17 +1,43 @@
-const base = {
-  fill: 'none',
+/* ------------------------------------------------------------------ icons */
+/* Solid-first icon system (user preference: "bhare" icons, no hollow
+   outlines):
+
+   - default: fill AND stroke are currentColor. Closed shapes render as
+     solid silhouettes; short line details that sit outside the body read
+     as bold strokes in the same colour.
+   - `line`: pure-stroke glyphs (arrows, ticks, chevrons, prompts). These
+     have no enclosed area, so there is nothing to fill — a clean, slightly
+     heavier stroke keeps the family consistent.
+   - `filled`: flat fill, no stroke (dot grids, stop, brand marks).
+   - Detail that must stay visible INSIDE a solid body (eyes, dots, lens,
+     keyhole, keys) is cut out as a true hole: extra subpaths on the body
+     path with fill-rule evenodd, so the hole stays transparent on any
+     background — no hardcoded contrast colour.
+*/
+const solid = {
+  fill: 'currentColor',
   stroke: 'currentColor',
   strokeWidth: 1.9,
   strokeLinecap: 'round',
   strokeLinejoin: 'round',
 }
 
-const Svg = ({ size = 20, children, filled, ...p }) => (
+const lineStroke = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2.1,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+}
+
+const flat = { fill: 'currentColor' }
+
+const Svg = ({ size = 20, children, filled, line: asLine, ...p }) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
-    {...(filled ? { fill: 'currentColor' } : base)}
+    {...(filled ? flat : asLine ? lineStroke : solid)}
     {...p}
   >
     {children}
@@ -52,49 +78,77 @@ export const Grid = (p) => (
 )
 
 export const Calendar = (p) => (
-  <Svg {...p}><rect x="3" y="5" width="18" height="16" rx="3.5" /><path d="M8 3v4M16 3v4M3 10h18" /><circle cx="8.5" cy="14.5" r=".9" fill="currentColor" stroke="none" /><circle cx="12" cy="14.5" r=".9" fill="currentColor" stroke="none" /><circle cx="15.5" cy="14.5" r=".9" fill="currentColor" stroke="none" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M6.5 5h11A3.5 3.5 0 0 1 21 8.5V17.5a3.5 3.5 0 0 1-3.5 3.5h-11A3.5 3.5 0 0 1 3 17.5V8.5A3.5 3.5 0 0 1 6.5 5ZM3.6 9.4h16.8v1.4H3.6ZM7.6 14.5a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM11.1 14.5a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM14.6 14.5a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0Z"
+    />
+    <path fill="none" d="M8 3v4M16 3v4" />
+  </Svg>
 )
 
 export const Card = (p) => (
-  <Svg {...p}><rect x="2.5" y="5" width="19" height="14" rx="3.5" /><path d="M2.5 10h19M6 15h3" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M6 5h12a3.5 3.5 0 0 1 3.5 3.5v7A3.5 3.5 0 0 1 18 19H6a3.5 3.5 0 0 1-3.5-3.5v-7A3.5 3.5 0 0 1 6 5ZM3.2 9.2h17.6v1.6H3.2ZM6 14.2h3.2v1.6H6Z"
+    />
+  </Svg>
 )
 
 export const Chart = (p) => (
-  <Svg {...p}><path d="M5 20V11M12 20V4M19 20v-6" /></Svg>
+  <Svg {...p}>
+    <rect x="3.3" y="11" width="3.4" height="9" rx="1.5" />
+    <rect x="10.3" y="4" width="3.4" height="16" rx="1.5" />
+    <rect x="17.3" y="14" width="3.4" height="6" rx="1.5" />
+  </Svg>
 )
 
 export const Chat = (p) => (
   <Svg {...p}>
-    <path d="M20.5 12.2c0 4.2-3.8 7.6-8.5 7.6-1.1 0-2.2-.2-3.1-.5L4 21l1.4-3.6A7.2 7.2 0 0 1 3.5 12.2C3.5 8 7.3 4.6 12 4.6s8.5 3.4 8.5 7.6Z" />
-    <circle cx="8.5" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
-    <circle cx="12" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
-    <circle cx="15.5" cy="11.9" r="1.05" fill="currentColor" stroke="none" />
+    <path
+      fillRule="evenodd"
+      d="M20.5 12.2c0 4.2-3.8 7.6-8.5 7.6-1.1 0-2.2-.2-3.1-.5L4 21l1.4-3.6A7.2 7.2 0 0 1 3.5 12.2C3.5 8 7.3 4.6 12 4.6s8.5 3.4 8.5 7.6ZM7.45 11.9a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0ZM10.95 11.9a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0ZM14.45 11.9a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0Z"
+    />
   </Svg>
 )
 
 export const Ghost = (p) => (
   <Svg {...p}>
-    <path d="M5 20V11a7 7 0 0 1 14 0v9l-2.3-1.7L14.4 20l-2.4-1.7L9.6 20l-2.3-1.7L5 20Z" />
-    <circle cx="9.5" cy="10.3" r="1.15" fill="currentColor" stroke="none" />
-    <circle cx="14.5" cy="10.3" r="1.15" fill="currentColor" stroke="none" />
-    <path d="M10.1 14.2c.55.55 1.15.8 1.9.8s1.35-.25 1.9-.8" />
+    <path
+      fillRule="evenodd"
+      d="M5 20V11a7 7 0 0 1 14 0v9l-2.3-1.7L14.4 20l-2.4-1.7L9.6 20l-2.3-1.7L5 20ZM8.35 10.3a1.15 1.15 0 1 0 2.3 0a1.15 1.15 0 1 0-2.3 0ZM13.35 10.3a1.15 1.15 0 1 0 2.3 0a1.15 1.15 0 1 0-2.3 0Z"
+    />
   </Svg>
 )
 
 export const Gear = (p) => (
-  <Svg {...p}><circle cx="12" cy="12" r="3.1" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.5a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.6V2.5a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1Z" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.5a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.6V2.5a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.6 1ZM8.9 12a3.1 3.1 0 1 0 6.2 0a3.1 3.1 0 1 0-6.2 0Z"
+    />
+  </Svg>
 )
 
 export const Logout = (p) => (
-  <Svg {...p}><path d="M14 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8M17 15l4-3-4-3M21 12H9" /></Svg>
+  <Svg line {...p}><path d="M14 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8M17 15l4-3-4-3M21 12H9" /></Svg>
 )
 
 export const Search = (p) => (
-  <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></Svg>
+  <Svg {...p}>
+    <path fillRule="evenodd" d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM11 7.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" />
+    <path fill="none" d="m16.2 16.2 3.8 3.8" />
+  </Svg>
 )
 
 export const UserCircle = (p) => (
-  <Svg {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="10" r="3.2" /><path d="M5.6 18.5a7.4 7.4 0 0 1 12.8 0" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM12 6.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4ZM5.6 18.5a7.4 7.4 0 0 1 12.8 0 9 9 0 0 1-12.8 0Z"
+    />
+  </Svg>
 )
 
 export const Chevron = ({ size = 16, dir = 'down', ...p }) => {
@@ -121,15 +175,22 @@ export const Dots = (p) => (
 )
 
 export const Info = (p) => (
-  <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></Svg>
+  <Svg {...p}>
+    <path fillRule="evenodd" d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM10.95 7.65a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0ZM11.05 10.8h1.9v5.8h-1.9Z" />
+  </Svg>
 )
 
 export const Transfer = (p) => (
-  <Svg {...p}><path d="M4 8h13l-3-3M20 16H7l3 3" /></Svg>
+  <Svg line {...p}><path d="M4 8h13l-3-3M20 16H7l3 3" /></Svg>
 )
 
 export const Bill = (p) => (
-  <Svg {...p}><rect x="5" y="3" width="14" height="18" rx="2.6" /><path d="M9 8h6M9 12h6M9 16h3.5" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M7.6 3h8.8A2.6 2.6 0 0 1 19 5.6v14.8a2.6 2.6 0 0 1-2.6 2.6H7.6a2.6 2.6 0 0 1-2.6-2.6V5.6A2.6 2.6 0 0 1 7.6 3ZM8.6 7.3h6.8v1.4H8.6ZM8.6 11.3h6.8v1.4H8.6ZM8.6 15.3h4.3v1.4H8.6Z"
+    />
+  </Svg>
 )
 
 export const Home = (p) => (
@@ -141,11 +202,14 @@ export const Plane = (p) => (
 )
 
 export const ArrowUp = (p) => (
-  <Svg {...p}><path d="M12 20V5M5.5 11.5 12 5l6.5 6.5" /></Svg>
+  <Svg line {...p}><path d="M12 20V5M5.5 11.5 12 5l6.5 6.5" /></Svg>
 )
 
 export const Mic = (p) => (
-  <Svg {...p}><rect x="9" y="2.8" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5" /></Svg>
+  <Svg {...p}>
+    <rect x="9" y="2.8" width="6" height="11" rx="3" />
+    <path fill="none" d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5" />
+  </Svg>
 )
 
 export const Stop = (p) => (
@@ -153,11 +217,13 @@ export const Stop = (p) => (
 )
 
 export const Eye = (p) => (
-  <Svg {...p}><path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.6" /></Svg>
+  <Svg {...p}>
+    <path fillRule="evenodd" d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6ZM9.8 12a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0-4.4 0Z" />
+  </Svg>
 )
 
 export const EyeOff = (p) => (
-  <Svg {...p}><path d="M10.6 6.2A8.9 8.9 0 0 1 12 6c6 0 9.5 6 9.5 6a15.7 15.7 0 0 1-2.9 3.5M6.3 7.7A15.6 15.6 0 0 0 2.5 12S6 18 12 18a8.8 8.8 0 0 0 3.6-.75M3 3l18 18" /></Svg>
+  <Svg line {...p}><path d="M10.6 6.2A8.9 8.9 0 0 1 12 6c6 0 9.5 6 9.5 6a15.7 15.7 0 0 1-2.9 3.5M6.3 7.7A15.6 15.6 0 0 0 2.5 12S6 18 12 18a8.8 8.8 0 0 0 3.6-.75M3 3l18 18" /></Svg>
 )
 
 export const Visa = ({ height = 15 }) => (
@@ -191,39 +257,57 @@ export const Binance = ({ size = 20 }) => (
 )
 
 export const Bell = (p) => (
-  <Svg {...p}><path d="M18 8.6a6 6 0 1 0-12 0c0 6-2.5 7.4-2.5 7.4h17S18 14.6 18 8.6ZM13.7 19.5a2 2 0 0 1-3.4 0" /></Svg>
+  <Svg {...p}>
+    <path d="M18 8.6a6 6 0 1 0-12 0c0 6-2.5 7.4-2.5 7.4h17S18 14.6 18 8.6Z" />
+    <path fill="none" d="M13.7 19.5a2 2 0 0 1-3.4 0" />
+  </Svg>
 )
 
 export const Lock = (p) => (
-  <Svg {...p}><rect x="4.5" y="10.5" width="15" height="10.5" rx="3" /><path d="M8 10.5V7.2a4 4 0 0 1 8 0v3.3" /><circle cx="12" cy="15.6" r="1.3" fill="currentColor" stroke="none" /></Svg>
+  <Svg {...p}>
+    <path fillRule="evenodd" d="M7.5 10.5h9a3 3 0 0 1 3 3V18a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-4.5a3 3 0 0 1 3-3ZM10.7 15.6a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z" />
+    <path fill="none" d="M8 10.5V7.2a4 4 0 0 1 8 0v3.3" />
+  </Svg>
 )
 
 export const Palette = (p) => (
-  <Svg {...p}><path d="M12 21a9 9 0 1 1 9-9c0 2-1.6 3-3.2 3H16a2 2 0 0 0-1.4 3.4c.4.5.2 1.3-.4 1.5-.7.1-1.4.1-2.2.1Z" /><circle cx="7.8" cy="12" r="1.2" fill="currentColor" stroke="none" /><circle cx="10" cy="8" r="1.2" fill="currentColor" stroke="none" /><circle cx="14.5" cy="7.8" r="1.2" fill="currentColor" stroke="none" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M12 21a9 9 0 1 1 9-9c0 2-1.6 3-3.2 3H16a2 2 0 0 0-1.4 3.4c.4.5.2 1.3-.4 1.5-.7.1-1.4.1-2.2.1ZM6.6 12a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0ZM8.8 8a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0ZM13.3 7.8a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0Z"
+    />
+  </Svg>
 )
 
 export const Globe = (p) => (
-  <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M3.2 9.5h17.6M3.2 14.5h17.6M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM3.6 8.95h16.8v1.1H3.6ZM3.6 13.95h16.8v1.1H3.6ZM12 3.6a2.9 8.4 0 1 0 .01 0Z"
+    />
+  </Svg>
 )
 
 export const Check = (p) => (
-  <Svg {...p}><path d="m5 12.8 4.4 4.4L19 7.6" /></Svg>
+  <Svg line {...p}><path d="m5 12.8 4.4 4.4L19 7.6" /></Svg>
 )
 
 export const Camera = (p) => (
-  <Svg {...p}><path d="M3.5 8.5h3l1.6-2.4h7.8l1.6 2.4h3v11h-17v-11Z" /><circle cx="12" cy="13.6" r="3.4" /></Svg>
+  <Svg {...p}>
+    <path fillRule="evenodd" d="M3.5 8.5h3l1.6-2.4h7.8l1.6 2.4h3v11h-17v-11ZM9.6 13.6a2.4 2.4 0 1 0 4.8 0a2.4 2.4 0 1 0-4.8 0Z" />
+  </Svg>
 )
 
 export const Trash = (p) => (
-  <Svg {...p}><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7M6.5 6.5 7.4 20a1.4 1.4 0 0 0 1.4 1.3h6.4a1.4 1.4 0 0 0 1.4-1.3l.9-13.5M10.5 10.5v6.5M13.5 10.5v6.5" /></Svg>
+  <Svg line {...p}><path d="M4.5 6.5h15M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7M6.5 6.5 7.4 20a1.4 1.4 0 0 0 1.4 1.3h6.4a1.4 1.4 0 0 0 1.4-1.3l.9-13.5M10.5 10.5v6.5M13.5 10.5v6.5" /></Svg>
 )
 
 export const Shield = (p) => (
-  <Svg {...p}><path d="M12 3 5 6v6c0 4.4 3 7.7 7 9 4-1.3 7-4.6 7-9V6l-7-3Z" /><path d="m9.2 12 2 2 3.6-3.8" /></Svg>
+  <Svg {...p}><path d="M12 3 5 6v6c0 4.4 3 7.7 7 9 4-1.3 7-4.6 7-9V6l-7-3Z" /></Svg>
 )
 
 export const Mail = (p) => (
-  <Svg {...p}><rect x="3" y="5.5" width="18" height="13" rx="3" /><path d="m3.8 7.6 7.2 5.1a1.8 1.8 0 0 0 2 0l7.2-5.1" /></Svg>
+  <Svg line {...p}><rect x="3" y="5.5" width="18" height="13" rx="3" /><path d="m3.8 7.6 7.2 5.1a1.8 1.8 0 0 0 2 0l7.2-5.1" /></Svg>
 )
 
 export const Phone = (p) => (
@@ -235,59 +319,74 @@ export const Moon = (p) => (
 )
 
 export const Sun = (p) => (
-  <Svg {...p}><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" /></Svg>
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4.2" />
+    <path fill="none" d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" />
+  </Svg>
 )
 
 export const Plus = (p) => (
-  <Svg {...p}><path d="M12 5.5v13M5.5 12h13" /></Svg>
+  <Svg line {...p}><path d="M12 5.5v13M5.5 12h13" /></Svg>
 )
 
 export const Key = (p) => (
-  <Svg {...p}><circle cx="8" cy="15.5" r="4.5" /><path d="m11.4 12.4 8-8M17 5.8l2 2M14.6 8.2l2 2" /></Svg>
+  <Svg line {...p}><circle cx="8" cy="15.5" r="4.5" /><path d="m11.4 12.4 8-8M17 5.8l2 2M14.6 8.2l2 2" /></Svg>
 )
 
 export const Monitor = (p) => (
-  <Svg {...p}><rect x="2.5" y="4" width="19" height="13" rx="2.6" /><path d="M8.5 21h7M12 17v4" /></Svg>
+  <Svg {...p}>
+    <rect x="2.5" y="4" width="19" height="13" rx="2.6" />
+    <path fill="none" d="M8.5 21h7M12 17v4" />
+  </Svg>
 )
 
 export const Download = (p) => (
-  <Svg {...p}><path d="M12 3.5v11M7.6 10.6 12 15l4.4-4.4M4.5 19.5h15" /></Svg>
+  <Svg line {...p}><path d="M12 3.5v11M7.6 10.6 12 15l4.4-4.4M4.5 19.5h15" /></Svg>
 )
 
 export const FileIcon = (p) => (
-  <Svg {...p}><path d="M13.6 3.5H7.2A2.2 2.2 0 0 0 5 5.7v12.6a2.2 2.2 0 0 0 2.2 2.2h9.6a2.2 2.2 0 0 0 2.2-2.2V9.1l-5.4-5.6Z" /><path d="M13.5 3.6v4a1.6 1.6 0 0 0 1.6 1.6h3.7M8.6 13.4h6.8M8.6 16.6h4.4" /></Svg>
+  <Svg {...p}><path d="M13.6 3.5H7.2A2.2 2.2 0 0 0 5 5.7v12.6a2.2 2.2 0 0 0 2.2 2.2h9.6a2.2 2.2 0 0 0 2.2-2.2V9.1l-5.4-5.6Z" /></Svg>
 )
 
 export const Terminal = (p) => (
-  <Svg {...p}><rect x="2.5" y="4" width="19" height="16" rx="3" /><path d="m7 9.5 3 2.5-3 2.5M12.5 15h4.5" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M5.5 4h13a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-13a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM6.2 9.2l3.4 2.8-3.4 2.8-1.1-.9 2.3-1.9-2.3-1.9ZM12.6 13.9h4.2v1.8h-4.2Z"
+    />
+  </Svg>
 )
 
 /* ---- nav icons ---------------------------------------------------- */
 
-/** Input terminal — a chevron prompt with a live block caret. */
+/** Input terminal — a solid window with a chevron prompt and block caret
+ *  cut out of it (true holes, transparent on any background). */
 export const InputTerminal = (p) => (
   <Svg {...p}>
-    <rect x="3" y="4" width="18" height="16" rx="3.6" />
-    <path d="m7.2 9.4 3 2.6-3 2.6" />
-    <rect x="12.4" y="13.6" width="4.4" height="1.9" rx=".95" fill="currentColor" stroke="none" />
+    <path
+      fillRule="evenodd"
+      d="M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM6.4 8.9l3.4 3.1-3.4 3.1-1.1-1 2.5-2.1-2.5-2.1ZM12.6 13.2h4.4v2h-4.4Z"
+    />
   </Svg>
 )
 
 /** Analyzing — a clean ECG pulse sweeping left to right. */
 export const Analyzing = (p) => (
-  <Svg {...p}><path d="M2.5 12h4l2.2-7 4.3 14 2.2-7h6.3" /></Svg>
+  <Svg line {...p}><path d="M2.5 12h4l2.2-7 4.3 14 2.2-7h6.3" /></Svg>
 )
 
 /** Topics — a modern slanted hash, like channels. */
 export const Topics = (p) => (
-  <Svg {...p}><path d="M9.6 4.5 7.8 19.5M16.2 4.5l-1.8 15M4.8 9.2h14.7M4 14.8h14.7" /></Svg>
+  <Svg line {...p}><path d="M9.6 4.5 7.8 19.5M16.2 4.5l-1.8 15M4.8 9.2h14.7M4 14.8h14.7" /></Svg>
 )
 
-/** Bord — a kanban board with floating task columns of varied depth. */
+/** Bord — a solid kanban board with three task columns cut out of it. */
 export const Bord = (p) => (
   <Svg {...p}>
-    <rect x="3.4" y="3.4" width="17.2" height="17.2" rx="3.6" />
-    <path d="M8.2 7.2v6.4M12 7.2v3.6M15.8 7.2v9.2" />
+    <path
+      fillRule="evenodd"
+      d="M7 3.4h10a3.6 3.6 0 0 1 3.6 3.6v10a3.6 3.6 0 0 1-3.6 3.6H7a3.6 3.6 0 0 1-3.6-3.6V7A3.6 3.6 0 0 1 7 3.4ZM7.3 7h1.8v6a.9.9 0 0 1-1.8 0ZM11.1 7h1.8v3.4a.9.9 0 0 1-1.8 0ZM14.9 7h1.8v9a.9.9 0 0 1-1.8 0Z"
+    />
   </Svg>
 )
 
@@ -306,48 +405,38 @@ export const Sparkle = (p) => (
   <Svg {...p}>
     <path d="M12 2.6Q15.2 8.8 21.4 12Q15.2 15.2 12 21.4Q8.8 15.2 2.6 12Q8.8 8.8 12 2.6Z" />
     <path d="M18.4 15.9l.75 1.75 1.75.75-1.75.75-.75 1.75-.75-1.75-1.75-.75 1.75-.75.75-1.75Z" fill="currentColor" stroke="none" />
-    <path d="M5.6 3.2v3M4.1 4.7h3" />
+    <path fill="none" d="M5.6 3.2v3M4.1 4.7h3" />
   </Svg>
 )
 
-/** Bot — a round-headed agent with dot eyes and an antenna. */
+/** Bot — a solid agent head with dot eyes and mouth cut out, plus
+ *  antenna and ears. */
 export const Bot = (p) => (
   <Svg {...p}>
-    <path d="M12 5.2V8" />
-    <circle cx="12" cy="4.1" r="1.15" fill="currentColor" stroke="none" />
-    <rect x="4" y="8" width="16" height="12.4" rx="4" />
-    <path d="M2.4 13.2h1.6M20 13.2h1.6" />
-    <circle cx="9" cy="13.2" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="13.2" r="1.2" fill="currentColor" stroke="none" />
-    <path d="M10 16.9h4" />
+    <path fill="none" d="M12 5.2V8M2.4 13.2h1.6M20 13.2h1.6" />
+    <circle cx="12" cy="4.1" r="1.15" />
+    <path
+      fillRule="evenodd"
+      d="M8 8h8a4 4 0 0 1 4 4v4.4a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V12a4 4 0 0 1 4-4ZM7.8 13.2a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0ZM13.8 13.2a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0ZM9.8 16.3h4.4v1.2H9.8Z"
+    />
   </Svg>
 )
 
-
 /**
- * NetworkAgent — modern person/agent icon for the Network entry.
- * Clean human silhouette (head + shoulders) with broadcast arcs, so it
- * reads as a connected agent at a glance. Works at 18px sidebar size,
- * respects currentColor, theme-agnostic.
+ * NetworkAgent — solid person/agent icon for the Network entry.
+ * Filled head + shoulders silhouette with broadcast arcs, so it reads as a
+ * connected agent at a glance. Works at 18px sidebar size, respects
+ * currentColor, theme-agnostic.
  */
 export const NetworkAgent = (p) => (
   <Svg {...p}>
     {/* head */}
     <circle cx="10" cy="8.6" r="3.4" />
-    {/* shoulders */}
+    {/* shoulders (filled silhouette) */}
     <path d="M3.8 19.4a6.6 6.6 0 0 1 12.4 0" />
     {/* broadcast arcs */}
-    <path d="M17.4 11.2a4.6 4.6 0 0 1 2.7 2.9" />
-    <path d="M17.4 7.2a8.6 8.6 0 0 1 4.6 3.6" />
+    <path fill="none" d="M17.4 11.2a4.6 4.6 0 0 1 2.7 2.9M17.4 7.2a8.6 8.6 0 0 1 4.6 3.6" />
   </Svg>
-)
-
-export const NetworkAgentFilled = ({ size = 18, ...p }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" {...p}>
-    <circle cx="10" cy="8.6" r="3.4" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M3.8 19.4a6.6 6.6 0 0 1 12.4 0" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M17.4 11.2a4.6 4.6 0 0 1 2.7 2.9M17.4 7.2a8.6 8.6 0 0 1 4.6 3.6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
 )
 
 /** Grip — six dots, the standard drag handle. */
@@ -361,21 +450,27 @@ export const Grip = ({ size = 14, ...p }) => (
 
 /** Pin — holds an item at the top of the rail. */
 export const Pin = (p) => (
-  <Svg {...p}><path d="M9 3.5h6l-.8 5.2 3 2.9v2H6.8v-2l3-2.9L9 3.5ZM12 13.6V20.5" /></Svg>
+  <Svg {...p}>
+    <path d="M9 3.5h6l-.8 5.2 3 2.9v2H6.8v-2l3-2.9L9 3.5Z" />
+    <path fill="none" d="M12 13.6V20.5" />
+  </Svg>
 )
 
 /** Unpin — a pin with a slash. */
 export const PinOff = (p) => (
-  <Svg {...p}><path d="M9 3.5h6l-.8 5.2 3 2.9v2H6.8v-2l3-2.9L9 3.5ZM12 13.6V20.5M4 4l16 16" /></Svg>
+  <Svg line {...p}><path d="M9 3.5h6l-.8 5.2 3 2.9v2H6.8v-2l3-2.9L9 3.5ZM12 13.6V20.5M4 4l16 16" /></Svg>
 )
 
 /** Unlock — an open padlock. */
 export const Unlock = (p) => (
-  <Svg {...p}><rect x="4.5" y="10.5" width="15" height="10" rx="2.4" /><path d="M8.2 10.5V7.4a3.8 3.8 0 0 1 7.3-1.4" /></Svg>
+  <Svg {...p}>
+    <rect x="4.5" y="10.5" width="15" height="10" rx="2.4" />
+    <path fill="none" d="M8.2 10.5V7.4a3.8 3.8 0 0 1 7.3-1.4" />
+  </Svg>
 )
 
-/** Star — marks a favourite typeface. */
-export const Star = ({ size = 16, filled = false, ...p }) => (
+/** Star — marks a favourite typeface. Filled by default (solid system). */
+export const Star = ({ size = 16, filled = true, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24"
     fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
     strokeWidth="1.9" strokeLinejoin="round" {...p}>
@@ -385,7 +480,7 @@ export const Star = ({ size = 16, filled = false, ...p }) => (
 
 /** Type — the typography page icon. */
 export const Type = (p) => (
-  <Svg {...p}><path d="M4 6.5V4.5h16v2M12 4.5v15M8.6 19.5h6.8" /></Svg>
+  <Svg line {...p}><path d="M4 6.5V4.5h16v2M12 4.5v15M8.6 19.5h6.8" /></Svg>
 )
 
 /** Droplet — the colour picker page icon. */
@@ -393,24 +488,32 @@ export const Droplet = (p) => (
   <Svg {...p}><path d="M12 3.2s6.2 6 6.2 10.1A6.2 6.2 0 0 1 5.8 13.3C5.8 9.2 12 3.2 12 3.2Z" /></Svg>
 )
 
-/** Keyboard — the shortcuts page icon. */
+/** Keyboard — solid keys, key dots and space bar cut out. */
 export const Keyboard = (p) => (
-  <Svg {...p}><rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6.5 9.6h.01M10 9.6h.01M13.5 9.6h.01M17 9.6h.01M8 14.4h8" /></Svg>
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M5 6h14a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 19 18H5a2.5 2.5 0 0 1-2.5-2.5v-7A2.5 2.5 0 0 1 5 6ZM5.6 9.6a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM9.1 9.6a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM12.6 9.6a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM16.1 9.6a.9.9 0 1 0 1.8 0a.9.9 0 1 0-1.8 0ZM7.8 13.6h8.4v1.8H7.8Z"
+    />
+  </Svg>
 )
 
 /** Archive — the backup page icon. */
 export const Archive = (p) => (
-  <Svg {...p}><path d="M3 7.5h18M4.6 7.5v11a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-11M3 7.5 5 4h14l2 3.5M10 12h4" /></Svg>
+  <Svg line {...p}><path d="M3 7.5h18M4.6 7.5v11a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-11M3 7.5 5 4h14l2 3.5M10 12h4" /></Svg>
 )
 
 /** Command — the palette page icon. */
 export const Command = (p) => (
-  <Svg {...p}><path d="M8.5 3.5a2.5 2.5 0 1 0 0 5h11a2.5 2.5 0 1 1 0 5h-11a2.5 2.5 0 1 0 0 5" /><path d="M15.5 8.5h-7v7h7v-7Z" /></Svg>
+  <Svg line {...p}><path d="M8.5 3.5a2.5 2.5 0 1 0 0 5h11a2.5 2.5 0 1 1 0 5h-11a2.5 2.5 0 1 0 0 5" /><path d="M15.5 8.5h-7v7h7v-7Z" /></Svg>
 )
 
-/** Layers — the workspaces page icon. */
+/** Layers — the workspaces page icon: solid top sheet, lines below. */
 export const Layers = (p) => (
-  <Svg {...p}><path d="m12 3.2 8.5 4.6-8.5 4.6L3.5 7.8 12 3.2ZM4.2 12.2 12 16.4l7.8-4.2M4.2 16.4 12 20.6l7.8-4.2" /></Svg>
+  <Svg {...p}>
+    <path d="m12 3.2 8.5 4.6-8.5 4.6L3.5 7.8 12 3.2Z" />
+    <path fill="none" d="M4.2 12.2 12 16.4l7.8-4.2M4.2 16.4 12 20.6l7.8-4.2" />
+  </Svg>
 )
 
 /** Blocks — the component edit page icon. */
@@ -420,19 +523,19 @@ export const Blocks = (p) => (
 
 /** History — a clock with a rewind arrow, for the chat history panel. */
 export const History = (p) => (
-  <Svg {...p}><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6L3.5 20.5" /><path d="M3.5 16.5v4h4M12 7.5V12l3 2" /></Svg>
+  <Svg line {...p}><path d="M3.5 12a8.5 8.5 0 1 1 2.5 6L3.5 20.5" /><path d="M3.5 16.5v4h4M12 7.5V12l3 2" /></Svg>
 )
 
 /** X — closes panels and dismisses menus. */
 export const X = (p) => (
-  <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
+  <Svg line {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
 )
 
-/* ---- advanced-settings page icons (one consistent stroke family) ------ */
+/* ---- advanced-settings page icons (same solid family) -------------- */
 
 /** Refresh — the Updates page: check for a newer version. */
 export const Refresh = (p) => (
-  <Svg {...p}>
+  <Svg line {...p}>
     <path d="M20.2 12a8.2 8.2 0 1 1-2.6-6" />
     <path d="M20.4 3.6v4.2h-4.2" />
   </Svg>
@@ -441,7 +544,7 @@ export const Refresh = (p) => (
 /** Sliders — the Advanced settings entry: fine-grained controls. */
 export const Sliders = (p) => (
   <Svg {...p}>
-    <path d="M5.5 4v5.4M5.5 15.2V20M12 4v1.8M12 11.4V20M18.5 4v9.2M18.5 18.4V20" />
+    <path fill="none" d="M5.5 4v5.4M5.5 15.2V20M12 4v1.8M12 11.4V20M18.5 4v9.2M18.5 18.4V20" />
     <circle cx="5.5" cy="12.1" r="1.9" />
     <circle cx="12" cy="8.3" r="1.9" />
     <circle cx="18.5" cy="15.6" r="1.9" />
@@ -451,43 +554,40 @@ export const Sliders = (p) => (
 /** Surfaces — overlapping panels, for Surfaces & Style. */
 export const Surfaces = (p) => (
   <Svg {...p}>
-    <rect x="3.4" y="3.4" width="13.6" height="13.6" rx="3" />
-    <path d="M20.6 8.6v9A2.4 2.4 0 0 1 18.2 20H9.2" />
-    <circle cx="8.2" cy="8.2" r="1.3" fill="currentColor" stroke="none" />
+    <path fillRule="evenodd" d="M6.4 3.4h7.6a3 3 0 0 1 3 3v7.6a3 3 0 0 1-3 3H6.4a3 3 0 0 1-3-3V6.4a3 3 0 0 1 3-3ZM6.9 8.2a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z" />
+    <path fill="none" d="M20.6 8.6v9A2.4 2.4 0 0 1 18.2 20H9.2" />
   </Svg>
 )
 
-/** Motion — a moving orb with speed lines, for Motion & Accessibility. */
+/** Motion — a solid moving orb with speed lines, for Motion & Accessibility. */
 export const Motion = (p) => (
   <Svg {...p}>
     <circle cx="16.6" cy="12" r="4.4" />
-    <path d="M2.8 8.4h5.6M2.8 12h3.6M2.8 15.6h5.6" />
+    <path fill="none" d="M2.8 8.4h5.6M2.8 12h3.6M2.8 15.6h5.6" />
   </Svg>
 )
 
-/** Zoom — scale + type, for Scale & Typography. */
+/** Zoom — scale + type, for Scale & Typography: solid ring lens. */
 export const Zoom = (p) => (
   <Svg {...p}>
-    <circle cx="11" cy="11" r="7" />
-    <path d="m20.2 20.2-3.8-3.8M11 8.2v5.6M8.2 11h5.6" />
+    <path fillRule="evenodd" d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM11 7.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" />
+    <path fill="none" d="m20.2 20.2-3.8-3.8M11 8.2v5.6M8.2 11h5.6" />
   </Svg>
 )
 
-/** TopBar — the Header page: a window with its bar highlighted. */
+/** TopBar — the Header page: solid window with bar + dots cut out. */
 export const TopBar = (p) => (
   <Svg {...p}>
-    <rect x="3" y="4" width="18" height="16" rx="3" />
-    <path d="M3 9.6h18" />
-    <circle cx="6.6" cy="6.8" r=".85" fill="currentColor" stroke="none" />
-    <circle cx="10" cy="6.8" r=".85" fill="currentColor" stroke="none" />
+    <path
+      fillRule="evenodd"
+      d="M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3ZM5.75 6.8a.85.85 0 1 0 1.7 0a.85.85 0 1 0-1.7 0ZM9.15 6.8a.85.85 0 1 0 1.7 0a.85.85 0 1 0-1.7 0ZM3.6 9h16.8v1.2H3.6Z"
+    />
   </Svg>
 )
 
 /** Pill — the Wide Notch page: the Settings + File header pill. */
 export const Pill = (p) => (
   <Svg {...p}>
-    <rect x="2.6" y="8" width="18.8" height="8" rx="4" />
-    <circle cx="7.4" cy="12" r="1.15" fill="currentColor" stroke="none" />
-    <path d="M12 12h4.4" />
+    <path fillRule="evenodd" d="M6.6 8h10.8a4 4 0 0 1 0 8H6.6a4 4 0 0 1 0-8ZM6.25 12a1.15 1.15 0 1 0 2.3 0a1.15 1.15 0 1 0-2.3 0ZM11.7 11.3h4.6v1.4h-4.6Z" />
   </Svg>
 )

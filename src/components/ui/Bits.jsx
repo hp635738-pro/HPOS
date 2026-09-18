@@ -7,8 +7,8 @@ import { Chevron } from '../Icons'
  * of the same Row/Slider/Toggle copied into each file.
  */
 
-export function Card({ children }) {
-  return <section style={S.card}>{children}</section>
+export function Card({ children, style }) {
+  return <section style={{ ...S.card, ...style }}>{children}</section>
 }
 
 export function Expander({ title, hint, defaultOpen = false, children }) {

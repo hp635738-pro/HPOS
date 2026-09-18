@@ -55,7 +55,7 @@ const PAGES = [
     Icon: Sparkle,
     desc: 'Five distinct visual identities — pick one, then fine-tune afterwards with the other Appearance pages.',
     keywords: 'preset identity look glass aurora minimal dark pro soft enterprise compact pick switch',
-    Panel: () => <Card><PresetChooser /></Card>,
+    Panel: () => <Card style={{ padding: '14px 16px 10px' }}><PresetChooser /></Card>,
   },
   {
     id: 'accent',
@@ -65,7 +65,7 @@ const PAGES = [
     Icon: Droplet,
     desc: 'The highlight colour for controls, links and active states — swatches, custom hex, text-on-accent and tint strength.',
     keywords: 'accent colour highlight tint strength hex custom contrast white black',
-    Panel: () => <Card><AccentSection /></Card>,
+    Panel: () => <Card style={{ padding: '14px 16px 10px' }}><AccentSection /></Card>,
   },
   {
     id: 'workspaces',
