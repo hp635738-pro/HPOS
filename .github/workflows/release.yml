@@ -44,7 +44,7 @@ on:
 
 permissions:
   contents: write
-  checks: write
+  statuses: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -73,7 +73,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     env:
-      # the verification report is published as a check run, which needs a token
+      # the verification report is published as commit statuses, which needs a token
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -95,7 +95,7 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           cat validated-artifacts.json
           exit $code
-      - name: Publish the validation report as a check run
+      - name: Publish the validation report (commit statuses)
         if: always()
         continue-on-error: true
         run: node scripts/publish-verification.mjs --file validated-artifacts.json
@@ -155,7 +155,7 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           cat release-verification.json
           exit $code
-      - name: Publish the verification report as a check run
+      - name: Publish the verification report (commit statuses)
         if: always()
         continue-on-error: true
         run: node scripts/publish-verification.mjs --file release-verification.json

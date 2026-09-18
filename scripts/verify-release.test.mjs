@@ -159,9 +159,9 @@ function makeReleaseDir({ version = '0.1.1', breakSha = false, dropEntry = false
 }
 
 
-/* ------------------- 7. the CI verification report (check run) is well-formed */
+/* ------------------- 7. the CI verification report (commit statuses) is readable */
 {
-  const { renderReport, publishCheckRun, parseArgs } = await import('./publish-verification.mjs')
+  const { renderReport, statusPayloads, publishStatuses, parseArgs } = await import('./publish-verification.mjs')
 
   const releaseResult = {
     ok: true,
@@ -172,40 +172,52 @@ function makeReleaseDir({ version = '0.1.1', breakSha = false, dropEntry = false
     assets: ['HPOS-0.1.1.AppImage', 'hpos_0.1.1_amd64.deb', 'latest-linux.yml'],
     metadataUrl: 'https://github.com/hp635738-pro/HPOS/releases/download/v0.1.1/latest-linux.yml',
     errors: [],
-    rows: [{ file: 'hpos_0.1.1_amd64.deb', size: 42, sha512: hash('deb payload'), url: 'https://github.com/hp635738-pro/HPOS/releases/download/v0.1.1/hpos_0.1.1_amd64.deb', status: 'ok' }],
+    rows: [
+      { file: 'hpos_0.1.1_amd64.deb', size: 42, sha512: hash('deb payload'), status: 'ok' },
+      { file: 'HPOS-0.1.1.AppImage', size: 43, sha512: hash('appimage payload'), status: 'ok' },
+    ],
   }
+
   const markdown = renderReport(releaseResult, 'release')
   assert.match(markdown, /hpos_0\.1\.1_amd64\.deb/, 'the report names the artifact')
   assert.match(markdown, /releases\/download\/v0\.1\.1\/latest-linux\.yml/, 'the report names the metadata URL the updater reads')
   assert.match(markdown, /\*\*verified\*\*/, 'a passing report says so')
+  assert.match(renderReport({ ...releaseResult, ok: false, errors: ['sha512 mismatch'] }, 'release'), /sha512 mismatch/, 'a failing report carries the reason')
 
-  const failedResult = { ...releaseResult, ok: false, errors: ['sha512 mismatch'] }
-  assert.match(renderReport(failedResult, 'release'), /sha512 mismatch/, 'a failing report carries the reason')
+  /* The hashes have to come back through the API, so every artifact gets its
+     own status context and the (140 char) description carries the sha512. */
+  const statuses = statusPayloads(releaseResult)
+  assert.equal(statuses.length, 3, 'one status per artifact plus a summary')
+  assert.equal(statuses[0].context, 'hpos/verify/release/hpos_0.1.1_amd64.deb')
+  assert.equal(statuses[0].description, `ok: sha512=${hash('deb payload')} size=42`, 'the sha512 is published verbatim')
+  assert.ok(statuses[0].description.length <= 140, 'the description fits GitHub\'s 140 character limit')
+  assert.equal(statuses[2].context, 'hpos/verify/release')
+  assert.equal(statuses[2].state, 'success')
+  assert.match(statuses[2].description, /v0\.1\.1: 2\/2 verified, \/releases\/latest=v0\.1\.1/)
 
-  let posted = null
+  const failed = statusPayloads({ ...releaseResult, ok: false, errors: ['some asset is missing'] })
+  assert.equal(failed[failed.length - 1].state, 'failure', 'a failed verification is a failed status')
+  assert.match(failed[failed.length - 1].description, /FAILED/, 'and says why')
+
+  const artifactStatuses = statusPayloads({ ok: true, version: '0.1.1', rows: [{ file: 'hpos_0.1.1_amd64.deb', size: 1, sha512: hash('x'), status: 'ok' }] })
+  assert.equal(artifactStatuses[1].context, 'hpos/verify/artifacts', 'pre-publish validation uses its own context')
+
+  const calls = []
   const fakeFetch = async (url, init) => {
-    posted = { url, body: JSON.parse(init.body) }
-    return { ok: true, status: 201, statusText: 'Created', text: async () => JSON.stringify({ html_url: 'https://github.com/check/1', conclusion: 'success' }) }
+    calls.push({ url, body: JSON.parse(init.body) })
+    return { ok: true, status: 201, statusText: 'Created', text: async () => init.body }
   }
-  const created = await publishCheckRun({
-    result: releaseResult,
-    name: 'HPOS release verification (v0.1.1)',
-    headSha: 'deadbeef',
-    token: 'x-token',
-    fetchImpl: fakeFetch,
-  })
-  assert.equal(posted.url, 'https://api.github.com/repos/hp635738-pro/HPOS/check-runs', 'the report is posted to this repository')
-  assert.equal(posted.body.conclusion, 'success', 'a passing verification is a passing check')
-  assert.equal(posted.body.head_sha, 'deadbeef', 'the check is attached to the built commit')
-  assert.match(posted.body.output.summary, /verified/, 'the check carries the report')
-  assert.equal(created.html_url, 'https://github.com/check/1')
+  const posted = await publishStatuses({ result: releaseResult, headSha: 'deadbeef', token: 'x', fetchImpl: fakeFetch })
+  assert.equal(posted.length, 3)
+  for (const call of calls) {
+    assert.equal(call.url, 'https://api.github.com/repos/hp635738-pro/HPOS/statuses/deadbeef', 'statuses are posted to this repository')
+  }
+  const dry = await publishStatuses({ result: releaseResult, headSha: 'deadbeef', token: 'x', dryRun: true, fetchImpl: fakeFetch })
+  assert.equal(dry.length, 3, 'a dry run renders every status without posting')
 
-  await publishCheckRun({ result: failedResult, name: 'x', headSha: 'y', token: 't', fetchImpl: fakeFetch })
-  assert.equal(posted.body.conclusion, 'failure', 'a failing verification is a failing check')
-
-  const args = parseArgs(['--file', 'a.json', '--name', 'n', '--dry-run'])
-  assert.deepEqual(args, { file: 'a.json', name: 'n', dryRun: true })
-  console.log('ok: the CI verification report is rendered and posted to this repository as a check run')
+  const args = parseArgs(['--file', 'a.json', '--dry-run'])
+  assert.deepEqual(args, { file: 'a.json', name: null, dryRun: true, json: false })
+  console.log('ok: the CI verification report is published as API-readable commit statuses')
 }
 
 console.log('release verification tests: all passed')
