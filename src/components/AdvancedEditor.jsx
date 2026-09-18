@@ -464,11 +464,12 @@ export default function AdvancedEditor({ onClose, initialPage, closing }) {
         {/* -------------------------------------------------------- NAV PANE */}
         <nav style={S.nav} aria-label="Advanced settings categories">
           <div style={S.searchWrap}>
-            <span style={S.searchIcon}><Search size={14} /></span>
+            <span style={S.searchIcon}><Search size={16} /></span>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Find a setting"
+              className="adv-search"
               style={S.search}
               aria-label="Find a setting"
             />
@@ -643,18 +644,17 @@ const S = {
   },
   searchWrap: { position: 'relative', padding: '4px 6px 12px' },
   searchIcon: {
-    position: 'absolute', left: 18, top: 'calc(50% - 6px)',
+    position: 'absolute', left: 12, top: '50%',
     transform: 'translateY(-50%)',
     color: 'var(--muted)', pointerEvents: 'none',
     display: 'grid', placeItems: 'center',
   },
   search: {
-    width: '100%', height: 32,
-    padding: '0 10px 0 32px',
+    width: '100%', height: 38,
+    padding: '0 14px 0 38px',
     background: 'var(--surface)',
-    border: '1px solid var(--line)',
-    borderRadius: 4,
-    fontSize: 12.5, fontWeight: 500, outline: 'none',
+    borderRadius: 10,
+    fontSize: 13, fontWeight: 500, outline: 'none',
     color: 'var(--text)',
   },
   navList: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },

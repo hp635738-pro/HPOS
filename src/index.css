@@ -630,6 +630,18 @@ button:hover > .rail-grip { opacity: .45; }
 .page-transition {
   animation: page-in var(--motion-duration) var(--motion-easing);
 }
+
+/* Advanced-settings search field (border + states live in CSS so focus can
+   win over the inline styles). */
+.adv-search {
+  border: 1px solid var(--line);
+  transition: border-color .16s, box-shadow .16s;
+}
+.adv-search::placeholder { color: var(--muted); opacity: .9; }
+.adv-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 @media (prefers-reduced-motion: reduce) {
   .page-transition { animation: none; }
 }
