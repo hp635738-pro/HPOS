@@ -1,3 +1,18 @@
+> # ⚠️ RELEASE STATUS: **nothing has been published yet — PR #36 is END-TO-END NOT VERIFIED**
+>
+> **No release and no tag have been created for 0.1.1.** `hp635738-pro/HPOS`
+> still has **0 releases / 0 tags**. Deliberately so: publishing a release
+> without the real `hpos_0.1.1_amd64.deb` **and** `latest-linux.yml` would put
+> every installed HPOS into exactly the failure this work fixes, and creating
+> the tag `v0.1.1` would make `release:check` refuse that version forever.
+>
+> The workflow below is **verified structurally and by integration test only**
+> (real electron-updater parsing of electron-builder-shaped metadata, see
+> `HPOS-Desktop/releaseMetadata.integration.test.mjs`). It has **not** produced
+> a real release yet, because the sandbox cannot download the Electron binary
+> needed to build the artifacts. Run step 1–3 on a normal machine, then
+> `TESTING-UPDATES.md` §1–§9, before merging PR #36.
+
 # Releasing HPOS (the in-app updater's source of truth)
 
 The updater in **Settings → App → Check for Updates** can only see a release
@@ -66,6 +81,14 @@ test — they never publish. The job runs `verify` (lint + tests) first, then
 `npm run release:check` and the publish step with `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`.
 
 ## 3. What ends up in the release
+
+*(Naming verified against electron-builder 26.15.3: `FpmTarget` uses
+`${name}_${version}_${arch}.deb` → **`hpos_0.1.1_amd64.deb`**, and
+`updateInfoBuilder.writeUpdateInfoFiles` merges every Linux artifact into the
+single `latest-linux.yml`, which `DebUpdater` then filters with
+`findFile(files,'deb',…)`. The updater cache directory is
+`~/.cache/hpos-updater/pending/`, so the package it hands to dpkg is
+`~/.cache/hpos-updater/pending/hpos_0.1.1_amd64.deb`.)*
 
 ```
 release/

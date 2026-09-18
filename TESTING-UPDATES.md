@@ -1,3 +1,24 @@
+> # ⚠️ STATUS: **END-TO-END NOT VERIFIED**
+>
+> **PR #36 has NOT been validated end to end.** The flow
+> *installed 0.1.0 → Check for Updates → 0.1.1 detected → Download → Restart →
+> running 0.1.1* **has never been executed**, on any machine, because:
+>
+> 1. **No published release exists.** `hp635738-pro/HPOS` has **0 releases and
+>    0 tags** (`gh release list` / `gh api …/releases` → empty). There is
+>    nothing for an installed app to detect.
+> 2. **The 0.1.1 artifacts cannot be built in the agent sandbox** — see
+>    *§12 Why the agent could not run this*.
+> 3. **The agent machine has no installed HPOS** (`dpkg-query -W hpos` → not
+>    installed, `/opt/HPOS` does not exist) and is **not root**, so it cannot
+>    install one either.
+>
+> What *has* been verified is listed in **§11 (automated coverage)** plus the
+> real-`electron-updater` integration test and the real `dpkg` install run
+> described there. **Nothing below §0 has been executed on real hardware.**
+> Do not merge on the basis of unit tests alone — run §1–§9 on a machine with
+> HPOS 0.1.0 installed.
+
 # End-to-end updater test plan (installed Linux `.deb`)
 
 Two **real** versions, built and published for real — no same-version test
@@ -149,7 +170,72 @@ with `EPRIV`: *"Administrator permission is needed… no supported privilege
 tool (pkexec/Polkit) was found."* — never a `sudo` password prompt, never a
 silent failure. Installing `policykit-1` makes the normal flow work.
 
-## 11. Automated coverage
+
+
+---
+
+## 12. Why the agent could not run this (and what it ran instead)
+
+| Blocker | Evidence |
+| --- | --- |
+| The sandbox cannot build the .deb | `npm run dist:linux` reaches `packaging platform=linux arch=x64 electron=31.0.0` and then fails with `RequestError: unable to verify the first certificate`. Electron is downloaded from `objects.githubusercontent.com`, which this sandbox's egress proxy hard-blocks (`curl` → `SSL_ERROR_SYSCALL`); `npmmirror.com` is blocked too. |
+| No installed HPOS here | `node scripts/verify-deb-install.mjs` → `dpkg reports package hpos — not installed`, `/opt/HPOS/hpos — ENOENT`. This machine is **not** the machine described in the task. |
+| No root, no Polkit here | `id -u` → `1001`, no `sudo`, no `pkexec` — a real `dpkg -i` into `/` and a real Polkit prompt are both impossible. |
+| No release may be published yet | Publishing a release **without** the real `hpos_0.1.1_amd64.deb` + `latest-linux.yml` would push every installed HPOS into exactly the failure this PR fixes (`ERELEASE`), and tagging `v0.1.1` would make `release:check` refuse that version forever. **Therefore no release and no tag were created.** |
+
+What the agent *did* run, for real (no mocks of the library):
+
+* **The real electron-updater release pipeline** over an injected HTTP
+  executor (`HPOS-Desktop/releaseMetadata.integration.test.mjs`):
+  `GitHubProvider.getLatestVersion()` parses a real releases `.atom` feed,
+  resolves the `latest` tag, fetches `latest-linux.yml`, `Provider.resolveFiles`
+  + `findFile(files,'deb',…)` selects **exactly**
+  `…/releases/download/v0.1.1/hpos_0.1.1_amd64.deb`, and the real
+  `AppUpdater.isUpdateAvailable` accepts 0.1.1 for a 0.1.0 install while
+  refusing 0.1.0-again and downgrades. The metadata used there is generated in
+  the byte-level shape electron-builder writes (`files[].url/sha512/size`,
+  `path`, `sha512`, `releaseDate`) and its SHA-512 is hashed from a `.deb`
+  built for real with `dpkg-deb`.
+* **The whole chain** from that metadata into HPOS code: `readVerifiedArtifact`
+  → `verifyFileSha512` → `planPackageInstall` → the shared state machine →
+  `pkexec --disable-internal-agent dpkg -i ~/.cache/hpos-updater/pending/hpos_0.1.1_amd64.deb`
+  → relaunch with 0.1.1.
+* **A real `dpkg -i` driven by `runInstallPlan`** (non-root, redirected
+  `--root`): SHA-512 verified → dpkg exit 0 → payload unpacked to
+  `/opt/HPOS/resources/` → `dpkg -l hpos` → `0.1.1`. So the install command
+  this PR issues really installs a package.
+
+None of that exercises: the installed 0.1.0 app, the Settings → App buttons,
+the real download from GitHub, the real Polkit dialog, or the restart.
+**Those are still untested.**
+
+---
+
+## 13. Pre/post verification helper
+
+`scripts/verify-deb-install.mjs` checks, on the machine that has HPOS
+installed, everything item 7 of the request asks for:
+
+```bash
+# BEFORE (on HPOS 0.1.0)
+node scripts/verify-deb-install.mjs --expect-version 0.1.0 --out /tmp/before.json
+
+# …run the update through the app UI…
+
+# AFTER (expecting 0.1.1)
+node scripts/verify-deb-install.mjs --expect-version 0.1.1 --baseline /tmp/before.json --check-release
+```
+
+It asserts: `dpkg-query -W hpos` = expected version, `dpkg -V hpos` clean
+(so `/opt/HPOS` really matches the package), `/opt/HPOS/hpos` is a runnable
+ELF, `resources/package-type` = `deb`, `app-update.yml` still pins
+`github/hp635738-pro/HPOS`, every user-data file survives with an identical
+checksum, and (with `--check-release`) that the installed version equals the
+newest published `latest-linux.yml` version.
+
+---
+
+## 14. Automated coverage
 
 ```bash
 npm test          # 28 suites, incl. the four updater/release suites
@@ -170,4 +256,5 @@ npm run build:prod
 | Renderer IPC boundary (no arguments, no URL surface) | `updater.test.mjs` §7, §11, `linuxUpdate.test.mjs` §10 |
 | User-data preservation | `linuxUpdate.test.mjs` §11 |
 | Release gate / publishing contract | `scripts/release-check.test.mjs`, `packaging.test.mjs` |
+| **The real electron-updater release pipeline** (atom feed → latest-linux.yml → deb selection → version gate → dpkg argv) | `HPOS-Desktop/releaseMetadata.integration.test.mjs` |
 | Settings UI (mechanism + failure detail, null-safe) | `src/pages/Settings.test.mjs` §6 |

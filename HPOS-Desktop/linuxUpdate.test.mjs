@@ -204,6 +204,27 @@ function markerResourceDir(kind) {
   const empty = readVerifiedArtifact({ updater: { downloadedUpdateHelper: null }, kind: 'deb', currentVersion: '0.1.0', existsSync: () => true })
   assert.equal(empty.ok, false)
 
+  /* a cached download from a previous launch: versionInfo not repopulated,
+     but the provider still knows the release version */
+  const cached = readVerifiedArtifact({
+    updater: { downloadedUpdateHelper: { file: DEB_PATH, packageFile: null, downloadedFileInfo: { fileName: 'hpos_0.1.1_amd64.deb', sha512: 'a'.repeat(128) }, versionInfo: null }, updateInfoAndProvider: { info: { version: '0.1.1' } } },
+    kind: 'deb',
+    currentVersion: '0.1.0',
+    existsSync: () => true,
+  })
+  assert.equal(cached.ok, true, 'the release version is recovered from the provider info')
+  assert.equal(cached.version, '0.1.1')
+
+  /* …and still refused when no version is known at all */
+  const noVersion = readVerifiedArtifact({
+    updater: { downloadedUpdateHelper: { file: DEB_PATH, packageFile: null, downloadedFileInfo: { fileName: 'x.deb', sha512: 'a'.repeat(128) }, versionInfo: null } },
+    kind: 'deb',
+    currentVersion: '0.1.0',
+    existsSync: () => true,
+  })
+  assert.equal(noVersion.ok, false, 'an unnamed package is never installed')
+  assert.equal(noVersion.code, ERROR_CODES.EARTIFACT)
+
   /* unsupported kind */
   const badKind = readVerifiedArtifact({ updater: { downloadedUpdateHelper: helper }, kind: 'snap', currentVersion: '0.1.0', existsSync: () => true })
   assert.equal(badKind.ok, false)

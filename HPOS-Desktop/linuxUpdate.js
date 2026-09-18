@@ -684,7 +684,12 @@ function readVerifiedArtifact(opts = {}) {
   }
 
   const versionInfo = helper && helper.versionInfo
-  const version = versionInfo && (versionInfo.version || versionInfo.tag)
+  /* `versionInfo` is set by every download; the fallback covers the cached
+     update path (app restarted with a pending download), where the helper is
+     only partially repopulated. Refusing is still the default when neither
+     source has a version — we never install something we cannot name. */
+  const providerInfo = opts.updater && opts.updater.updateInfoAndProvider && opts.updater.updateInfoAndProvider.info
+  const version = (versionInfo && (versionInfo.version || versionInfo.tag)) || (providerInfo && (providerInfo.version || providerInfo.tag))
   if (typeof version !== 'string' || version === '') {
     return fail(ERROR_CODES.EARTIFACT, 'The release metadata has no version for this package, so the update was NOT installed.')
   }
@@ -796,7 +801,12 @@ function createLinuxPackageBackend(opts = {}) {
   const verify = typeof opts.verify === 'function' ? opts.verify : verifyFileSha512
   const readArtifact = typeof opts.readArtifact === 'function' ? opts.readArtifact : readVerifiedArtifact
   const hasCommand = typeof opts.commandExists === 'function' ? opts.commandExists : commandExists
-  const isRootImpl = typeof opts.isRoot === 'function' ? opts.isRoot : function () { return false }
+  const isRootImpl =
+    typeof opts.isRoot === 'function'
+      ? opts.isRoot
+      : function () {
+          return typeof process.getuid === 'function' && process.getuid() === 0
+        }
   const prepareForInstall = typeof opts.prepareForInstall === 'function' ? opts.prepareForInstall : null
   const resumeAfterFailure = typeof opts.resumeAfterFailure === 'function' ? opts.resumeAfterFailure : null
   const relaunch = typeof opts.relaunch === 'function' ? opts.relaunch : function () {}
