@@ -323,6 +323,35 @@ export const Bot = (p) => (
   </Svg>
 )
 
+
+/**
+ * AssistantAgent — modern person/agent icon for the Assistant entry.
+ * Clean human silhouette (head + shoulders) with a subtle AI sparkle badge.
+ * Works at 18px sidebar size, respects currentColor, theme-agnostic.
+ */
+export const AssistantAgent = (p) => (
+  <Svg {...p}>
+    {/* head */}
+    <circle cx="12" cy="8.2" r="3.4" />
+    {/* shoulders */}
+    <path d="M5.8 18.8a6.2 6.2 0 0 1 12.4 0" />
+    {/* sparkle badge */}
+    <g fill="currentColor" stroke="none">
+      <path d="M17.2 14.2l1.15 2.05 2.05 1.15-2.05 1.15-1.15 2.05-1.15-2.05-2.05-1.15 2.05-1.15 1.15-2.05Z" opacity=".95" />
+    </g>
+  </Svg>
+)
+
+export const AssistantAgentFilled = ({ size = 18, ...p }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" {...p}>
+    <circle cx="12" cy="8.2" r="3.4" fill="currentColor" opacity=".12" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5.8 18.8a6.2 6.2 0 0 1 12.4 0" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    <g fill="currentColor" stroke="none">
+      <path d="M17.2 14.2l1.15 2.05 2.05 1.15-2.05 1.15-1.15 2.05-1.15-2.05-2.05-1.15 2.05-1.15 1.15-2.05Z" />
+    </g>
+  </svg>
+)
+
 /** Grip — six dots, the standard drag handle. */
 export const Grip = ({ size = 14, ...p }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" {...p}>

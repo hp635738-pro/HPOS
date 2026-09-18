@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
 import {
-  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, Ghost,
+  Logo, InputTerminal, Analyzing, Topics, Bord, Chat, AssistantAgent,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
 } from './Icons'
 
@@ -18,7 +18,7 @@ export const NAV = [
   { id: 'cards',     label: 'Topics',         Icon: Topics },
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
-  { id: 'assistant', label: 'Assistant',      Icon: Ghost },
+  { id: 'assistant', label: 'Assistant',      Icon: AssistantAgent, accent: true },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 
@@ -209,26 +209,49 @@ export default function Sidebar({ active, onChange }) {
                 }}
                 onContextMenu={(e) => openMenu(e, id)}
                 title={mini ? label : undefined}
-                style={{
-                  ...S.item,
-                  height: prefs.railItemH,
-                  borderRadius: prefs.railRadius,
-                  justifyContent: mini ? 'center' : 'flex-start',
-                  padding: mini ? 0 : '0 8px 0 11px',
-                  background: (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent',
-                  color: (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
-                  opacity: dragging ? 0.35 : 1,
-                  cursor: 'pointer',
-                }}
+                style={(() => {
+                  const isAssistant = id === 'assistant'
+                  const assistantOn = isAssistant && on
+                  const baseBg = (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent'
+                  const assistantBg = assistantOn
+                    ? 'var(--accent-soft)'
+                    : isAssistant ? 'rgba(var(--accent-rgb), .07)' : baseBg
+                  const baseColor = (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)'
+                  const assistantColor = isAssistant && !on ? 'var(--accent)' : baseColor
+                  return {
+                    ...S.item,
+                    height: prefs.railItemH,
+                    borderRadius: prefs.railRadius,
+                    justifyContent: mini ? 'center' : 'flex-start',
+                    padding: mini ? 0 : '0 8px 0 11px',
+                    background: isAssistant ? assistantBg : baseBg,
+                    color: isAssistant ? assistantColor : baseColor,
+                    border: isAssistant && !on ? '1px solid rgba(var(--accent-rgb), .14)' : '1px solid transparent',
+                    boxShadow: isAssistant && on ? '0 0 0 3px var(--accent-soft), 0 1px 6px rgba(var(--accent-rgb), .18)' : 'none',
+                    opacity: dragging ? 0.35 : 1,
+                    cursor: 'pointer',
+                    transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
+                  }
+                })()}
               >
-                <span style={S.iconBox}>
+                <span style={{
+                  ...S.iconBox,
+                  ...(id === 'assistant' ? {
+                    background: on ? 'var(--accent)' : 'rgba(var(--accent-rgb), .10)',
+                    borderRadius: Math.max(prefs.railRadius - 2, 6),
+                    color: on ? 'var(--accent-fg)' : 'var(--accent)',
+                    border: '1px solid rgba(var(--accent-rgb), .12)',
+                  } : {})
+                }}>
                   <Icon size={prefs.railIcon} />
                   {dot && prefs.railDots && <span style={S.dot} />}
+                  {id === 'assistant' && !mini && <span style={S.assistantGlow} aria-hidden />}
                 </span>
 
                 {!mini && (
                   <>
                     <span style={S.label}>{label}</span>
+                    {id === 'assistant' && <span style={S.aiBadge}>AI</span>}
                     <span style={S.badges}>
                       {pin && <Pin size={11} />}
                       {lock && <Lock size={11} />}
@@ -382,6 +405,8 @@ const S = {
   rail: {
     position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
     background: 'var(--rail)',
+    backdropFilter: 'blur(var(--rail-blur, 0px))',
+    WebkitBackdropFilter: 'blur(var(--rail-blur, 0px))',
     display: 'flex', flexDirection: 'column',
     transition: 'width .22s cubic-bezier(.4,0,.2,1), background .22s,\n                 border-radius .18s, margin .18s',
   },
@@ -412,7 +437,7 @@ const S = {
   item: {
     position: 'relative', width: '100%',
     display: 'flex', alignItems: 'center', gap: 11,
-    transition: 'background .16s, color .16s, opacity .16s',
+    transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), opacity var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing)',
     border: 'none', background: 'transparent',
     cursor: 'pointer',
   },
@@ -460,6 +485,17 @@ const S = {
     flexShrink: 0,
   },
 
+  aiBadge: {
+    fontSize: 9, fontWeight: 800, letterSpacing: '.5px',
+    padding: '2px 5px', borderRadius: 4,
+    background: 'var(--accent)', color: 'var(--accent-fg)',
+    lineHeight: 1, flexShrink: 0, marginLeft: -4,
+  },
+  assistantGlow: {
+    position: 'absolute', inset: -2, borderRadius: 'inherit',
+    background: 'radial-gradient(40% 60% at 50% 50%, rgba(var(--accent-rgb), .18), transparent 70%)',
+    pointerEvents: 'none', filter: 'blur(6px)', opacity: 0.6,
+  },
   foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, marginTop: 8 },
 
   menu: {

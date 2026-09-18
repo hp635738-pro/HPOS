@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useTheme, ACCENTS, DENSITY, isLight } from '../theme/ThemeContext'
 import { DARK_TOKENS, LIGHT_TOKENS } from '../theme/tokens.js'
+import { PRESETS, PRESET_ORDER } from '../theme/presets.js'
 import ColourField from '../components/ColourField'
 import AdvancedEditor from '../components/AdvancedEditor'
-import { Sun, Moon, Monitor, Check, Chevron } from '../components/Icons'
+import { Sun, Moon, Monitor, Check, Chevron, Sparkle, Layers, Palette, Grip } from '../components/Icons'
 
 /**
  * Settings → App → "Update from GitHub" (one-click self-update).
@@ -391,6 +392,132 @@ const THEMES = [
   { id: 'system', label: 'System', Icon: Monitor },
 ]
 
+function PresetChooser() {
+  const { prefs, resolved, setPreset } = useTheme()
+  const active = prefs.preset || 'minimal'
+  const accentHex = (() => {
+    const a = ACCENTS.find(x => x.id === prefs.accent)
+    return prefs.accent === 'custom' ? prefs.accentCustom : (a?.hex || '#2383e2')
+  })()
+
+  return (
+    <div style={P.grid}>
+      {PRESET_ORDER.map(id => {
+        const preset = PRESETS[id]
+        const isActive = active === id
+        const tokens = preset.tokens[resolved] || preset.tokens.light
+        // subtle preview colors
+        const bg = tokens['--bg']
+        const surface = tokens['--surface']
+        const rail = tokens['--rail']
+        const line = tokens['--line']
+        const accent = ACCENTS.find(a => a.id === preset.accent)?.hex || accentHex
+        return (
+          <button
+            key={id}
+            onClick={() => setPreset(id)}
+            style={{
+              ...P.card,
+              borderColor: isActive ? 'var(--accent)' : 'var(--line)',
+              background: isActive ? 'var(--accent-soft)' : 'var(--surface)',
+              boxShadow: isActive ? '0 0 0 3px var(--accent-soft), 0 8px 24px -12px rgba(0,0,0,.18)' : 'var(--shadow)',
+              transform: isActive ? 'translateY(-1px)' : 'none',
+            }}
+          >
+            <span style={{
+              ...P.preview,
+              background: bg,
+              borderColor: line,
+              borderRadius: preset.prefs.radius > 14 ? 14 : preset.prefs.radius > 8 ? 10 : 7,
+            }}>
+              {/* mini rail */}
+              <span style={{
+                ...P.miniRail,
+                background: rail,
+                borderRight: `1px solid ${line}`,
+                borderRadius: preset.prefs.railRadius > 10 ? 7 : 5,
+              }}>
+                <span style={{ ...P.miniMark, background: accent }} />
+                <span style={{ ...P.miniLine, opacity: .6 }} />
+                <span style={{ ...P.miniLine, opacity: .35 }} />
+              </span>
+              <span style={P.miniBody}>
+                <span style={{
+                  ...P.miniHeader,
+                  background: surface,
+                  borderColor: line,
+                  borderRadius: preset.prefs.barRadius ? Math.min(preset.prefs.barRadius, 8) : 5,
+                }} />
+                <span style={{
+                  ...P.miniCard,
+                  background: surface,
+                  borderColor: line,
+                  borderRadius: preset.prefs.radius > 14 ? 12 : 8,
+                  boxShadow: preset.effects.shadowStyle === 'deep' ? '0 2px 10px rgba(0,0,0,.14)' :
+                             preset.effects.shadowStyle === 'glow' ? '0 4px 16px rgba(139,92,246,.12)' :
+                             preset.effects.shadowStyle === 'soft' ? '0 2px 12px rgba(0,0,0,.08)' : 'none',
+                }}>
+                  <span style={{ ...P.miniPill, background: accent }} />
+                </span>
+              </span>
+              {preset.id === 'aurora' && <span style={P.auroraGlow} />}
+            </span>
+            <span style={P.cardHead}>
+              <span style={{ ...P.cardTitle, color: isActive ? 'var(--accent)' : 'var(--text)' }}>{preset.label}</span>
+              {isActive && <span style={P.activeDot}><Check size={10} /></span>}
+            </span>
+            <span style={P.cardDesc}>{preset.desc}</span>
+            <span style={P.cardChar}>{preset.character}</span>
+            <span style={P.meta}>
+              <span style={{
+                ...P.metaChip,
+                background: isActive ? 'var(--accent)' : 'var(--surface-2)',
+                color: isActive ? 'var(--accent-fg)' : 'var(--text-2)',
+                borderColor: isActive ? 'var(--accent)' : 'var(--line)',
+              }}>{preset.prefs.density}</span>
+              <span style={P.metaChip2}>{preset.prefs.radius}px radius</span>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+const P = {
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 },
+  card: {
+    textAlign: 'left',
+    padding: 10,
+    border: '2px solid',
+    borderRadius: 'var(--radius)',
+    transition: 'border-color var(--motion-duration) var(--motion-easing), background var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
+    display: 'flex', flexDirection: 'column', gap: 7,
+  },
+  preview: {
+    position: 'relative', display: 'flex', height: 78, borderRadius: 8, overflow: 'hidden', border: '1px solid', flexShrink: 0,
+  },
+  miniRail: { width: 32, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, paddingTop: 8 },
+  miniMark: { width: 10, height: 10, borderRadius: 3 },
+  miniLine: { width: 16, height: 2.5, borderRadius: 99, background: 'currentColor', opacity: .25 },
+  miniBody: { flex: 1, padding: 6, display: 'flex', flexDirection: 'column', gap: 5 },
+  miniHeader: { height: 10, borderRadius: 4, border: '1px solid' },
+  miniCard: { flex: 1, borderRadius: 6, border: '1px solid', display: 'flex', alignItems: 'flex-end', padding: 5 },
+  miniPill: { width: 22, height: 5, borderRadius: 99 },
+  auroraGlow: {
+    position: 'absolute', inset: 0, pointerEvents: 'none',
+    background: 'radial-gradient(60% 50% at 50% 30%, rgba(139,92,246,.14), transparent 70%)',
+  },
+  cardHead: { display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' },
+  cardTitle: { fontSize: 13, fontWeight: 800, letterSpacing: '-.2px', flex: 1 },
+  activeDot: { width: 16, height: 16, borderRadius: '50%', background: 'var(--accent)', color: 'var(--accent-fg)', display: 'grid', placeItems: 'center' },
+  cardDesc: { fontSize: 11.5, color: 'var(--text-2)', fontWeight: 600, padding: '0 2px', lineHeight: 1.35 },
+  cardChar: { fontSize: 10.5, color: 'var(--muted)', padding: '0 2px', lineHeight: 1.45, minHeight: 32 },
+  meta: { display: 'flex', gap: 6, padding: '2px 2px 0' },
+  metaChip: { fontSize: 9, fontWeight: 800, letterSpacing: '.3px', padding: '3px 6px', borderRadius: 4, border: '1px solid' },
+  metaChip2: { fontSize: 9, fontWeight: 600, color: 'var(--muted)', padding: '3px 6px' },
+}
+
 export default function Settings({ jumpTo, onJumped }) {
   const { prefs, resolved, accentHex, set } = useTheme()
   const [advanced, setAdvanced] = useState(false)
@@ -413,6 +540,21 @@ export default function Settings({ jumpTo, onJumped }) {
             </p>
           </div>
         </header>
+
+        {/* -------------------------------------------------- PRESETS */}
+        <Section title="Presets" desc="Five distinct visual identities — pick one, then fine-tune below. Each preset has its own palette, spacing, borders, shadows, typography and motion.">
+          <PresetChooser />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500 }}>
+              Preset: <b style={{ color: 'var(--text)' }}>{PRESETS[prefs.preset || 'minimal']?.label || 'Minimal'}</b> · {PRESETS[prefs.preset || 'minimal']?.character}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => { set('preset', 'minimal'); set('bgStyle','auto'); set('cardStyle','auto'); set('sidebarStyle','auto') }}
+              style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line)', padding: '5px 10px', borderRadius: 6 }}
+            >Reset to Minimal</button>
+          </div>
+        </Section>
 
         {/* ------------------------------------------------------------ APP */}
         <Section
@@ -596,6 +738,133 @@ export default function Settings({ jumpTo, onJumped }) {
           </Row>
         </Section>
 
+        {/* --------------------------------------------------- SURFACES */}
+        <Section title="Surfaces & Style" desc="Background treatment, card appearance and sidebar finish. Live — try each preset first, then tweak.">
+          <Row label="Background" hint={`${prefs.bgStyle === 'auto' ? 'Preset default' : prefs.bgStyle} — fallback is the preset's treatment.`}>
+            <Segmented
+              value={prefs.bgStyle}
+              options={['auto', 'solid', 'gradient', 'aurora', 'soft']}
+              labels={{ auto: 'Auto' }}
+              onChange={(v) => set('bgStyle', v)}
+            />
+          </Row>
+          <Row label="Card style" hint="How cards and panels feel.">
+            <Segmented
+              value={prefs.cardStyle}
+              options={['auto', 'bordered', 'elevated', 'glass', 'soft', 'sharp']}
+              labels={{ auto: 'Auto' }}
+              onChange={(v) => set('cardStyle', v)}
+            />
+          </Row>
+          <Row label="Sidebar style" hint="Rail finish — flat, translucent glass, high-contrast or soft.">
+            <Segmented
+              value={prefs.sidebarStyle}
+              options={['auto', 'flat', 'glass', 'contrast', 'soft']}
+              labels={{ auto: 'Auto' }}
+              onChange={(v) => set('sidebarStyle', v)}
+            />
+          </Row>
+          <Row label="Sidebar width" hint={`${prefs.railWidth}px — expanded rail.`}>
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="160" max="264" step="1"
+                value={prefs.railWidth}
+                onChange={(e) => set('railWidth', +e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.railWidth}</span>
+            </div>
+          </Row>
+          <Row label="Row height" hint={`${prefs.railItemH}px — navigation rows.`}>
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="28" max="48" step="1"
+                value={prefs.railItemH}
+                onChange={(e) => set('railItemH', +e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.railItemH}</span>
+            </div>
+          </Row>
+        </Section>
+
+        {/* --------------------------------------------------- MOTION */}
+        <Section title="Motion & Accessibility" desc="Animation personality and reduced-motion support. All motion respects your preference.">
+          <Row label="Animation intensity" hint={`${prefs.animationIntensity}% — scales every transition.`}>
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="0" max="100" step="5"
+                value={prefs.animationIntensity}
+                onChange={(e) => set('animationIntensity', +e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.animationIntensity}</span>
+            </div>
+          </Row>
+          <Row label="Reduced motion" hint="Disables non-essential animation for accessibility.">
+            <button
+              onClick={() => set('reducedMotion', !prefs.reducedMotion)}
+              role="switch" aria-checked={!!prefs.reducedMotion}
+              style={{
+                ...S.toggle,
+                background: prefs.reducedMotion ? 'var(--accent)' : 'transparent',
+                borderColor: prefs.reducedMotion ? 'var(--accent)' : 'var(--text-2)',
+              }}
+            >
+              <span style={{
+                ...S.toggleKnob,
+                background: prefs.reducedMotion ? 'var(--accent-fg)' : 'var(--text-2)',
+                transform: prefs.reducedMotion ? 'translateX(18px)' : 'translateX(0)',
+              }} />
+            </button>
+          </Row>
+          <Row label="Sidebar density" hint="Row gap — tighter rails feel more enterprise.">
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="1" max="8" step="1"
+                value={prefs.railGap}
+                onChange={(e) => set('railGap', +e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.railGap}</span>
+            </div>
+          </Row>
+        </Section>
+
+        {/* --------------------------------------------------- SCALE */}
+        <Section title="Scale & Typography" desc="Global size and type — kept in proportion via page zoom.">
+          <Row label="UI scale" hint={`${prefs.uiScale ?? prefs.fontScale}% — entire interface.`}>
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="90" max="130" step="1"
+                value={prefs.uiScale ?? prefs.fontScale}
+                onChange={(e) => { set('uiScale', +e.target.value); set('fontScale', +e.target.value) }}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.uiScale ?? prefs.fontScale}</span>
+            </div>
+          </Row>
+          <Row label="Font" hint="Typeface for body and headings.">
+            <Segmented
+              value={prefs.fontId}
+              options={['system', 'inter', 'rounded', 'mono']}
+              labels={{ system: 'System', inter: 'Inter', rounded: 'Rounded', mono: 'Mono' }}
+              onChange={(v) => set('fontId', v)}
+            />
+          </Row>
+          <Row label="Card radius" hint={`${prefs.cmpRadius}px — buttons and inputs.`}>
+            <div style={S.sliderWrap}>
+              <input
+                type="range" min="0" max="20" step="1"
+                value={prefs.cmpRadius}
+                onChange={(e) => set('cmpRadius', +e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <span style={S.radiusVal}>{prefs.cmpRadius}</span>
+            </div>
+          </Row>
+        </Section>
+
 
         {/* ------------------------------------------------------ DANGER ZONE */}
         <section style={S.danger}>
@@ -629,7 +898,7 @@ export default function Settings({ jumpTo, onJumped }) {
 /* ------------------------------------------------------------------ pieces */
 function Section({ title, desc, children }) {
   return (
-    <section style={S.card}>
+    <section style={S.card} className="page-transition">
       <div style={S.cardHead}>
         <h3 style={S.cardTitle}>{title}</h3>
         {desc && <p style={S.cardDesc}>{desc}</p>}
@@ -692,16 +961,18 @@ const S = {
   h2: { margin: 0, fontSize: 21, fontWeight: 800, letterSpacing: '-.5px' },
   sub: {
     margin: '5px 0 0', fontSize: 12.5, color: 'var(--muted)',
-    fontWeight: 500, maxWidth: 460, lineHeight: 1.55,
+    fontWeight: 500, maxWidth: 560, lineHeight: 1.55,
   },
 
   card: {
     background: 'var(--surface)',
-    border: '1px solid var(--line)',
+    border: '1px solid var(--card-border, var(--line))',
     borderRadius: 'var(--radius-lg)',
     padding: 'var(--pad)',
-    boxShadow: 'var(--shadow)',
-    transition: 'border-radius .18s, background .22s, border-color .22s, padding .18s',
+    boxShadow: 'var(--card-shadow, var(--shadow))',
+    backdropFilter: 'blur(var(--card-blur, 0px))',
+    WebkitBackdropFilter: 'blur(var(--card-blur, 0px))',
+    transition: 'border-radius var(--motion-duration) var(--motion-easing), background var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), padding var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing)',
   },
   cardHead: { marginBottom: 'var(--gap)' },
   cardTitle: { margin: 0, fontSize: 14.5, fontWeight: 800, letterSpacing: '-.2px' },
@@ -823,6 +1094,16 @@ const S = {
     borderRadius: 'var(--radius-sm)',
     padding: '5px 0',
     transition: 'border-radius .18s',
+  },
+  toggle: {
+    width: 40, height: 20, borderRadius: 99,
+    border: '1px solid', padding: 2,
+    display: 'flex', alignItems: 'center',
+    transition: 'background .18s, border-color .18s',
+  },
+  toggleKnob: {
+    width: 12, height: 12, borderRadius: '50%',
+    transition: 'transform .18s cubic-bezier(.4,0,.2,1), background .18s',
   },
 
 }

@@ -22,6 +22,8 @@ export default function App() {
     setView(nextView)
   }
 
+  // page transition key — triggers re-animation on view change
+
   const openRuntimeDetails = () => {
     setRuntimeDetailsOpen(true)
   }
@@ -75,13 +77,13 @@ export default function App() {
         />
 
 {runtimeDetailsOpen
-  ? <RuntimeDetailsPanel onBack={closeRuntimeDetails} />
+  ? <div key="runtime" className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}><RuntimeDetailsPanel onBack={closeRuntimeDetails} /></div>
   : view === 'settings'
-    ? <Settings
+    ? <div key="settings" className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}><Settings
       jumpTo={advancedPage}
       onJumped={() => setAdvancedPage(null)}
-    />
-    : <Blank />}
+    /></div>
+    : <div key={view} className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}><Blank /></div>}
       </main>
 
       <CommandPalette
@@ -96,7 +98,8 @@ const S = {
   shell: {
     height: '100vh', width: '100vw',
     display: 'flex', overflow: 'hidden',
-    background: 'var(--bg)',
+    background: 'var(--app-bg, var(--bg))',
+    transition: 'background var(--motion-duration) var(--motion-easing)',
   },
   main: {
     flex: 1, minWidth: 0,
