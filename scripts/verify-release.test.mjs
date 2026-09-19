@@ -81,11 +81,11 @@ const hash = text => crypto.createHash('sha512').update(text).digest('base64')
 
 /* --------------------------------------- 3. artifact names match the updater */
 {
-  const expected = expectedArtifacts('0.1.1')
-  assert.equal(expected.deb, 'hpos_0.1.1_amd64.deb', 'deb name = ${name}_${version}_${arch}.deb')
-  assert.equal(expected.appImage, 'HPOS-0.1.1.AppImage', 'AppImage name = ${productName}-${version}.AppImage on x64')
   const desktopPkg = JSON.parse(fs.readFileSync(path.join(root, 'HPOS-Desktop', 'package.json'), 'utf8'))
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+  const expected = expectedArtifacts(pkg.version)
+  assert.equal(expected.deb, `hpos_${pkg.version}_amd64.deb`, 'deb name is derived from the released version')
+  assert.equal(expected.appImage, `HPOS-${pkg.version}.AppImage`, 'AppImage name is derived from the released version')
   assert.equal(desktopPkg.version, pkg.version, 'both package.json files agree')
   assert.equal(expected.deb, `hpos_${pkg.version}_amd64.deb`, 'the deb name is derived from the released version')
   console.log('ok: expected artifact names are derived from the released version')

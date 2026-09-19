@@ -85,7 +85,15 @@ function markerResourceDir(kind) {
   assert.equal(both.kind, 'appimage', 'APPIMAGE wins: an AppImage is the running artifact')
 
   /* Fallback when the marker is missing (older builder / no publish config). */
-  const byPrefix = detectLinuxInstallKind({ platform: 'linux', env: {}, execPath: '/opt/HPOS/hpos', resourceDir: RESOURCE_DIR })
+  const byPrefix = detectLinuxInstallKind({
+    platform: 'linux',
+    env: {},
+    execPath: '/opt/HPOS/hpos',
+    resourceDir: RESOURCE_DIR,
+    readFileSync: () => {
+      throw new Error('missing package-type marker')
+    },
+  })
   assert.equal(byPrefix.kind, 'deb')
   assert.equal(byPrefix.detectedBy, 'install-prefix')
 
