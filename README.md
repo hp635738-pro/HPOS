@@ -56,9 +56,12 @@ npm run build:prod
 **Application icon:**
 - `public/icon.ico` — the Windows application/installer icon
   (16/24/32/48/64/128/256 px), wired via `build.win.icon`
-- `public/icon.svg` — the icon source: the existing HPOS logo mark
-  (`favicon.svg`) on a rounded dark tile matching the app background.
-  Regenerate `icon.ico` from it if the logo ever changes.
+- `public/icon.png` — the 1024×1024 transparent raster master: an ice-blue
+  glass H on a rounded graphite tile
+- `public/icon.svg` — editable vector companion; `public/favicon.svg` is a
+  simplified small-size version
+- Regenerate the ICO and Linux PNG exports with `python3 scripts/export-icons.py`
+  (requires Pillow). See [icon assets and usage](design/icons/README.md).
 
 **What is packaged:**
 - `HPOS-Desktop/` – Electron main (`main.js`), preload, runtimeManager, workspaceRoot, git logic
@@ -223,8 +226,10 @@ npm run dist:linux:dir
 - Unpacked: `release/linux-unpacked/HPOS` — raw Electron app directory
 
 **Application icon:**
-- `public/icon.png` — 512×512 PNG rendered from the same `public/icon.svg`
-  source as the Windows `icon.ico`; wired via `build.linux.icon`
+- `public/icon.png` — 1024×1024 transparent PNG master with the graphite / ice-blue
+  H design; wired via `build.linux.icon` and used for the Windows ICO exports
+- Ready-to-use 16→512 px PNGs: `design/icons/hicolor/`.
+  See [icon assets and regeneration](design/icons/README.md).
 - electron-builder isse resize karke hicolor size set (16→512) banata hai jo
   AppImage, deb aur desktop entry use karte hain
 - `public/icon.png` `build.files` mein bhi pack hota hai taaki `main.js` har
