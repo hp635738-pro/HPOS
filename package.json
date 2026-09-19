@@ -1,8 +1,8 @@
 {
   "name": "hpos",
   "private": true,
-  "version": "0.1.1",
-  "description": "HPOS \u2014 a fully themeable desktop app shell",
+  "version": "0.1.2",
+  "description": "HPOS — a fully themeable desktop app shell",
   "author": "HPOS Team",
   "repository": {
     "type": "git",
@@ -51,7 +51,7 @@
   "build": {
     "appId": "com.hpos.desktop",
     "productName": "HPOS",
-    "copyright": "Copyright \u00a9 2026 HPOS",
+    "copyright": "Copyright © 2026 HPOS",
     "asar": true,
     "asarUnpack": [
       "runtime/**/*",
