@@ -92,6 +92,20 @@ Run **Check for Updates** again on 0.1.1 (with no newer release published):
 * green **"You're up to date — 0.1.1."**,
 * the button stays **Check for Updates** (never a download).
 
+## 2b. A press is never silent
+
+On any of the three buttons (Check / Download / Restart):
+
+| What happens | What the panel must show |
+| --- | --- |
+| The press itself | the started state **immediately** — *"Checking the release source for a newer version…"* with a disabled **Checking…** button, or *Downloading … 0 %* / *"Installing the update — HPOS is restarting…"* |
+| The call answers | the status it returns, whether or not a pushed event arrived in the window (up to date / version available / error) |
+| The call is refused or rejects | a visible error with its code + raw reason (e.g. `EUNTRUSTED`, or *"HPOS could not reach its updater — restart the app and try again."*) and **Try Again** |
+| Nothing answers at all | after 30 s: *"The update check did not answer in time — the release source may be unreachable. Try again."* + **Try Again** — never an endless *Checking…* and never a dead button |
+
+Covered automatically by `src/lib/updaterStatus.test.mjs` (the click contract)
+and `src/pages/Settings.test.mjs` (the panel's states).
+
 ## 3. Network failure
 
 Disconnect the machine (or block `github.com` / `api.github.com`) and press

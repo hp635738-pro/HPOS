@@ -319,7 +319,13 @@ does the release-metadata lookup, the download and the integrity check
 (SHA-512 from the published `latest*.yml`); a failed verification is
 reported as *not installed* and can never reach install. Auto-download and
 auto-install are forced off; development instances show a structured
-"updates only in the installed app" state. Developer builds never publish:
+"updates only in the installed app" state. A press of any of the three
+buttons is never silent: the panel shows the state the press started
+(*Checking…* / *Downloading…* / *Installing…*) immediately, applies the status
+the argument-free call returns even when no pushed event reaches the window,
+and turns a refusal, a rejection or a check that never answers into a visible
+error with its category (`src/lib/updaterStatus.js`, executed by
+`src/lib/updaterStatus.test.mjs`). Developer builds never publish:
 all `dist*` scripts pass `--publish never` — releases are cut by an explicit
 publish step against the pinned repo (see **[RELEASE.md](RELEASE.md)**).
 
