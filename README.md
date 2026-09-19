@@ -245,9 +245,17 @@ npm run dist:linux:dir
   karta hai — dono platforms pe same
 - Terminal sessions `sh -c`/`$SHELL` use karte hain (`terminalSession.js`
   platform-aware hai); runtime daemon `ELECTRON_RUN_AS_NODE=1` ke saath chalta hai
-- In-app updater Linux AppImage/deb builds pe "unsupported" dikhata hai
-  (electron-updater auto-update AppImage ke liye AppImageUpdate mangta hai jo
-  abhi wired nahi) — update ka flow: naya build download karke replace kar do
+- In-app updater (Settings → App → **Check for Updates**) Linux pe bhi
+  chalta hai — **terminal ki zarurat nahi**: AppImage install apni single
+  file ko replace karta hai (`AppImageUpdater`, `main.js` mein explicitly
+  wire kiya hua), aur deb/rpm/pacman install verified package ko package
+  manager ko **pkexec** (Polkit GUI password prompt) ke through dete hain.
+  Sirf tab terminal/manual step banta hai jab `pkexec`/`policykit-1` system
+  pe na ho — panel tab `EPRIV` ke saath saaf message deta hai (`sudo apt
+  install policykit-1`, ya release page se .deb manual install). Snap /
+  Flatpak / unpacked dir installs pe updater honestly "unsupported" dikhata
+  hai (store/sandbox ka kaam). Details: *Per-install update mechanism* table
+  (Code Arena section) aur `HPOS-Desktop/linuxUpdate.js`
 - AppImage pe `libfuse2` na ho toh: `sudo apt install libfuse2`, ya
   `./HPOS-0.1.1.AppImage --appimage-extract && squashfs-root/AppRun`
 - Purane/locked-down distros (Ubuntu 24.04+) pe Electron ka sandbox na chale toh
