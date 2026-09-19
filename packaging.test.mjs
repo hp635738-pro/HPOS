@@ -363,7 +363,7 @@ console.log('packaging configuration tests...')
   assert.equal(width, height, 'icon.png must be square')
   assert.ok(width >= 256, `icon.png must be at least 256px (got ${width})`)
 
-  assert.equal(linux.icon, 'public/icon.png', 'build.linux.icon must point at public/icon.png')
+  assert.equal(linux.icon, 'public/linux-icons', 'build.linux.icon must point at public/icon.png')
   assert.equal(linux.category, 'Development', 'the Linux desktop entry category must stay Development')
   assert.ok(typeof linux.maintainer === 'string' && linux.maintainer.includes('<'), 'deb packages need a maintainer with an email')
   assert.deepEqual(
