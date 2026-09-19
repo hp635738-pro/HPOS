@@ -144,7 +144,7 @@
       "shortcutName": "HPOS"
     },
     "linux": {
-      "icon": "public/icon.png",
+      "icon": "public/linux-icons",
       "category": "Development",
       "maintainer": "HPOS Team <hp635738-pro@users.noreply.github.com>",
       "target": [
