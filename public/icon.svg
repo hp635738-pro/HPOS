@@ -1,30 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!--
-    HPOS application icon source.
-
-    The glyph is the existing HPOS logo mark (the primary path of
-    public/favicon.svg), placed on a rounded dark tile that matches the
-    application background (#0f1013). Brand purple #863bff is preserved as
-    the mid stop of the vertical gradient.
-
-    public/icon.ico (16/24/32/48/64/128/256 px, PNG-compressed entries) is
-    generated from this file with an SVG rasterizer plus an ICO packer
-    (e.g. resvg + a small PNG-to-ICO script, or ImageMagick with SVG
-    support). See README "Windows installer" for details.
-  -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>HPOS application icon</title>
+  <desc>A geometric ice-blue glass H on a rounded graphite tile.</desc>
+  <!-- Editable vector companion. The rendered desktop master is icon.png.
+       See design/icons/README.md for exports and regeneration. -->
   <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#262832"/>
-      <stop offset="1" stop-color="#0d0e12"/>
+    <path id="tile" d="M324 94H700C854 94 930 170 930 324V700C930 854 854 930 700 930H324C170 930 94 854 94 700V324C94 170 170 94 324 94Z"/>
+    <path id="h" d="M340 294H414Q430 294 430 310V450Q430 464 444 464H580Q594 464 594 450V310Q594 294 610 294H684Q700 294 700 310V714Q700 730 684 730H610Q594 730 594 714V574Q594 560 580 560H444Q430 560 430 574V714Q430 730 414 730H340Q324 730 324 714V310Q324 294 340 294Z"/>
+    <linearGradient id="rim" x1="512" y1="94" x2="512" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#91b2bf"/>
+      <stop offset=".22" stop-color="#3e515b"/>
+      <stop offset=".7" stop-color="#1a2026"/>
+      <stop offset="1" stop-color="#3a464d"/>
     </linearGradient>
-    <linearGradient id="glyph" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#9b5cff"/>
-      <stop offset="0.5" stop-color="#863bff"/>
-      <stop offset="1" stop-color="#7a20ff"/>
+    <linearGradient id="graphite" x1="512" y1="104" x2="512" y2="920" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34444f"/>
+      <stop offset=".45" stop-color="#242d35"/>
+      <stop offset="1" stop-color="#15171b"/>
     </linearGradient>
+    <radialGradient id="ambient" cx="512" cy="142" r="540" gradientTransform="translate(0 64) scale(1 .55)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#78cde7" stop-opacity=".19"/>
+      <stop offset="1" stop-color="#78cde7" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="512" y1="294" x2="512" y2="730" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c5f8fc"/>
+      <stop offset=".4" stop-color="#b4e3eb"/>
+      <stop offset=".7" stop-color="#83b7c8"/>
+      <stop offset="1" stop-color="#659bac"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="512" y1="294" x2="512" y2="730" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d5fcff"/>
+      <stop offset=".48" stop-color="#8bdeec"/>
+      <stop offset=".8" stop-color="#4d899c"/>
+      <stop offset="1" stop-color="#a5dce5"/>
+    </linearGradient>
+    <radialGradient id="reflection" cx="512" cy="464" r="240" gradientTransform="translate(0 301.6) scale(1 .35)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ecffff" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#ecffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edgeLight" x1="300" y1="104" x2="724" y2="104" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7cdcff" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#9ee8ff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#7cdcff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="lift" x="270" y="258" width="484" height="542" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="13"/>
+      <feOffset dy="17"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".65"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tile)"/>
-  <g transform="translate(46.4 49.8) scale(3.4)">
-    <path fill="url(#glyph)" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
+  <use href="#tile" fill="url(#rim)"/>
+  <use href="#tile" transform="translate(6.144 6.144) scale(.988)" fill="#101c23"/>
+  <use href="#tile" transform="translate(10.752 10.752) scale(.979)" fill="url(#graphite)"/>
+  <use href="#tile" transform="translate(10.752 10.752) scale(.979)" fill="url(#ambient)"/>
+  <path d="M300 104H724" stroke="url(#edgeLight)" stroke-width="3" stroke-linecap="round"/>
+  <g filter="url(#lift)">
+    <use href="#h" fill="url(#glass)" stroke="url(#bevel)" stroke-width="10" stroke-linejoin="round" paint-order="stroke fill"/>
+    <use href="#h" fill="url(#reflection)" stroke="#d7fcff" stroke-opacity=".32" stroke-width="1.5"/>
   </g>
 </svg>
