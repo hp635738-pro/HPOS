@@ -392,6 +392,28 @@ export const Bord = (p) => (
   </Svg>
 )
 
+/** Notes — a solid note page with a dog-eared corner and text lines cut
+ *  out of it (true holes, transparent on any background). */
+export const NotesIcon = (p) => (
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M6 3.5h12a2.3 2.3 0 0 1 2.3 2.3v8.4l-6.1 6.3H6a2.3 2.3 0 0 1-2.3-2.3V5.8A2.3 2.3 0 0 1 6 3.5ZM7.8 8h8.4v1.8H7.8ZM7.8 11.6h8.4v1.8H7.8ZM7.8 15.2h4.6V17H7.8Z"
+    />
+  </Svg>
+)
+
+/** Game view — a solid gamepad with a d-pad and two action buttons cut
+ *  out of it (true holes, transparent on any background). */
+export const Gamepad = (p) => (
+  <Svg {...p}>
+    <path
+      fillRule="evenodd"
+      d="M7.3 6.2h9.4c3.1 0 5.6 2.6 5.3 5.7l-.3 3a3 3 0 0 1-5.2 1.9l-1.6-1.7H9.1L7.5 16.8a3 3 0 0 1-5.2-1.9l-.3-3C1.7 8.8 4.2 6.2 7.3 6.2ZM8.1 8.9h1.7v1.7h1.7v1.7H9.8v1.7H8.1v-1.7H6.4v-1.7h1.7ZM15.9 9.3a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0ZM18.3 11.7a1.05 1.05 0 1 0 2.1 0a1.05 1.05 0 1 0-2.1 0Z"
+    />
+  </Svg>
+)
+
 /** Wrench — tempdev workbench. */
 export const Wrench = (p) => (
   <Svg {...p}><path d="M15.2 3.6a5.5 5.5 0 0 0-6.7 6.9L3.9 15a2.1 2.1 0 0 0 3 3l4.5-4.6a5.5 5.5 0 0 0 6.9-6.7l-3 3-2.6-2.6 3-3Z" /></Svg>

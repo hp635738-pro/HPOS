@@ -3,10 +3,19 @@ import Sidebar, { NAV } from './components/Sidebar'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
+import Notes from './pages/Notes'
+import GameView from './pages/GameView'
 import RuntimeDetailsPanel from './components/RuntimeDetailsPanel'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
 import { usePanelExit } from './lib/panelTransition'
+
+// Rail destinations with real page content. Everything else renders the
+// Blank canvas. Add a sidebar entry in Sidebar.NAV + map its id here.
+const PAGES = {
+  notes: Notes,
+  gameview: GameView,
+}
 
 export default function App() {
   const [view, setView] = useState('overview')
@@ -98,7 +107,10 @@ export default function App() {
       jumpTo={advancedPage}
       onJumped={() => setAdvancedPage(null)}
     /></div>
-    : <div key={view} className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}><Blank /></div>}
+    : (() => {
+        const Page = PAGES[view]
+        return <div key={view} className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{Page ? <Page /> : <Blank />}</div>
+      })()}
       </main>
 
       <CommandPalette
