@@ -25,4 +25,26 @@ export default defineConfig({
     allowedHosts: true,
     hmr: { clientPort: 443 },
   },
+  // Bundle every dep in ONE pass at server start. Late discovery (opening a
+  // page that lazily imports e.g. framer-motion) otherwise re-bundles
+  // mid-session, and served transforms can end up stamped with mismatched
+  // browserHashes — the browser then loads TWO react copies and every hook
+  // crashes with "resolveDispatcher() is null".
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-dom/client',
+      'react/jsx-dev-runtime',
+      'react/jsx-runtime',
+      'framer-motion',
+      '@radix-ui/react-dialog',
+      '@radix-ui/react-tooltip',
+      'lucide-react',
+      'react-markdown',
+      'remark-gfm',
+      'react-syntax-highlighter',
+      'react-syntax-highlighter/dist/esm/styles/prism',
+    ],
+  },
 })
