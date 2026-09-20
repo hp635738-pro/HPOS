@@ -38,31 +38,48 @@ the repository before this change: every `dist*` script passed
 `--publish never` and no release workflow existed, so the installed Linux
 `.deb` had nothing to update against and reported a generic failure.
 
-## 1. Versioning (semver, incremented every release)
+## 1. Versioning (semver, bumped automatically on every push to main)
 
-* `package.json` **and** `HPOS-Desktop/package.json` must carry the same
-  version (enforced by `packaging.test.mjs` and `scripts/release-check.mjs`).
-* Increment strictly — `0.1.0 → 0.1.1 → 0.2.0 → 1.0.0`. An installed app only
-  updates when the release version is **greater than** its own version, so
-  re-publishing `0.1.0` over `0.1.0` is invisible to every installation
-  (that is exactly the trap this release process now blocks).
-* `scripts/release-check.mjs` reads the published releases of
-  `hp635738-pro/HPOS` and refuses to publish when the local version is not
-  newer than the newest published release.
+* Four files carry the version — `package.json`, `package-lock.json`,
+  `HPOS-Desktop/package.json`, `HPOS-Desktop/package-lock.json` — and must
+  agree (enforced by `packaging.test.mjs` and `scripts/release-check.mjs`).
+* You never bump by hand: every push to `main` makes the workflow's **bump**
+  job compute the next patch version from the newest published release
+  (`0.1.2 → 0.1.3 → 0.1.4 …`), sync the four files, commit
+  `chore(release): vX.Y.Z [skip ci]` and tag `vX.Y.Z` — then verify, validate
+  and publish that exact commit in the same run.
+* Increment strictly — an installed app only updates when the release version
+  is **greater than** its own version, so re-publishing `0.1.0` over `0.1.0`
+  is invisible to every installation (that is exactly the trap this release
+  process blocks).
+* `scripts/next-version.mjs` decides the version (newest of published
+  releases + `v*` tags, plus one patch; a checked-in version that is already
+  newer is released as-is and never skipped over);
+  `scripts/bump-version.mjs` writes it; `scripts/release-check.mjs` still
+  refuses to publish when the version is not newer than the newest published
+  release.
 
 ```bash
-# edit package.json + HPOS-Desktop/package.json → 0.1.1
-npm test                  # includes the release-gate + version tests
-git commit -am "release: 0.1.1"
-git tag v0.1.1
-git push origin main --tags
+# the normal release path — just push to main:
+git push origin main
+# → bump to 0.1.3 → commit → tag v0.1.3 → verify → validate →
+#   publish AppImage + deb + latest-linux.yml → verify the release
 ```
+
+Escape hatches:
+
+* Put `[skip release]` (or `[skip ci]`) in the head commit message and the
+  push is validated but never bumped or published.
+* The manual fallback stays: push a `v*` tag (or run the workflow with
+  `dry_run` switched off) and the tag path publishes exactly like before.
 
 ## 2. Publishing (deliberate, never from a developer build)
 
 | Command | What it does |
 | --- | --- |
 | `npm run dist`, `dist:win`, `dist:linux`, `dist:dir`, `dist:linux:dir` | **Build only.** Always `--publish never`. Safe to run any time. |
+| `node scripts/next-version.mjs` | Decides the next patch version (published releases + `v*` tags + checked-in version). Used by the bump job; `--json` / `--offline` / `--github-output` for CI. |
+| `node scripts/bump-version.mjs <x.y.z>` | Syncs the version across `package.json` + `package-lock.json` (+ the `HPOS-Desktop` copies). `--dry-run` previews, `--json` reports. |
 | `npm run release:check` | The gate: semver/sync check, pinning check, `dist*` never publish, token present in the **environment**, and version > newest published release. |
 | `npm run release:linux` | gate → `build:prod` → workspace payload → `electron-builder --linux appimage deb --publish always` |
 | `npm run release:win` | gate → `build:prod` → workspace payload → `electron-builder --win nsis --publish always` |
@@ -88,33 +105,39 @@ npm run release:linux
 skips drafts and pre-releases. A draft release is invisible to every installed
 app.
 
-### CI (recommended path)
+### CI (the only path — fully automatic)
 
-`.github/workflows/release.yml` has three jobs; **publishing can only happen
-after the first two succeeded**:
+`.github/workflows/release.yml` has five jobs; **publishing can only happen
+after the first three succeeded**:
 
 | Job | Runs on | Does |
 | --- | --- | --- |
-| `verify` | every run | `npm run lint`, `npm test`, `npm run release:check` (version increment + pinned source + token) |
+| `bump` | every run (acts only on pushes to `main`) | computes the next patch (`scripts/next-version.mjs`), syncs the version files (`scripts/bump-version.mjs`), commits `chore(release): vX.Y.Z [skip ci]`, pushes the commit + the `vX.Y.Z` tag |
+| `verify` | every run | checks out the bumped commit, then `npm run lint`, `npm test`, `npm run release:check` (version increment + pinned source + token) |
 | `validate` | every run | `npm run dist:linux` (**`--publish never`**) and `npm run verify:artifacts` — proves, in CI, that the exact artifacts and hashes the updater needs are produced, then uploads them for inspection |
-| `release` | **`v*` tag push**, or `workflow_dispatch` with `dry_run` switched off | `npm run release:linux` / `release:win`, then `gh release edit … --draft=false --prerelease=false`, then `npm run verify:release -- --wait --summary` |
+| `release-linux` | push to `main` (automatic), `v*` tag push, or `workflow_dispatch` with `dry_run` off | `npm run release:linux`, then `gh release edit … --draft=false --prerelease=false`, then `npm run verify:release -- --wait --summary` |
+| `release-win` | `v*` tag push, or `workflow_dispatch` with `dry_run` off | `npm run release:win` (uploads NSIS + `latest.yml` into the same release, after Linux) |
 
 Triggers:
 
-* `git push origin v0.1.1` — the normal release path. The workflow file is read
+* `git push origin main` — **the normal release path.** One push = one patch
+  release (`0.1.2 → 0.1.3`), committed, tagged, built and published by the
+  same run. The bump commit carries `[skip ci]` so it never starts a
+  follow-up run; a head commit that already carries `[skip ci]` /
+  `[skip release]`, or is already tagged, is never bumped again.
+* `git push origin v0.1.1` — the manual fallback. The workflow file is read
   from the **pushed commit**, so a tag pushed on any branch (not just `main`)
   runs the pipeline as it exists in that commit.
 * `workflow_dispatch` — manual, from the Actions UI / `gh workflow run`, with
   `dry_run` (default **true**: validation only) and `target`
   (`all` / `linux` / `win`). GitHub resolves `workflow_dispatch` against the
-  **default branch**, so this only becomes available once the workflow is
-  merged to `main`.
-* ordinary branch pushes (`main`, `arena/**`) — `verify` + `validate` only,
-  never a publish. This is what makes "the workflow configuration is
-  validated" a gate rather than a claim.
+  **default branch**.
+* ordinary branch pushes (`arena/**`) — `verify` + `validate` only, never a
+  publish. This is what makes "the workflow configuration is validated" a
+  gate rather than a claim.
 
 Auth: `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` with
-`permissions: contents: write`. The `release` job sets
+`permissions: contents: write`. The `release-*` jobs set
 `HPOS_RELEASE_OFFLINE=1` because the version-increment gate already ran in
 `verify` — otherwise the second platform job would trip over the release this
 same run creates.

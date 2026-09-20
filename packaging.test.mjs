@@ -456,19 +456,34 @@ console.log('packaging configuration tests...')
   assert.match(main, /createLinuxPackageBackend\(/, 'Linux package installs run the controlled install backend')
   assert.match(main, /updateMechanism/, 'appInfo reports the update mechanism to the UI')
 
-  /* Deliberate release publishing: workflow-triggered, never on every push. */
+  /* Automatic patch releases: every push to main bumps one patch version,
+     commits it, tags it and publishes it — in the same run that verified and
+     validated it. Pushing a v* tag stays as the manual fallback. */
   const workflowPath = path.join(root, '.github', 'workflows', 'release.yml')
   assert.ok(fs.existsSync(workflowPath), '.github/workflows/release.yml must exist')
   const workflow = fs.readFileSync(workflowPath, 'utf8')
-  assert.match(workflow, /tags:\s*\n\s*- 'v\*'/, 'releases are cut by pushing a v* tag')
+  assert.match(workflow, /tags:\s*\n\s*- 'v\*'/, 'a release can still be cut by pushing a v* tag')
   assert.match(workflow, /workflow_dispatch/, 'a manual release is possible on purpose')
-  /* Branch pushes ARE allowed to run the pipeline — they only ever validate
-     (the publish job is gated on a v* tag or a non-dry manual run). That is
-     what makes "the workflow configuration is validated" a real gate instead
-     of a claim. */
-  assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'publishing only happens for a v* tag')
+  /* The bump job is what makes main self-releasing: it decides the next patch
+     (next-version.mjs), syncs the version files (bump-version.mjs), commits
+     and tags — and every later job builds the commit it produced. */
+  assert.match(workflow, /\n  bump:\n/, 'the workflow has a bump job')
+  assert.match(workflow, /node scripts\/next-version\.mjs/, 'the next patch version is computed, never guessed')
+  assert.match(workflow, /node scripts\/bump-version\.mjs/, 'the version files are synced by the bump script')
+  assert.match(workflow, /needs\.bump\.outputs\.sha \|\| github\.sha/, 'verify/validate/publish build the bumped commit')
+  assert.match(workflow, /needs\.bump\.outputs\.bumped == 'true'/, 'an automatic bump publishes in the same run')
+  /* …with guards so one push can never release twice. */
+  assert.match(workflow, /\[skip ci\]/, 'the bump commit carries [skip ci] (no release loop)')
+  assert.match(workflow, /\[skip release\]/, 'a [skip release] push is never bumped')
+  assert.match(workflow, /already exists - not publishing twice/, 'an existing tag is never published twice')
+  /* Branch pushes to arena/** only ever validate (the publish jobs stay
+     gated). That is what makes "the workflow configuration is validated" a
+     real gate instead of a claim. */
+  assert.match(workflow, /startsWith\(github\.ref, 'refs\/tags\/v'\)/, 'a pushed v* tag still publishes')
   assert.match(workflow, /dry_run != 'true'/, 'a manual run only publishes when dry-run is switched off')
-  assert.match(workflow, /needs: \[verify, validate\]/, 'the publish job runs only after the validation job succeeded')
+  assert.match(workflow, /needs: \[bump, verify, validate\]/, 'the Linux publish job runs only after bump + verify + validate succeeded')
+  assert.match(workflow, /needs: \[bump, verify\]/, 'validation builds the bumped commit')
+  assert.match(workflow, /needs: \[verify, validate, release-linux\]/, 'Windows still publishes after Linux into the same release')
   /* Real finding from running the pipeline: GitHub rejects the whole workflow
      file with "Unrecognized named-value: 'matrix'" if a JOB-level `if` uses
      the matrix context — the run then fails without ever creating a job.
@@ -485,10 +500,15 @@ console.log('packaging configuration tests...')
   assert.doesNotMatch(workflow, /(ghp_|github_pat_)[A-Za-z0-9_]+/, 'no hardcoded token in the workflow')
 
   /* Every new contract is part of npm test. */
-  for (const file of ['node HPOS-Desktop/linuxUpdate.test.mjs', 'node scripts/release-check.test.mjs']) {
+  for (const file of [
+    'node HPOS-Desktop/linuxUpdate.test.mjs',
+    'node scripts/release-check.test.mjs',
+    'node scripts/next-version.test.mjs',
+    'node scripts/bump-version.test.mjs',
+  ]) {
     assert.ok(pkg.scripts.test.includes(file), `npm test must run ${file}`)
   }
-  console.log('ok: deliberate release process (gated publish, CI on tags) + Linux deb/AppImage update wiring')
+  console.log('ok: automatic patch releases (bump + tag + gated publish) + Linux deb/AppImage update wiring')
 }
 
 console.log('packaging configuration tests: all passed')

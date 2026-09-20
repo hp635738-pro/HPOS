@@ -1,19 +1,34 @@
 name: Release
 
-# Deliberate release process for the in-app updater (Settings → App → Check for
+# Automatic patch releases for the in-app updater (Settings → App → Check for
 # Updates). Publishing is what makes electron-builder upload the update
 # metadata (latest-linux.yml, latest.yml) next to the artifacts — without it no
 # installed app can ever see a new version.
 #
-#   · every push / tag / manual run  → test + lint + release gate + a full
-#                                      Linux build that is VALIDATED and never
-#                                      published
-#   · pushing a v* tag               → the same validation, then publish
-#   · workflow_dispatch (dry_run off)→ the same validation, then publish
+#   · push to main             → the bump job computes the next patch version
+#                                from the newest published release
+#                                (0.1.2 → 0.1.3), syncs package.json +
+#                                package-lock.json (plus the HPOS-Desktop
+#                                copies), commits "chore(release): vX.Y.Z
+#                                [skip ci]", tags vX.Y.Z — and the SAME run
+#                                then verifies, validates and publishes the
+#                                Linux release (AppImage + deb +
+#                                latest-linux.yml) that Check for Updates reads.
+#   · push to arena/**         → verify + validate only, never a publish.
+#   · pushing a v* tag         → verify + validate, then publish Linux (+
+#                                Windows after it) — the manual fallback.
+#   · workflow_dispatch        → manual, with dry_run (default true: validation
+#                                only) and target (all / linux / win).
 #
-# The publish job has `needs: [verify, validate]`, so no release can be cut
-# from a configuration that does not build exactly the artifacts (and hashes)
-# the updater was coded against.
+# The publish jobs have `needs: [bump, verify, validate]`, so no release can be
+# cut from a configuration that does not build exactly the artifacts (and
+# hashes) the updater was coded against. Guards against double releases:
+#
+#   · the bump commit carries [skip ci], so pushing it never starts a
+#     follow-up run (no release loop);
+#   · a push whose head commit already carries [skip ci]/[skip release], or is
+#     already tagged, is never bumped again;
+#   · a version whose tag already exists is never published twice.
 #
 # Repository: hp635738-pro/HPOS (pinned in package.json → build.publish and
 # asserted by `npm run release:check`).
@@ -51,11 +66,106 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  bump:
+    name: Next version (+ bump on main)
+    runs-on: ubuntu-latest
+    outputs:
+      bumped: ${{ steps.push.outputs.bumped }}
+      version: ${{ steps.next.outputs.version }}
+      tag: ${{ steps.next.outputs.tag }}
+      sha: ${{ steps.push.outputs.sha }}
+      published: ${{ steps.next.outputs.published }}
+    steps:
+      - name: Check out the push (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide whether this push gets a release
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" != 'push' ] || [ "${{ github.ref }}" != 'refs/heads/main' ]; then
+            echo "should_bump=false" >> "$GITHUB_OUTPUT"
+            echo "reason=not a push to main (${{ github.event_name }} ${{ github.ref }}) - validation only" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Operate on the latest main, not the trigger commit: runs for one
+          # ref are queued (see concurrency above), so this always includes
+          # every earlier bump.
+          git fetch origin main --tags --quiet
+          git checkout -q -B main origin/main
+          echo "main is now at $(git rev-parse --short HEAD) (trigger: ${{ github.sha }})"
+          git log -1 --pretty='--- head: %h %s ---'
+          if git log -1 --pretty=%B | grep -qE '\[skip (ci|release)\]'; then
+            echo "should_bump=false" >> "$GITHUB_OUTPUT"
+            echo "reason=head commit carries [skip ci]/[skip release]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAGGED="$(git tag --points-at HEAD | grep '^v' || true)"
+          if [ -n "$TAGGED" ]; then
+            echo "should_bump=false" >> "$GITHUB_OUTPUT"
+            echo "reason=HEAD is already tagged ($TAGGED) - the tag run publishes it" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_bump=true" >> "$GITHUB_OUTPUT"
+          echo "reason=push to main - computing the next patch version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.should_bump == 'true'
+        with:
+          node-version: '22'
+
+      - name: Determine the next patch version
+        id: next
+        if: steps.decide.outputs.should_bump == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/next-version.mjs --json --github-output
+
+      - name: Bump, commit, tag and push the release
+        id: push
+        if: steps.decide.outputs.should_bump == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT='${{ steps.next.outputs.version }}'
+          TAG='${{ steps.next.outputs.tag }}'
+          if [ -z "$NEXT" ] || [ -z "$TAG" ]; then
+            echo '::error::no next version was computed - refusing to guess'
+            exit 1
+          fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$TAG already exists - not publishing twice" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/bump-version.mjs "$NEXT"
+          git config user.name 'hpos-release'
+          git config user.email 'hpos-release@users.noreply.github.com'
+          if [ -n "$(git status --porcelain)" ]; then
+            git add package.json package-lock.json HPOS-Desktop/package.json HPOS-Desktop/package-lock.json
+            git commit -m "chore(release): $TAG [skip ci]"
+          else
+            echo 'version files already in sync - tagging HEAD as-is'
+          fi
+          git tag "$TAG"
+          git push origin main "$TAG"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Test + lint + release gate
+    needs: [bump]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # On an automatic release this is the bump commit the bump job just
+          # pushed; otherwise it is the pushed commit itself.
+          ref: ${{ needs.bump.outputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -70,13 +180,15 @@ jobs:
 
   validate:
     name: Validate the release artifacts (builds, never publishes)
-    needs: verify
+    needs: [bump, verify]
     runs-on: ubuntu-latest
     env:
       # the verification report is published as commit statuses, which needs a token
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -98,6 +210,9 @@ jobs:
       - name: Publish the validation report (commit statuses)
         if: always()
         continue-on-error: true
+        env:
+          # Attach the report to the released commit on automatic releases.
+          GITHUB_SHA: ${{ needs.bump.outputs.sha || github.sha }}
         run: node scripts/publish-verification.mjs --file validated-artifacts.json
       - name: Fail the job when the artifacts are not valid (blocks publishing)
         if: steps.artifacts.outputs.exit_code != '0'
@@ -119,10 +234,11 @@ jobs:
   # separate jobs instead of a matrix.
   release-linux:
     name: Build + publish Linux (AppImage + deb + latest-linux.yml)
-    needs: [verify, validate]
+    needs: [bump, verify, validate]
     runs-on: ubuntu-latest
-    # Publish ONLY for a v* tag push, or a manual run with dry_run switched off.
-    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'linux')) }}
+    # Publish for a v* tag push, a manual run with dry_run switched off, or an
+    # automatic release (this run's bump job committed + tagged the next patch).
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.target == 'all' || github.event.inputs.target == 'linux')) || needs.bump.outputs.bumped == 'true' }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # The release:* scripts run `release:check` again. The "is this version
@@ -132,6 +248,8 @@ jobs:
       HPOS_RELEASE_OFFLINE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -158,6 +276,8 @@ jobs:
       - name: Publish the verification report (commit statuses)
         if: always()
         continue-on-error: true
+        env:
+          GITHUB_SHA: ${{ needs.bump.outputs.sha || github.sha }}
         run: node scripts/publish-verification.mjs --file release-verification.json
       - name: Fail the job when the published release is incomplete
         if: steps.verifyrelease.outputs.exit_code != '0'
