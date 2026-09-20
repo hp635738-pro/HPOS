@@ -5,6 +5,7 @@ import Settings from './pages/Settings'
 import Blank from './pages/Blank'
 import Notes from './pages/Notes'
 import GameView from './pages/GameView'
+import Chats from './pages/Chats'
 import RuntimeDetailsPanel from './components/RuntimeDetailsPanel'
 import CommandPalette from './components/CommandPalette'
 import FilesWorkspace from './components/FilesWorkspace'
@@ -15,6 +16,7 @@ import { usePanelExit } from './lib/panelTransition'
 const PAGES = {
   notes: Notes,
   gameview: GameView,
+  messages: Chats,
 }
 
 export default function App() {
