@@ -123,7 +123,7 @@ export default function Chats() {
 
       <div className="relative flex min-w-0 flex-1 flex-col">
         <main
-          className={`${isEmpty ? 'overflow-hidden py-4' : 'overflow-y-auto pt-4 pb-28'} flex-1 px-4`}
+          className={`${isEmpty ? 'overflow-hidden pt-4 pb-0' : 'overflow-y-auto pt-4 pb-28'} flex-1 px-4`}
         >
           <AnimatePresence mode="wait" initial={false}>
             {isEmpty ? (
@@ -133,7 +133,7 @@ export default function Chats() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -24, scale: 0.98 }}
                 transition={{ duration: 0.28, ease: 'easeOut' }}
-                className="flex h-full flex-col justify-center pb-16"
+                className="flex h-full flex-col justify-end"
               >
                 <div className="mb-8 text-center">
                   <h1 className="text-3xl font-light text-white/85">
@@ -213,7 +213,7 @@ export default function Chats() {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.28, ease: 'easeOut' }}
-            className="absolute inset-x-0 bottom-0 z-10 px-4 pb-3"
+            className="absolute inset-x-0 bottom-0 z-10 px-4 pb-0"
           >
             <div className="w-full">
               <PromptInputBox
