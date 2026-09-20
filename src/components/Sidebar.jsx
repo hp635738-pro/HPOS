@@ -4,6 +4,7 @@ import { useTheme } from '../theme/ThemeContext'
 import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, NetworkAgent,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
+  NotesIcon, Gamepad,
 } from './Icons'
 
 /**
@@ -20,6 +21,8 @@ export const NAV = [
   { id: 'reports',   label: 'Bord',           Icon: Bord },
   { id: 'messages',  label: 'Chats',          Icon: Chat, dot: true },
   { id: 'assistant', label: 'Network',        Icon: NetworkAgent },
+  { id: 'notes',     label: 'Notes',          Icon: NotesIcon },
+  { id: 'gameview',  label: 'Game view',      Icon: Gamepad },
   { id: 'star',      label: 'Favourites',     Icon: Star },
 ]
 

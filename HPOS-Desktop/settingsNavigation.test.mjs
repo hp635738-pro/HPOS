@@ -391,10 +391,11 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
   }
   // Rail view ids minus the removed settings entry and the removed AI
   // section (AI tools / AI chats / Code Arena): no route was invented.
+  // Notes and Game view were added later as real rail destinations.
   assert.deepEqual(
     flatNav().map((n) => n.id),
-    ['overview', 'schedule', 'cards', 'reports', 'messages', 'assistant', 'star'],
-    'rail view ids are unchanged apart from the removed settings entry and AI section',
+    ['overview', 'schedule', 'cards', 'reports', 'messages', 'assistant', 'notes', 'gameview', 'star'],
+    'rail view ids match the shipped set (removed settings/AI, added Notes + Game view)',
   )
   assert.ok(
     appJsx.includes("if (view === 'files') {") && appJsx.includes('<FilesWorkspace'),

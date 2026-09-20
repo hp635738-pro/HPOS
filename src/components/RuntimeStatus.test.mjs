@@ -198,7 +198,10 @@ assert(
       readFileSync(join(root, 'tailwind.config.js'), 'utf8').includes('preflight: false'),
     'tailwind is setup-only (v3, preflight off, zero global impact)'
   )
-  assert(!names.includes('lucide') && !names.includes('typescript'), 'no lucide/TypeScript added')
+  // lucide-react arrives with the vendored Chats section (compo / 21st.dev
+  // ai-prompt-box). TypeScript is still NOT a dependency — .tsx components
+  // are type-stripped by esbuild during the Vite build (no tsc anywhere).
+  assert(!names.includes('typescript'), 'no TypeScript dependency added')
 }
 assert(
   !panel.includes('DeepSeek') && !status.includes('DeepSeek'),
