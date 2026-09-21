@@ -150,20 +150,31 @@ export const DEFAULTS = {
   fontSmooth: true,       // antialiased rendering
   fontStarred: [],        // pinned font ids, shown first
 
-  /* ---- sidebar ---- */
-  railWidth: 194,         // expanded width
-  railMini: 62,           // icons-only width
-  railItemH: 40,          // nav row height
-  railGap: 3,             // space between rows
-  railRadius: 10,         // nav row corner radius
-  railIcon: 18,           // nav icon size
-  railFont: 13,           // nav label size
-  railPad: 10,            // rail side padding
+  /* ---- sidebar ----
+     Geometry follows the shadcn/ui sidebar spec (the rail is built on the
+     shadcn component): 16rem width, 3rem icon mode, 36px rows, 4px row
+     spacing, 6px row radius, 16px icons, 14px medium labels. Every value
+     below stays user-tunable from the settings. */
+  railWidth: 256,         // expanded width (shadcn 16rem)
+  railMini: 48,           // icons-only width (shadcn 3rem)
+  railItemH: 36,          // nav row height
+  railGap: 4,             // space between rows
+  railRadius: 6,          // nav row corner radius
+  railIcon: 16,           // nav icon size
+  railFont: 14,           // nav label size
+  railPad: 10,            // rail side padding (shadcn px-2.5)
   railBrand: true,        // show the HPOS logo block
   railDots: true,         // show notification dots
   railPips: true,         // show the accent bar on the active row
   railSharp: 0,           // outer corner radius of the rail itself
   railInset: 0,           // gap around the rail, letting corners show
+
+  /* ---- toast (shadcn/Base UI notifications) ---- */
+  toastPosition: 'bottom-right', // bottom-right | bottom-center | bottom-left
+  toastDuration: 4000,           // auto-dismiss, ms (success ×0.875, warn ×1.125, error ×1.5)
+  toastLimit: 3,                 // max toasts visible at once (Base UI limit)
+  toastIcons: true,              // status icons (success/info/warning/error/loading)
+  toastClose: true,              // the × button on every toast
 
   /* ---- wide notch ---- */
   notchFillet: 13,        // radius of the curve that joins bar -> notch
@@ -227,9 +238,34 @@ function writeStoredPrefs(value) {
   }
 }
 
+/**
+ * One-time rail design migration (shadcn sidebar rebuild): saved values that
+ * still equal the pre-redesign defaults are replaced with the new shadcn
+ * geometry. A value the user explicitly changed (anything other than the
+ * old default) is kept as-is.
+ */
+const RAIL_DESIGN_MIGRATION = {
+  railWidth: [194, 256],
+  railMini: [62, 48],
+  railItemH: [40, 36],
+  railGap: [3, 4],
+  railRadius: [10, 6],
+  railIcon: [18, 16],
+  railFont: [13, 14],
+}
+
+export function migratePrefs(prefs) {
+  for (const [key, [oldValue, nextValue]] of Object.entries(RAIL_DESIGN_MIGRATION)) {
+    if (prefs[key] === oldValue) prefs[key] = nextValue
+  }
+  return prefs
+}
+
 function load() {
   try {
-    return { ...DEFAULTS, ...JSON.parse(storedPrefs() || '{}') }
+    const prefs = { ...DEFAULTS, ...JSON.parse(storedPrefs() || '{}') }
+    migratePrefs(prefs)
+    return prefs
   } catch {
     return { ...DEFAULTS }
   }
@@ -557,7 +593,8 @@ export function ThemeProvider({ children }) {
     loadFromDisk().then((disk) => {
       if (!cancelled && disk) {
         skipHistory.current = true
-        setPrefs({ ...DEFAULTS, ...disk })
+        // migrate the on-disk copy too — it may predate the shadcn rail design.
+        setPrefs(migratePrefs({ ...DEFAULTS, ...disk }))
         skipHistory.current = false
       }
       hydrated.current = true

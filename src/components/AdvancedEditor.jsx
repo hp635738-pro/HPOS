@@ -9,12 +9,13 @@ import HeaderPanel from './HeaderPanel'
 import ShortcutsPanel from './ShortcutsPanel'
 import BackupPanel from './BackupPanel'
 import PalettePanel from './PalettePanel'
+import ToastPanel from './ToastPanel'
 import WorkspacePanel from './WorkspacePanel'
 import ComponentPanel from './ComponentPanel'
 import Notch from './Notch'
 import { AccentSection, GitHubUpdatePanel, PresetChooser, UpdatesPanel } from '../pages/Settings'
 import { Card, Row, Segmented, Toggle } from './ui/Bits'
-import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill, Sparkle } from './Icons'
+import { Chevron, Check, Search, Wrench, Palette, Grip, Type, Droplet, Keyboard, Archive, Command, Layers, Blocks, Refresh, Surfaces, Motion, Zoom, TopBar, Pill, Sparkle, Bell } from './Icons'
 
 /**
  * Advanced settings — the full settings explorer for everything that is not a
@@ -195,6 +196,16 @@ const PAGES = [
     desc: 'The Ctrl+K launcher for pages, settings and actions.',
     keywords: 'command palette launcher ctrl k search quick jump run',
     Panel: PalettePanel,
+  },
+  {
+    id: 'toasts',
+    related: ['palette', 'backup'],
+    name: 'Toasts',
+    group: 'System',
+    Icon: Bell,
+    desc: 'Where and how long the short toast messages show.',
+    keywords: 'toast notification message notify popup alert dismiss',
+    Panel: ToastPanel,
   },
   {
     id: 'shortcuts',

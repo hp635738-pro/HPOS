@@ -1,5 +1,7 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import Sidebar, { NAV } from './components/Sidebar'
+import { SidebarProvider } from './components/ui/sidebar'
+import { useTheme } from './theme/ThemeContext'
 import Topbar, { TOOLS } from './components/Topbar'
 import Settings from './pages/Settings'
 import Blank from './pages/Blank'
@@ -20,8 +22,20 @@ const PAGES = {
 }
 
 export default function App() {
+  const { prefs, set } = useTheme()
   const [view, setView] = useState('overview')
   const [previousView, setPreviousView] = useState('overview')
+  // Sidebar open state — the shadcn SidebarProvider is controlled from the
+  // existing "sidebar" pref (expanded | icons), so the collapse state stays
+  // across reloads exactly like the old rail. prefs is the source of truth;
+  // every toggle (footer button, rail, cmd+b) lands in the pref and flows
+  // back through the sync effect below.
+  const [railOpen, setRailOpen] = useState(prefs.sidebar !== 'icons')
+  useEffect(() => {
+    const desired = prefs.sidebar !== 'icons'
+    if (desired !== railOpen) setRailOpen(desired)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.sidebar])
   // Set to a panel id when the palette jumps straight into Advanced settings.
   const [advancedPage, setAdvancedPage] = useState(null)
   // Full-panel runtime details overlay, opened by holding the header status
@@ -91,6 +105,12 @@ export default function App() {
 
   return (
     <div style={S.shell}>
+      <SidebarProvider
+        open={railOpen}
+        onOpenChange={(v) => set('sidebar', v ? 'expanded' : 'icons')}
+        className="h-full"
+        style={{ height: '100%', minHeight: 0, width: '100%' }}
+      >
       <Sidebar active={activeInSidebar} onChange={navigate} />
 
       <main style={S.main}>
@@ -114,6 +134,7 @@ export default function App() {
         return <div key={view} className="page-transition" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{Page ? <Page /> : <Blank />}</div>
       })()}
       </main>
+      </SidebarProvider>
 
       <CommandPalette
         onNavigate={navigate}

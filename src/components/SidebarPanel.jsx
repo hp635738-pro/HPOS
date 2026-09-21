@@ -30,8 +30,8 @@ const ROWS = [
 ]
 
 const PRESETS = {
-  Default: { railWidth: 194, railMini: 62, railItemH: 40, railGap: 3,
-             railRadius: 10, railIcon: 18, railFont: 13, railPad: 10, railSharp: 0, railInset: 0 },
+  Default: { railWidth: 256, railMini: 48, railItemH: 36, railGap: 4,
+             railRadius: 6, railIcon: 16, railFont: 14, railPad: 10, railSharp: 0, railInset: 0 },
   Compact: { railWidth: 168, railMini: 54, railItemH: 34, railGap: 1,
              railRadius: 6, railIcon: 16, railFont: 12, railPad: 8, railSharp: 0, railInset: 0 },
   Roomy:   { railWidth: 232, railMini: 74, railItemH: 48, railGap: 6,

@@ -81,11 +81,10 @@ export default function Chats() {
     el?.scrollTo?.({ top: el.scrollHeight, behavior: 'smooth' })
   }, [convos, pending])
 
-  // Track the composer's rendered height so the message area can cap itself
-  // at "available height − composer − gap". While the conversation is short
-  // the composer therefore sits right under the last message; once the
-  // conversation fills the viewport, the messages scroll and the composer
-  // rests at the bottom exactly as before.
+  // Track the composer's rendered height as a safety cap on the message
+  // area ("available height − composer − gap"). main is flex-1 in every
+  // state, so the composer stays bottom-anchored and the message area
+  // scrolls once the conversation fills the viewport.
   useEffect(() => {
     if (isEmpty) return undefined
     const el = footerRef.current
@@ -158,7 +157,15 @@ export default function Chats() {
       <div className="relative flex min-w-0 flex-1 flex-col gap-3">
         <main
           ref={mainRef}
-          className={`${isEmpty ? 'flex-1 overflow-hidden pt-4 pb-3' : 'min-h-0 overflow-y-auto pt-4'} px-4`}
+          // flex-1 in BOTH states: the composer must stay bottom-anchored
+          // through the empty -> chat transition. If chat-state main shrank
+          // to content height, the footer composer would fly up under the
+          // first message on send (while the empty-state composer is still
+          // fading out at the bottom) and only settle back at the bottom
+          // when the reply arrived — a visible whole-screen fadup. With a
+          // bottom-anchored composer in both states, the two composers
+          // crossfade in place and the screen never shifts.
+          className={`flex-1 min-h-0 ${isEmpty ? 'overflow-hidden pt-4 pb-3' : 'overflow-y-auto pt-4'} px-4`}
           style={!isEmpty && composerH > 0 ? { maxHeight: `calc(100% - ${composerH}px - 12px)` } : undefined}
         >
           <AnimatePresence mode="wait" initial={false}>
@@ -169,15 +176,20 @@ export default function Chats() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -24, scale: 0.98 }}
                 transition={{ duration: 0.28, ease: 'easeOut' }}
-                className="flex h-full flex-col justify-end"
+                className="flex h-full flex-col"
               >
-                <div className="mb-8 text-center">
-                  <h1 className="text-3xl font-light text-white/85">
-                    How can I help today?
-                  </h1>
-                  <p className="mt-3 text-sm text-white/40">
-                    Type a command or ask a question
-                  </p>
+                {/* Hero text vertically centered in the space above the
+                    composer (flex-1 + items-center); the box stays pinned
+                    to the bottom as before. */}
+                <div className="flex flex-1 items-center justify-center">
+                  <div className="text-center">
+                    <h1 className="text-3xl font-light text-white/85">
+                      How can I help today?
+                    </h1>
+                    <p className="mt-3 text-sm text-white/40">
+                      Type a command or ask a question
+                    </p>
+                  </div>
                 </div>
                 <div className="mx-auto w-full max-w-2xl">
                   <PromptInputBox
@@ -199,15 +211,16 @@ export default function Chats() {
                 style={{ maxWidth: chatMaxW }}
               >
                 {active?.msgs.map((m, i) => {
-                  // user input -> assistant output sits a bit closer (8px)
-                  // than other message pairs (12px)
+                  // user input -> assistant output sits tight (4px) so the
+                  // reply reads as a direct answer; other message pairs keep
+                  // the looser 12px rhythm
                   const mt = i > 0
-                    ? (m.role === 'assistant' && active.msgs[i - 1].role === 'user' ? 'mt-2' : 'mt-3')
+                    ? (m.role === 'assistant' && active.msgs[i - 1].role === 'user' ? 'mt-1' : 'mt-3')
                     : ''
                   return m.role === 'user' ? (
                     <div
                       key={i}
-                      className={`max-w-[80%] self-end rounded-2xl border border-[#F97316]/40 bg-[#F97316]/15 px-4 py-3 text-sm break-words whitespace-pre-wrap text-orange-50 ${mt}`}
+                      className={`max-w-[80%] self-end rounded-2xl border border-[#F97316]/40 bg-[#F97316]/15 px-4 py-2 text-sm break-words whitespace-pre-wrap text-orange-50 ${mt}`}
                     >
                       {m.text}
                     </div>
@@ -231,7 +244,7 @@ export default function Chats() {
                 })}
                 {pending && (
                   <div
-                    className="mt-2 inline-flex items-center gap-2 self-start rounded-full pr-4 pl-1"
+                    className="mt-1 inline-flex items-center gap-2 self-start rounded-full pr-4 pl-1"
                     style={{
                       background: 'rgba(29,29,29,0.42)',
                       boxShadow: 'inset 0 0 0 1px rgba(44,47,54,0.31)',

@@ -184,11 +184,12 @@ NAV.forEach((n) => { allNav.push(n); if (n.children) n.children.forEach((c) => a
 
 /* 2. rail footer keeps Collapse only */
 {
-  const footAt = sidebar.indexOf('<div style={S.foot}>')
-  if (assert.ok(footAt !== -1, 'rail footer still exists')) {
-    // The footer holds no nested <div>, so its first </div> closes it.
-    const foot = sidebar.slice(footAt, sidebar.indexOf('</div>', footAt) + '</div>'.length)
-    const buttons = foot.split('<button').length - 1
+  // The rail is built on the shadcn sidebar (components/ui/sidebar.tsx);
+  // the footer is a <SidebarFooter> holding a single SidebarMenuButton.
+  const footAt = sidebar.indexOf('<SidebarFooter')
+  if (assert.ok(footAt !== -1, 'rail footer still exists (shadcn SidebarFooter)')) {
+    const foot = sidebar.slice(footAt, sidebar.indexOf('</SidebarFooter>', footAt) + '</SidebarFooter>'.length)
+    const buttons = foot.split('<SidebarMenuButton').length - 1
     assert.equal(buttons, 1, 'rail footer renders exactly one button')
     assert.ok(foot.includes('Collapse'), 'the one footer button is the Collapse toggle')
     assert.ok(!/settings/i.test(foot), 'the rail footer mentions no settings destination')

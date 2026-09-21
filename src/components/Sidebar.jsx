@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../theme/ThemeContext'
+import {
+  Sidebar as ShadSidebar, SidebarHeader, SidebarContent, SidebarGroup, SidebarGroupContent,
+  SidebarFooter, SidebarMenu, SidebarMenuItem, SidebarMenuButton,
+  SidebarMenuSub, SidebarMenuSubItem, SidebarMenuSubButton,
+  SidebarRail, useSidebar,
+} from '@/components/ui/sidebar'
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuGroup,
+  ContextMenuItem, ContextMenuSeparator, ContextMenuLabel,
+} from '@/components/ui/context-menu'
 import {
   Logo, InputTerminal, Analyzing, Topics, Bord, Chat, NetworkAgent,
   Chevron, Chevrons, Grip, Pin, PinOff, Lock, Unlock, Star,
@@ -13,6 +22,21 @@ import {
  * of NAV also stops App from classifying the settings view as a rail page, so
  * the header receives `active === 'settings'` and its gear can show the
  * on-state. Regression: HPOS-Desktop/settingsNavigation.test.mjs.
+ *
+ * Structure — built on the shadcn sidebar (components/ui/sidebar.tsx):
+ *   SidebarProvider (owned by App, controlled from prefs.sidebar)
+ *   └── Sidebar  variant="floating" collapsible="icon"
+ *       ├── SidebarHeader   — brand (logo + HPOS)
+ *       ├── SidebarContent  — SidebarGroup > SidebarMenu > items
+ *       │     (pin/lock badges, Chats dot, drag reorder, right-click
+ *       │      context menu — behaviour unchanged)
+ *       ├── SidebarFooter   — Collapse/Expand toggle
+ *       └── SidebarRail     — edge strip that also toggles the sidebar
+ *
+ * Geometry comes from the existing Sidebar settings: ThemeContext paints
+ * --rail-w / --rail-mini / --rail-item-h / --rail-gap / --rail-radius /
+ * --rail-font, which the shadcn primitives consume via Tailwind
+ * arbitrary-value classes. No new settings were added.
  */
 export const NAV = [
   { id: 'overview',  label: 'Input terminal', Icon: InputTerminal },
@@ -49,6 +73,7 @@ export function orderNav(saved) {
 
 export default function Sidebar({ active, onChange }) {
   const { prefs, set } = useTheme()
+  const { toggleSidebar } = useSidebar()
   const mini = prefs.sidebar === 'icons'
 
   const pinned = prefs.navPinned || []
@@ -65,7 +90,6 @@ export default function Sidebar({ active, onChange }) {
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
   const [edge, setEdge] = useState('above')
-  const [menu, setMenu] = useState(null)     // { id, x, y }
   const dragRef = useRef(null)
 
   // When true, the sidebar was expanded automatically by clicking a parent
@@ -83,21 +107,6 @@ export default function Sidebar({ active, onChange }) {
       set('navExpanded', [])
     }
   }, [])
-
-  // Any click or scroll dismisses the context menu.
-  useEffect(() => {
-    if (!menu) return
-    const close = () => setMenu(null)
-    const onKey = (e) => { if (e.key === 'Escape') close() }
-    window.addEventListener('click', close)
-    window.addEventListener('resize', close)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('click', close)
-      window.removeEventListener('resize', close)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [menu])
 
   const toggle = (key, id) => {
     const list = prefs[key] || []
@@ -123,305 +132,269 @@ export default function Sidebar({ active, onChange }) {
     set('navOrder', ids)
   }
 
-  const openMenu = (e, id) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setMenu({ id, x: e.clientX, y: e.clientY })
-  }
-
   const reset = () => { setDragId(null); setOverId(null); dragRef.current = null }
 
-  const allFlat = useMemo(() => flatNav(), [])
-  const menuItem = menu && allFlat.find((n) => n.id === menu.id)
-  const isPinned = menu && pinned.includes(menu.id)
-  const isLocked = menu && locked.includes(menu.id)
+  // Context menu content shared by every rail item (top-level and nested) —
+  // the exact actions, labels and order of the original portaled menu:
+  // Pin, Lock, then the conditional separator + Reset all. Radix renders
+  // <ContextMenuContent> in a portal on <body>, so it stays unclipped by the
+  // rail's overflow/scroll (and by the glass preset's backdrop-filter).
+  // Dismissal (outside click / Escape) and close-on-select come from Radix.
+  const navMenuContent = (id, label) => (
+    <>
+      <ContextMenuLabel>{label}</ContextMenuLabel>
+      <ContextMenuGroup>
+        <ContextMenuItem onSelect={() => toggle('navPinned', id)}>
+          {pinned.includes(id) ? <PinOff size={14} /> : <Pin size={14} />}
+          {pinned.includes(id) ? 'Unpin from top' : 'Pin to top'}
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => toggle('navLocked', id)}>
+          {locked.includes(id) ? <Unlock size={14} /> : <Lock size={14} />}
+          {locked.includes(id) ? 'Unlock position' : 'Lock position'}
+        </ContextMenuItem>
+      </ContextMenuGroup>
+      {(pinned.length > 0 || prefs.navOrder) && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuGroup>
+            <ContextMenuItem
+              onSelect={() => {
+                set('navOrder', null); set('navPinned', []); set('navLocked', []); set('navExpanded', [])
+              }}
+            >
+              <span style={{ width: 14 }} />
+              Reset all
+            </ContextMenuItem>
+          </ContextMenuGroup>
+        </>
+      )}
+    </>
+  )
 
   return (
-    <aside style={{
-      ...S.rail,
-      width: mini ? prefs.railMini : prefs.railWidth,
-      padding: `14px ${prefs.railPad}px`,
-      /* Same surface as the header (Topbar) so rail + header read as ONE
-         connected piece. When the rail is flush (no inset) the top-right
-         corner is squared — it butts against the header's top-left corner,
-         so the top edge runs as one continuous line. */
-      background: 'var(--surface)',
-      borderRadius: prefs.railInset
-        ? prefs.railSharp
-        : `${prefs.railSharp}px 0 ${prefs.railSharp}px ${prefs.railSharp}px`,
-      margin: prefs.railInset,
-      marginRight: prefs.railInset ? prefs.railInset : 0,
-    }}>
+    <ShadSidebar
+      variant="floating"
+      collapsible="icon"
+      style={{
+        /* Same surface as the header (Topbar) so rail + header read as ONE
+           connected piece. When the rail is flush (no inset) the top-right
+           corner is squared — it butts against the header's top-left corner,
+           so the top edge runs as one continuous line. */
+        background: 'var(--surface)',
+        margin: prefs.railInset,
+        marginRight: prefs.railInset ? prefs.railInset : 0,
+      }}
+    >
       {prefs.railBrand && (
-        <div style={{ ...S.brand, justifyContent: mini ? 'center' : 'flex-start' }}>
-          <span style={S.mark}><Logo size={20} /></span>
-          {!mini && <span style={S.brandText}>HPOS</span>}
-        </div>
+        <SidebarHeader style={{ padding: '14px 0 0' }}>
+          <div style={S.brand} className="group-data-[collapsible=icon]:justify-center">
+            <span style={S.mark}><Logo size={20} /></span>
+            <span style={S.brandText} className="group-data-[collapsible=icon]:hidden">HPOS</span>
+          </div>
+        </SidebarHeader>
       )}
 
-      <nav style={{ ...S.nav, gap: prefs.railGap }}>
-        {items.map((item, i) => {
-          const { id, label, Icon, dot, children } = item
-          const isParent = !!children
-          const isOpen = expanded.includes(id)
-          // Section headers themselves are never "active" — they only highlight
-          // when one of their children is the active page.
-          const on = isParent ? false : active === id
-          const dragging = dragId === id
-          const marker = overId === id && dragId && dragId !== id
-          const pin = pinned.includes(id)
-          const lock = locked.includes(id)
-          const lastPinned = pin && !pinned.includes(items[i + 1]?.id)
-          const hasActiveChild = isParent && children.some((c) => c.id === active)
+      <SidebarContent style={{ padding: `0 ${prefs.railPad}px` }} className="px-0 pb-0">
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {items.map((item, i) => {
+                const { id, label, Icon, dot, children } = item
+                const isParent = !!children
+                const isOpen = expanded.includes(id)
+                // Section headers themselves are never "active" — they only
+                // highlight when one of their children is the active page.
+                const on = isParent ? false : active === id
+                const dragging = dragId === id
+                const marker = overId === id && dragId && dragId !== id
+                const pin = pinned.includes(id)
+                const lock = locked.includes(id)
+                const lastPinned = pin && !pinned.includes(items[i + 1]?.id)
+                const hasActiveChild = isParent && children.some((c) => c.id === active)
 
-          return (
-            <div key={id} style={S.slot}>
-              {marker && edge === 'above' && <span style={{ ...S.marker, top: -2 }} />}
+                return (
+                  <Fragment key={id}>
+                    <SidebarMenuItem>
+                      {marker && edge === 'above' && <span style={{ ...S.marker, top: -2 }} />}
 
-              <button
-                draggable={!lock && !mini}
-                onDragStart={(e) => {
-                  dragRef.current = id
-                  setDragId(id)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                onDragOver={(e) => {
-                  if (lock) return
-                  e.preventDefault()
-                  const r = e.currentTarget.getBoundingClientRect()
-                  setOverId(id)
-                  setEdge(e.clientY > r.top + r.height / 2 ? 'below' : 'above')
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  commit(dragRef.current, id, edge === 'below')
-                  reset()
-                }}
-                onDragEnd={reset}
-                onClick={() => {
-                  if (isParent) {
-                    if (mini) {
-                      // Collapsed (icon-only) mode: click on AI tools icon
-                      // auto-expands the sidebar AND opens the section.
-                      autoExpandedRef.current = true
-                      set('sidebar', 'expanded')
-                      // Make sure the parent's children are visible.
-                      const list = prefs.navExpanded || []
-                      if (!list.includes(id)) {
-                        set('navExpanded', [...list, id])
-                      }
-                    } else {
-                      // Expanded mode: normal toggle of the section chevron.
-                      toggleExpanded(id)
-                    }
-                  } else {
-                    onChange(id)
-                  }
-                }}
-                onContextMenu={(e) => openMenu(e, id)}
-                title={mini ? label : undefined}
-                aria-label={label}
-                style={(() => {
-                  const baseBg = (on || hasActiveChild) ? 'var(--rail-hover)' : 'transparent'
-                  const baseColor = (on || hasActiveChild) ? 'var(--rail-fg-on)' : 'var(--rail-fg)'
-                  return {
-                    ...S.item,
-                    height: prefs.railItemH,
-                    borderRadius: prefs.railRadius,
-                    justifyContent: mini ? 'center' : 'flex-start',
-                    padding: mini ? 0 : '0 8px 0 11px',
-                    background: baseBg,
-                    color: baseColor,
-                    border: '1px solid transparent',
-                    boxShadow: 'none',
-                    opacity: dragging ? 0.35 : 1,
-                    cursor: 'pointer',
-                    transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), border-color var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing)',
-                  }
-                })()}
-              >
-                <span style={S.iconBox}>
-                  <Icon size={prefs.railIcon} />
-                  {dot && prefs.railDots && <span style={S.dot} />}
-                </span>
+                      <ContextMenu>
+                        <ContextMenuTrigger asChild>
+                          <SidebarMenuButton
+                            isActive={on || hasActiveChild}
+                            draggable={!lock && !mini}
+                            onDragStart={(e) => {
+                              dragRef.current = id
+                              setDragId(id)
+                              e.dataTransfer.effectAllowed = 'move'
+                            }}
+                            onDragOver={(e) => {
+                              if (lock) return
+                              e.preventDefault()
+                              const r = e.currentTarget.getBoundingClientRect()
+                              setOverId(id)
+                              setEdge(e.clientY > r.top + r.height / 2 ? 'below' : 'above')
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              commit(dragRef.current, id, edge === 'below')
+                              reset()
+                            }}
+                            onDragEnd={reset}
+                            onClick={() => {
+                              if (isParent) {
+                                if (mini) {
+                                  // Collapsed (icon-only) mode: click on AI tools icon
+                                  // auto-expands the sidebar AND opens the section.
+                                  autoExpandedRef.current = true
+                                  set('sidebar', 'expanded')
+                                  // Make sure the parent's children are visible.
+                                  const list = prefs.navExpanded || []
+                                  if (!list.includes(id)) {
+                                    set('navExpanded', [...list, id])
+                                  }
+                                } else {
+                                  // Expanded mode: normal toggle of the section chevron.
+                                  toggleExpanded(id)
+                                }
+                              } else {
+                                onChange(id)
+                              }
+                            }}
+                            title={mini ? label : undefined}
+                            aria-label={label}
+                            style={dragging ? { opacity: 0.35 } : undefined}
+                          >
+                            <span style={S.iconBox}>
+                              <Icon size={prefs.railIcon} />
+                              {dot && prefs.railDots && <span style={S.dot} />}
+                            </span>
 
-                {!mini && (
-                  <>
-                    <span style={S.label}>{label}</span>
-                    {id === 'assistant' && <span style={S.aiBadge}>AI</span>}
-                    <span style={S.badges}>
-                      {pin && <Pin size={11} />}
-                      {lock && <Lock size={11} />}
-                    </span>
-                    {isParent ? (
-                      <>
-                        {!lock && (
-                          <span className="rail-grip" style={S.grip}><Grip size={13} /></span>
-                        )}
-                        <span style={{
-                          ...S.chev,
-                          transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                          transition: 'transform .18s',
-                          opacity: 0.7,
-                          marginLeft: -4,
-                        }}>
-                          <Chevron size={14} dir="right" />
-                        </span>
-                      </>
-                    ) : !lock ? (
-                      <span className="rail-grip" style={S.grip}><Grip size={13} /></span>
-                    ) : null}
-                  </>
-                )}
-              </button>
+                            <span style={S.label} className="group-data-[collapsible=icon]:hidden">{label}</span>
+                            <span style={S.badges} className="group-data-[collapsible=icon]:hidden">
+                              {pin && <Pin size={11} />}
+                              {lock && <Lock size={11} />}
+                            </span>
+                            {isParent ? (
+                              <>
+                                {!lock && (
+                                  <span className="rail-grip group-data-[collapsible=icon]:hidden" style={S.grip}><Grip size={13} /></span>
+                                )}
+                                <span
+                                  className="group-data-[collapsible=icon]:hidden"
+                                  style={{
+                                    ...S.chev,
+                                    transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                                    transition: 'transform .18s',
+                                    opacity: 0.7,
+                                    marginLeft: -4,
+                                  }}
+                                >
+                                  <Chevron size={14} dir="right" />
+                                </span>
+                              </>
+                            ) : !lock ? (
+                              <span className="rail-grip" style={S.grip}><Grip size={13} /></span>
+                            ) : null}
+                          </SidebarMenuButton>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent sideOffset={2}>
+                          {navMenuContent(id, label)}
+                        </ContextMenuContent>
+                      </ContextMenu>
 
-              {/* Nested children */}
-              {!mini && isParent && isOpen && (
-                <div style={S.subList} className="sublist-in">
-                  {children.map((child) => {
-                    const childOn = active === child.id
-                    const openChat = () => {
-                      onChange(child.id)
-                      if (autoExpandedRef.current) {
-                        autoExpandedRef.current = false
-                        setTimeout(() => set('sidebar', 'icons'), 150)
-                      }
-                    }
-                    return (
-                      <div key={child.id}>
-                        <button
-                          onClick={openChat}
-                          onContextMenu={(e) => openMenu(e, child.id)}
-                          title={child.label}
-                          style={{
-                            ...S.item,
-                            ...S.subItem,
-                            height: prefs.railItemH - 4,
-                            borderRadius: prefs.railRadius - 2,
-                            padding: '0 8px 0 0',
-                            background: childOn ? 'var(--rail-hover)' : 'transparent',
-                            color: childOn ? 'var(--rail-fg-on)' : 'var(--rail-fg)',
-                            opacity: 0.9,
-                          }}
-                        >
-                          <span style={S.bullet}>•</span>
-                          <span style={{
-                            ...S.iconBox,
-                            width: 16, height: 16,
-                            marginLeft: 4,
-                            opacity: 0.75,
-                          }}>
-                            <child.Icon size={14} />
-                          </span>
-                          <span style={{ ...S.label, fontSize: prefs.railFont - 0.5, fontWeight: 500 }}>
-                            {child.label}
-                          </span>
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+                      {/* Nested children */}
+                      {isParent && isOpen && (
+                        <SidebarMenuSub className="sublist-in">
+                          {children.map((child) => {
+                            const childOn = active === child.id
+                            const openChat = () => {
+                              onChange(child.id)
+                              if (autoExpandedRef.current) {
+                                autoExpandedRef.current = false
+                                setTimeout(() => set('sidebar', 'icons'), 150)
+                              }
+                            }
+                            return (
+                              <SidebarMenuSubItem key={child.id}>
+                                <ContextMenu>
+                                  <ContextMenuTrigger asChild>
+                                    <SidebarMenuSubButton
+                                      render="button"
+                                      isActive={childOn}
+                                      onClick={openChat}
+                                      title={child.label}
+                                      className="h-[calc(var(--rail-item-h,36px)_-_4px)] cursor-pointer"
+                                    >
+                                      <span style={S.bullet}>•</span>
+                                      <span style={{
+                                        ...S.iconBox,
+                                        width: 16, height: 16,
+                                        marginLeft: 4,
+                                        opacity: 0.75,
+                                      }}>
+                                        <child.Icon size={14} />
+                                      </span>
+                                      <span style={{
+                                        fontSize: 'var(--rail-font)',
+                                        fontWeight: 500,
+                                      }}>
+                                        {child.label}
+                                      </span>
+                                    </SidebarMenuSubButton>
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent sideOffset={2}>
+                                    {navMenuContent(child.id, child.label)}
+                                  </ContextMenuContent>
+                                </ContextMenu>
+                              </SidebarMenuSubItem>
+                            )
+                          })}
+                        </SidebarMenuSub>
+                      )}
 
-              {marker && edge === 'below' && <span style={{ ...S.marker, bottom: -2 }} />}
-              {!mini && lastPinned && <span style={S.pinDivider} />}
-            </div>
-          )
-        })}
-      </nav>
+                      {marker && edge === 'below' && <span style={{ ...S.marker, bottom: -2 }} />}
+                    </SidebarMenuItem>
+                    {/* Sibling <li> (not nested in the item's own <li>) so the
+                        divider is valid HTML and gets the ul's gap spacing. */}
+                    {lastPinned && (
+                      <li style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                        <span style={S.pinDivider} />
+                      </li>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
 
       {/* Footer holds rail chrome only. Settings is a header destination —
           the Topbar gear button owns it (no rail Settings entry point). */}
-      <div style={S.foot}>
-        <button
-          onClick={() => set('sidebar', mini ? 'expanded' : 'icons')}
-          title={mini ? 'Expand sidebar' : 'Collapse sidebar'}
-          style={{
-            ...S.item,
-            height: prefs.railItemH,
-            borderRadius: prefs.railRadius,
-            justifyContent: mini ? 'center' : 'flex-start',
-            padding: mini ? 0 : '0 11px',
-            color: 'var(--rail-fg)',
-          }}
-        >
-          <span style={S.iconBox}><Chevrons size={prefs.railIcon - 1} dir={mini ? 'right' : 'left'} /></span>
-          {!mini && <span style={S.label}>Collapse</span>}
-        </button>
-      </div>
+      <SidebarFooter style={{ padding: '8px 0 14px' }} className="px-0">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={toggleSidebar}
+              title={mini ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={mini ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <span style={S.iconBox}>
+                <Chevrons size={prefs.railIcon - 1} dir={mini ? 'right' : 'left'} />
+              </span>
+              <span style={S.label} className="group-data-[collapsible=icon]:hidden">Collapse</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
 
-      {/* ------------------------------------------------------ CONTEXT MENU
-          Portaled to <body>: the rail is a scroll container, and a fixed
-          element must live outside it (viewport coordinates, no clipping,
-          not dragged along with rail scroll). Coordinates are clamped so
-          the menu never overflows the window edge. */}
-      {menu && typeof document !== 'undefined' && createPortal(
-        <div
-          className="float-layer"
-          style={{
-            ...S.menu,
-            left: Math.max(4, Math.min(menu.x + 2, (window.innerWidth || 1280) - 200)),
-            top: Math.max(4, Math.min(menu.y + 2, (window.innerHeight || 800) - 190)),
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <span style={S.menuHead}>{menuItem?.label}</span>
-
-          <button
-            className="ctx-item"
-            style={S.menuBtn}
-            onClick={() => { toggle('navPinned', menu.id); setMenu(null) }}
-          >
-            {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-            <span>{isPinned ? 'Unpin from top' : 'Pin to top'}</span>
-          </button>
-
-          <button
-            className="ctx-item"
-            style={S.menuBtn}
-            onClick={() => { toggle('navLocked', menu.id); setMenu(null) }}
-          >
-            {isLocked ? <Unlock size={14} /> : <Lock size={14} />}
-            <span>{isLocked ? 'Unlock position' : 'Lock position'}</span>
-          </button>
-
-          {(pinned.length > 0 || prefs.navOrder) && (
-            <>
-              <span style={S.menuSep} />
-              <button
-                className="ctx-item"
-                style={S.menuBtn}
-                onClick={() => {
-                  set('navOrder', null); set('navPinned', []); set('navLocked', []); set('navExpanded', [])
-                  setMenu(null)
-                }}
-              >
-                <span style={{ width: 14 }} />
-                <span>Reset all</span>
-              </button>
-            </>
-          )}
-        </div>,
-        document.body
-      )}
-    </aside>
+      {/* Edge strip: click to toggle, 2px line on hover (shadcn rail). */}
+      <SidebarRail />
+    </ShadSidebar>
   )
 }
 
 const S = {
-  rail: {
-    position: 'relative', flexShrink: 0, overflowX: 'hidden', overflowY: 'auto',
-    /* background is set inline: var(--surface) — the SAME surface as the
-       header (Topbar), so rail + header connect as one piece. */
-    /* Glass blur is applied by index.css, scoped to the glass preset. Do NOT
-       set backdrop-filter inline here: any non-none value makes this <aside>
-       the containing block for position:fixed descendants (the context
-       menu), which then resolves its viewport coordinates against the rail
-       and gets clipped by the rail's overflow — the menu rendered as a cut
-       strip at the rail edge. */
-    display: 'flex', flexDirection: 'column',
-    transition: 'width .22s cubic-bezier(.4,0,.2,1), background .22s,\n                 border-radius .18s, margin .18s',
-  },
   brand: {
     display: 'flex', alignItems: 'center', gap: 10,
     height: 40, padding: '0 6px', marginBottom: 18, flexShrink: 0,
@@ -436,30 +409,15 @@ const S = {
     color: 'var(--rail-fg-on)', whiteSpace: 'nowrap',
   },
 
-  nav: { display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
-  slot: { position: 'relative' },
-  marker: {
-    position: 'absolute', left: 4, right: 4, height: 2,
-    borderRadius: 99, background: 'var(--accent)', pointerEvents: 'none',
-  },
-  pinDivider: {
-    display: 'block', height: 1, margin: '6px 6px 3px',
-    background: 'var(--rail-line)',
-  },
-  item: {
-    position: 'relative', width: '100%',
-    display: 'flex', alignItems: 'center', gap: 11,
-    transition: 'background var(--motion-duration) var(--motion-easing), color var(--motion-duration) var(--motion-easing), opacity var(--motion-duration) var(--motion-easing), transform var(--motion-duration) var(--motion-easing), box-shadow var(--motion-duration) var(--motion-easing)',
-    border: 'none', background: 'transparent',
-    cursor: 'pointer',
-  },
   iconBox: {
     position: 'relative',
-    width: 'var(--rail-icon-box, 20px)', height: 'var(--rail-icon-box, 20px)',
+    width: 'var(--rail-icon-box, 16px)', height: 'var(--rail-icon-box, 16px)',
     display: 'grid', placeItems: 'center', flexShrink: 0,
   },
   label: {
-    fontSize: 'var(--rail-font)', fontWeight: 600, whiteSpace: 'nowrap',
+    /* 500 = shadcn's font-medium menu label (inline weight, so it wins over
+       the button class). */
+    fontSize: 'var(--rail-font)', fontWeight: 500, whiteSpace: 'nowrap',
     letterSpacing: '-.1px', flex: 1, textAlign: 'left',
     overflow: 'hidden', textOverflow: 'ellipsis',
   },
@@ -480,14 +438,13 @@ const S = {
     position: 'absolute', top: -2, right: -3,
     width: 6, height: 6, borderRadius: '50%', background: 'var(--warning)',
   },
-
-  subList: {
-    display: 'flex', flexDirection: 'column', gap: 2,
-    paddingLeft: 14,
-    marginTop: 1, marginBottom: 3,
+  marker: {
+    position: 'absolute', left: 4, right: 4, height: 2,
+    borderRadius: 99, background: 'var(--accent)', pointerEvents: 'none',
   },
-  subItem: {
-    opacity: 0.85,
+  pinDivider: {
+    display: 'block', height: 1, margin: '6px 6px 3px',
+    background: 'var(--rail-line)',
   },
   bullet: {
     width: 14, textAlign: 'center',
@@ -496,37 +453,4 @@ const S = {
     opacity: 0.5,
     flexShrink: 0,
   },
-
-  aiBadge: {
-    fontSize: 9, fontWeight: 800, letterSpacing: '.5px',
-    padding: '2px 5px', borderRadius: 4,
-    background: 'var(--accent)', color: 'var(--accent-fg)',
-    lineHeight: 1, flexShrink: 0, marginLeft: -4,
-  },
-  foot: { display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, marginTop: 8 },
-
-  menu: {
-    position: 'fixed', zIndex: 90, minWidth: 186,
-    padding: 5,
-    /* floats over page text — near-opaque, see .float-layer */
-    background: 'var(--surface-float, var(--surface))',
-    border: '1px solid var(--line)',
-    borderRadius: 7,
-    boxShadow: '0 12px 34px -10px rgba(0,0,0,.42)',
-    display: 'flex', flexDirection: 'column', gap: 1,
-  },
-  menuHead: {
-    padding: '6px 10px 7px', fontSize: 10.5, fontWeight: 800,
-    letterSpacing: '.4px', color: 'var(--muted)',
-    textTransform: 'uppercase',
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  },
-  menuBtn: {
-    display: 'flex', alignItems: 'center', gap: 10,
-    height: 32, padding: '0 10px', borderRadius: 5,
-    fontSize: 12.5, fontWeight: 500, color: 'var(--text)',
-    background: 'transparent', textAlign: 'left',
-    border: 'none', cursor: 'pointer',
-  },
-  menuSep: { height: 1, background: 'var(--line)', margin: '4px 6px' },
 }
