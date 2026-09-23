@@ -69,6 +69,27 @@
   --motion-scale: 1;
 }
 
+/* shadcn sidebar tokens (components/ui/sidebar.tsx). Kept in their own
+   :root block on purpose — the block above is asserted to stay in sync with
+   LIGHT_TOKENS (tokens.test.mjs). Colours map onto HPOS theme vars so the
+   existing Sidebar settings + preset palettes keep full control; widths
+   follow the live --rail-w / --rail-mini values ThemeContext paints from
+   prefs.railWidth / prefs.railMini. */
+:root {
+  --sidebar-background: var(--surface);
+  --sidebar-foreground: var(--rail-fg);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--accent-fg);
+  --sidebar-accent: var(--rail-hover);
+  --sidebar-accent-foreground: var(--rail-fg-on);
+  --sidebar-border: var(--rail-line);
+  --sidebar-ring: var(--ring);
+  --sidebar-width: var(--rail-w, 256px);
+  --sidebar-width-icon: var(--rail-mini, 48px);
+  --sidebar-width-mobile: var(--rail-w, 256px);
+  --sidebar-sharp: var(--rail-sharp, 0px);
+}
+
 * { box-sizing: border-box; }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -795,6 +816,13 @@ input:focus, textarea:focus, select:focus {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px) scale(.97); }
   to   { opacity: 1; transform: none; }
+}
+
+/* shadcn toast (Base UI) — corner radius from the nova style (rounded-2xl).
+   Entrance/exit motion is handled by Base UI's data-starting/ending-style
+   transforms, so no extra animation here. */
+.cn-toast {
+  border-radius: 16px;
 }
 
 /* Loading states — shimmer + pulse */
