@@ -12,6 +12,7 @@ const {
   describeUpdateMechanism,
   createLinuxPackageBackend,
 } = require('./linuxUpdate')
+const { createArenaBridge } = require('./arena')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -72,6 +73,25 @@ const runtimeManager = createRuntimeManager({
   appPath: app.getAppPath(),
   resourcesPath: process.resourcesPath,
 })
+
+/* ------------------------------------------------- Arena bridge (Phase 1)
+   Owns the LM Arena Playwright session: headless Chromium, storageState
+   persistence and the read-only health check. Phase 1 is lifecycle-only —
+   nothing starts a browser on app launch, and no IPC/UI exposes it yet.
+
+   Chromium is launched by Playwright as a child of this process, so the
+   bridge installs process guards (exit / SIGINT / SIGTERM / SIGHUP) that
+   close or kill it. Together with the before-quit stop below this is what
+   guarantees no Chromium is left running after HPOS exits — including on a
+   crash path where the graceful close never completes.
+
+   The Arena feature itself (chat, search, code, downloads) is not
+   implemented yet; see HPOS-Desktop/arena/README.md. */
+const arenaBridge = createArenaBridge({
+  env: process.env,
+  logLevel: process.env.HPOS_ARENA_LOG_LEVEL || 'info',
+})
+arenaBridge.installProcessGuards()
 
 function getDefaultPackagedWorkspacePath() {
   try {
@@ -1141,18 +1161,25 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-// Never leave terminal sessions or the runtime bound after the app goes away.
+// Never leave terminal sessions, the runtime or the Arena browser bound after
+// the app goes away.
 // Runtime shutdown: graceful SIGTERM first, bounded fallback SIGKILL, Windows safe,
 // only kills owned child, not unrelated processes.
+// Arena shutdown: persist the session, close the context, close the browser and
+// SIGKILL the Chromium process if the graceful close hangs — no orphan browser.
 let runtimeShuttingDown = false
 app.on('before-quit', async (event) => {
   const rtStatus = runtimeManager.getStatus()
-  if (rtStatus.running && rtStatus.owned && !runtimeShuttingDown) {
+  const arenaStatus = arenaBridge.getStatus()
+  const needsAsyncShutdown =
+    (rtStatus.running && rtStatus.owned) || arenaStatus.running
+  if (needsAsyncShutdown && !runtimeShuttingDown) {
     runtimeShuttingDown = true
     event.preventDefault()
     try {
       terminalManager.disposeAll()
       devLauncher.dispose()
+      await arenaBridge.stop()
       await runtimeManager.stop()
     } catch {
       // best effort
@@ -1164,4 +1191,7 @@ app.on('before-quit', async (event) => {
   }
   terminalManager.disposeAll()
   devLauncher.dispose()
+  // Synchronous path (nothing async left to await): the process guards still
+  // kill any Chromium that survived, so nothing outlives the app.
+  arenaBridge.stop().catch(() => { /* best effort */ })
 })

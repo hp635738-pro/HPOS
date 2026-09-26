@@ -183,6 +183,15 @@ const arenaHtml = readFileSync(join(desktopDir, '..', 'src', 'pages', 'CodeArena
   console.log('ok: app shutdown cleans up child processes')
 }
 
+// 8b. Arena bridge (headless Chromium) must never outlive the app
+{
+  assert.ok(mainSrc.includes("require('./arena')"), 'main.js must load the Arena bridge module')
+  assert.ok(mainSrc.includes('installProcessGuards()'), 'the Arena bridge must install exit/signal guards')
+  assert.ok(mainSrc.includes('arenaBridge.stop()'), 'before-quit must stop the Arena browser session')
+  assert.ok(mainSrc.includes('arenaStatus.running'), 'the async shutdown path must consider the Arena session')
+  console.log('ok: Arena Chromium is stopped on quit and guarded against orphans')
+}
+
 // 9. No orphan processes (dispose kills child)
 {
   assert.ok(devLaunchSrc.includes('removeAllListeners'), 'dispose must remove listeners to prevent leaks')

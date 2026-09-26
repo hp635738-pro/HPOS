@@ -194,6 +194,11 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        env:
+          # Chromium for the Arena bridge (HPOS-Desktop/arena) is a
+          # developer step (`npx playwright install chromium`), never a
+          # release-build input — keep the release jobs from downloading it.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
       - name: Build the Linux targets without publishing (--publish never)
         run: npm run dist:linux
@@ -255,6 +260,11 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        env:
+          # Chromium for the Arena bridge (HPOS-Desktop/arena) is a
+          # developer step (`npx playwright install chromium`), never a
+          # release-build input — keep the release jobs from downloading it.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
 
       - name: Publish Linux (AppImage + deb + latest-linux.yml)
@@ -314,6 +324,11 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        env:
+          # Chromium for the Arena bridge (HPOS-Desktop/arena) is a
+          # developer step (`npx playwright install chromium`), never a
+          # release-build input — keep the release jobs from downloading it.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci
 
       - name: Publish Windows (NSIS + latest.yml)

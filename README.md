@@ -419,9 +419,31 @@ is no arbitrary task, browser, command or shell UI.
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
 
+### LM Arena bridge (Phase 1 — lifecycle only)
+
+`HPOS-Desktop/arena/` is the dedicated module for all Arena automation. Phase 1
+ships the Playwright bridge: **headless** Chromium launcher, Playwright
+`storageState` session persistence and a read-only health check that verifies
+the page with role/text selectors (never CSS classes).
+
+```bash
+cd HPOS-Desktop
+npm install                       # adds Playwright (the browser automation dependency)
+npx playwright install chromium   # the browser Chromium launches from
+```
+
+If Arena answers with sign-in, a CAPTCHA or a "verify you are human" check, the
+bridge **stops** and reports `verification_required` — HPOS does not bypass
+verification in any form. `installProcessGuards()` plus the `before-quit` stop
+in `main.js` guarantee no Chromium outlives the app.
+
+Chat, Search, Code generation, downloads and UI are deliberately not
+implemented yet. Details: `HPOS-Desktop/arena/README.md`.
+
 ```bash
 npm test        # packaging/path + runtime-bridge (protocol, connection, events,
-                # activity), proxy and theme checks (root)
+                # activity), Arena bridge (lifecycle + health states),
+                # proxy and theme checks (root)
                 # + `cd runtime && npm test` (runtime daemon suites)
 ```
 
