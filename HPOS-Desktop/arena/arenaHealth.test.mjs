@@ -454,8 +454,9 @@ function verificationProbesOf(page) {
     }
   }
 
-  /* The health check must be observation-only — no interaction with the
-     page under test, and no challenge solving anywhere in the module. */
+  /* The HEALTH CHECK must be observation-only. chat.js legitimately types
+     and clicks (that is what Direct Chat is), so it is excluded here and
+     covered by its own policy assertions instead. */
   const interaction = /\.\s*(click|dblclick|fill|type|press|check|uncheck|selectOption|setInputFiles)\s*\(/
   const evasion = /\b(2captcha|anticaptcha|nopecha|hcaptcha-solver|solveCaptcha|solve_captcha|recaptcha-token)\b/i
   for (const file of ['config.js', 'errors.js', 'healthCheck.js', 'arenaBridge.js', 'index.js']) {
@@ -463,7 +464,26 @@ function verificationProbesOf(page) {
     assert.equal(interaction.test(source), false, `${file} must never interact with the page`)
     assert.equal(evasion.test(source), false, `${file} must never solve a challenge`)
   }
-  console.log('ok: launch options are headless and evasion-free; the check is observation-only')
+
+  /* Direct Chat may interact, but still never solves a challenge and never
+     retries a send — both are hard rules for this phase. */
+  const chatSource = readFileSync(join(arenaDir, 'chat.js'), 'utf8')
+  assert.equal(evasion.test(chatSource), false, 'chat.js must never solve a challenge')
+  /* Comments legitimately describe the "no retries" rule, so scan code only. */
+  const chatCode = chatSource
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  assert.equal(
+    /\b(retry|retries|retryCount|resend|sendAgain|submitOnceAgain)\b/i.test(chatCode),
+    false,
+    'chat.js must not retry a send (no automatic retries in this phase)',
+  )
+  assert.equal(
+    (chatCode.match(/\.click\s*\(/g) || []).length,
+    1,
+    'a turn must submit exactly once — one click, never a second attempt',
+  )
+  console.log('ok: launch options are headless and evasion-free; the health check is observation-only')
 }
 
 console.log('arena health-check tests: all passed')

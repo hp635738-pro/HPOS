@@ -12,7 +12,7 @@ const {
   describeUpdateMechanism,
   createLinuxPackageBackend,
 } = require('./linuxUpdate')
-const { createArenaBridge } = require('./arena')
+const { createArenaBridge, createArenaChat } = require('./arena')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -1155,6 +1155,72 @@ app.whenReady().then(async () => {
       loadContent(w)
     }
   })
+})
+
+/* ------------------------------------------- Arena Direct Chat (Phase 2)
+   One IPC surface for the Chats section. The renderer sends a plain prompt
+   string and receives structured results; every selector, URL, timeout and
+   browser decision stays here in the main process.
+
+     · chatSend    send one prompt, stream events on the event channel
+     · status      read-only session snapshot for the UI
+
+   One turn at a time (chat.js refuses a concurrent send with `busy`), no
+   retries anywhere, and verification is fatal for the turn: it stops the
+   session and reports `verification_required` for the UI to surface. */
+const CHANNEL_ARENA_CHAT_SEND = 'hpos:arena:chat:send'
+const CHANNEL_ARENA_CHAT_EVENT = 'hpos:arena:chat:event'
+const CHANNEL_ARENA_STATUS = 'hpos:arena:status'
+
+const arenaChat = createArenaChat({
+  bridge: arenaBridge,
+  logger: (line) => {
+    if ((process.env.HPOS_ARENA_LOG_LEVEL || 'info') !== 'silent') {
+      // eslint-disable-next-line no-console
+      console.log(line)
+    }
+  },
+})
+
+function broadcastArenaChatEvent(payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (win.isDestroyed()) continue
+      const wc = win.webContents
+      if (!wc || wc.isDestroyed()) continue
+      wc.send(CHANNEL_ARENA_CHAT_EVENT, payload)
+    } catch {
+      // Window destroyed between checks — skip.
+    }
+  }
+}
+
+ipcMain.handle(CHANNEL_ARENA_CHAT_SEND, async (event, request) => {
+  if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+  const prompt = request && typeof request.prompt === 'string' ? request.prompt : ''
+  const conversationId = request && typeof request.conversationId === 'string'
+    ? request.conversationId.slice(0, 120)
+    : null
+  /* Model/mode are echoed for the bubble label only — Search and Code are
+     not implemented, so anything other than the default text mode is
+     refused here rather than silently ignored. */
+  const mode = request && typeof request.mode === 'string' ? request.mode : 'text'
+  if (mode !== 'text') {
+    return fail('EUNSUPPORTED', 'Only Direct Chat (text) is available in this phase')
+  }
+  const result = await arenaChat.send({
+    prompt,
+    conversationId,
+    onEvent: broadcastArenaChatEvent,
+  })
+  /* The renderer also gets the outcome on the invoke() reply so a caller
+     that misses the streamed events still knows how the turn ended. */
+  return { ...result, conversationId }
+})
+
+ipcMain.handle(CHANNEL_ARENA_STATUS, (event) => {
+  if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+  return { ok: true, ...arenaBridge.getStatus(), busy: arenaChat.isBusy() }
 })
 
 app.on('window-all-closed', () => {

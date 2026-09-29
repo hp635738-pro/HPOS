@@ -102,6 +102,84 @@ export default function Chats() {
     setPending(false)
   }
 
+  /**
+   * Direct Chat (Phase 2): one Arena turn, streamed into the conversation.
+   *
+   * The UI is unchanged — the reply is written into the same assistant
+   * bubble, which is created on the first update and rewritten as the answer
+   * grows. `pending` stays true for the whole turn, so the ThinkingOrb keeps
+   * showing until the answer is final or an error lands.
+   *
+   * Only text mode is routed to Arena: Search and Code are not implemented
+   * yet (the main process refuses them too).
+   */
+  const sendViaArena = (id, prompt, arena) => {
+    let settled = false
+
+    const putAssistant = (text, streaming) => {
+      if (!text) return
+      setStore((s) => ({
+        ...s,
+        convos: s.convos.map((c) => {
+          if (c.id !== id) return c
+          const msgs = [...c.msgs]
+          const last = msgs[msgs.length - 1]
+          if (last && last.role === 'assistant' && last.streaming) {
+            msgs[msgs.length - 1] = { ...last, text, streaming }
+          } else {
+            msgs.push({ role: 'assistant', text, model: 'Arena', streaming })
+          }
+          return { ...c, msgs }
+        }),
+      }))
+    }
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      arena.offChatEvent(onEvent)
+      setPending(false)
+    }
+
+    const onEvent = (ev) => {
+      if (!ev || ev.conversationId !== id) return
+      if (ev.type === 'update') {
+        putAssistant(ev.text || '', true)
+      } else if (ev.type === 'done') {
+        putAssistant(ev.text || '', false)
+        finish()
+      } else if (ev.type === 'error') {
+        putAssistant(ev.message || 'Arena could not complete the request.', false)
+        finish()
+      }
+    }
+
+    arena.onChatEvent(onEvent)
+    arena
+      .chatSend({ prompt, conversationId: id, mode: 'text' })
+      .then((res) => {
+        // The invoke() reply carries the outcome too, so a missed event
+        // still ends the turn cleanly. Errors already reported through the
+        // event stream are not written twice.
+        if (!settled && (!res || !res.ok)) {
+          putAssistant(
+            (res && res.message) || 'Arena could not complete the request.',
+            false,
+          )
+        }
+        finish()
+      })
+      .catch((err) => {
+        if (!settled) {
+          putAssistant(
+            'Arena could not be reached. ' + (err?.message ? String(err.message) : ''),
+            false,
+          )
+        }
+        finish()
+      })
+  }
+
   const handleSend = (message, files, meta) => {
     const fileNote = files && files.length > 0 ? '  ·  📎 ' + files.length + ' file(s)' : ''
     const modelUsed = meta?.model ?? 'Max'
@@ -127,6 +205,21 @@ export default function Chats() {
       }))
     }
     setPending(true)
+
+    /* A live Arena bridge (Electron main process) takes over the turn. When
+       it is absent — plain web dev, unit tests, or Search/Code mode — the
+       original demo reply path is untouched. */
+    const arena = typeof window !== 'undefined' ? window.hpos?.arena : null
+    if (
+      mode === 'text'
+      && arena
+      && typeof arena.chatSend === 'function'
+      && typeof arena.onChatEvent === 'function'
+    ) {
+      sendViaArena(id, message + fileNote, arena)
+      return
+    }
+
     window.setTimeout(() => {
       const reply = DUMMY_REPLIES[replyIdx.current % DUMMY_REPLIES.length]
       replyIdx.current += 1

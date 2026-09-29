@@ -165,6 +165,55 @@ const ARENA_REQUIRED_ELEMENTS = Object.freeze([
   }),
 ])
 
+/* ------------------------------------------------- Direct Chat (Phase 2)
+   Same rule as the health check: semantic locators only, never CSS classes
+   or ids. Each element lists fallbacks so a copy change degrades instead of
+   breaking the turn.
+
+   `response` identifies assistant message containers; the reader takes the
+   LAST one as the current answer and uses the count/last-text pair captured
+   before sending to tell a new answer from the previous turn's text. */
+const ARENA_CHAT_ELEMENTS = Object.freeze({
+  input: Object.freeze([
+    { kind: 'role', role: 'textbox', name: /ask|message|prompt|chat|type/i },
+    { kind: 'placeholder', placeholder: /ask|message|prompt|chat|type/i },
+    { kind: 'label', label: /ask|message|prompt|chat/i },
+    { kind: 'role', role: 'textbox' },
+  ]),
+  send: Object.freeze([
+    { kind: 'role', role: 'button', name: /^send/i },
+    { kind: 'role', role: 'button', name: /send message/i },
+    { kind: 'role', role: 'button', name: /submit/i },
+  ]),
+  /* Visible while the model is generating — how the reader knows a response
+     is still incomplete. */
+  stop: Object.freeze([
+    { kind: 'role', role: 'button', name: /^stop/i },
+    { kind: 'role', role: 'button', name: /stop generating/i },
+    { kind: 'role', role: 'button', name: /generating/i },
+  ]),
+  response: Object.freeze([
+    { kind: 'role', role: 'article' },
+    { kind: 'label', label: /assistant|response|answer/i },
+  ]),
+})
+
+const ARENA_CHAT_TIMINGS = Object.freeze({
+  pollMs: 300,
+  /* A response must stop changing for this long before it counts as final. */
+  stableMs: 1600,
+  /* How long to wait for the first token before diagnosing the page. */
+  firstAnswerMs: 45000,
+  /* Idle-but-not-generating grace period before "no response detected". */
+  missingAnswerMs: 4000,
+  /* Hard ceiling for one turn. */
+  responseDeadlineMs: 180000,
+  fillTimeoutMs: 5000,
+  sendTimeoutMs: 5000,
+  maxPromptChars: 8000,
+  maxResponseChars: 48000,
+})
+
 module.exports = {
   ARENA_ORIGIN,
   ARENA_HOSTNAMES,
@@ -175,4 +224,6 @@ module.exports = {
   ARENA_SIGNAL,
   ARENA_VERIFICATION_SIGNALS,
   ARENA_REQUIRED_ELEMENTS,
+  ARENA_CHAT_ELEMENTS,
+  ARENA_CHAT_TIMINGS,
 }

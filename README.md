@@ -419,12 +419,26 @@ is no arbitrary task, browser, command or shell UI.
 Details: `runtime/README.md` (`/events`, event types, history/reconnect,
 metrics availability, Activity UI non-goals).
 
-### LM Arena bridge (Phase 1 — lifecycle only)
+### Arena bridge (LM Arena)
 
-`HPOS-Desktop/arena/` is the dedicated module for all Arena automation. Phase 1
-ships the Playwright bridge: **headless** Chromium launcher, Playwright
-`storageState` session persistence and a read-only health check that verifies
-the page with role/text selectors (never CSS classes).
+`HPOS-Desktop/arena/` is the dedicated module for all Arena automation. It is
+built on Playwright and is **headless only**; every check uses role/text
+selectors, never CSS class names.
+
+**Phase 1 — lifecycle.** Headless Chromium launcher, `storageState` session
+persistence in the Electron user-data directory, and a read-only health check
+that reports `ready`, `verification_required`, `timeout`, `navigation_failed`,
+`launch_failed`, `playwright_unavailable` and `unsupported_page`.
+
+**Phase 2 — direct Chat.** One prompt in, streamed answer out, through the
+bridge's persistent session:
+
+| | |
+| --- | --- |
+| Messages | `renderer → hpos.arena.chatSend({prompt, conversationId, mode})` |
+| Progress | `hpos:arena:chat:event` — `preparing`, `ready`, `sending`, `streaming`, `update`, `complete`, `done`, `error` |
+| Multi-turn | the same Arena conversation is reused; turn N+1 appends to the thread instead of starting a new one |
+| Errors | `prompt_invalid`, `composer_missing`, `send_failed`, `response_not_detected`, `cancelled`, `timeout`, `verification_required`, `busy`, `browser_unavailable` |
 
 ```bash
 cd HPOS-Desktop
@@ -437,12 +451,14 @@ bridge **stops** and reports `verification_required` — HPOS does not bypass
 verification in any form. `installProcessGuards()` plus the `before-quit` stop
 in `main.js` guarantee no Chromium outlives the app.
 
-Chat, Search, Code generation, downloads and UI are deliberately not
-implemented yet. Details: `HPOS-Desktop/arena/README.md`.
+**Deliberately not implemented:** Search mode, Code mode, automatic retries
+(a failed turn is reported, never resent), downloads, and any redesign of the
+existing Chat UI. Details: `HPOS-Desktop/arena/README.md`.
 
 ```bash
 npm test        # packaging/path + runtime-bridge (protocol, connection, events,
-                # activity), Arena bridge (lifecycle + health states),
+                # activity), Arena bridge (lifecycle, health states, direct chat,
+                # chat UI wiring), chats section smoke,
                 # proxy and theme checks (root)
                 # + `cd runtime && npm test` (runtime daemon suites)
 ```

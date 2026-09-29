@@ -1,10 +1,10 @@
-# HPOS-Desktop/arena — LM Arena Playwright bridge
+# HPOS-Desktop/arena — Arena Playwright bridge
 
-Phase 1 of the Arena integration. **Lifecycle only.**
+Phase 1 (lifecycle) and Phase 2 (direct Chat) of the Arena integration.
 
 This module owns every piece of browser automation HPOS uses for Arena. It
-is required by the Electron main process (`HPOS-Desktop/main.js`) and has no
-renderer/IPC surface yet.
+is required by the Electron main process (`HPOS-Desktop/main.js`), which
+exposes it to the renderer over the `hpos.arena` IPC surface.
 
 ## What is implemented
 
@@ -14,12 +14,14 @@ renderer/IPC surface yet.
 | Health check | `healthCheck.js` | read-only page check returning one frozen state |
 | Session | `arenaBridge.js` | Playwright `storageState` persistence under `~/.hpos/arena` |
 | Lifecycle | `arenaBridge.js` | idempotent `start()` / `stop()`, process guards, `dispose()` |
+| Direct chat | `chat.js` | one prompt → streamed answer, multi-turn over one session |
 | Config | `config.js` | origin, timeouts, launch options, selector descriptors |
 | States | `errors.js` | frozen `ARENA_HEALTH` / `ARENA_ERROR` codes + safe messages |
 
 ## What is deliberately NOT implemented
 
-- Chat, Search, Code generation, downloads, any UI and any IPC channel.
+- Search mode, Code mode, downloads and any redesign of the Chat UI.
+- **Automatic retries.** A failed turn is reported once — never resent.
 - **Anything that bypasses verification.** No CAPTCHA solving, no
   challenge clicking, no stealth patches, no User-Agent spoofing, no
   cookie import from an external source. If Arena asks for sign-in, a
@@ -143,10 +145,84 @@ and reported as `session_state_invalid`. A session that hit verification is
 ## Tests
 
 ```bash
-node HPOS-Desktop/arena/arenaHealth.test.mjs   # every health-check state
-node HPOS-Desktop/arena/arenaBridge.test.mjs   # lifecycle, persistence, guards
+node HPOS-Desktop/arena/arenaHealth.test.mjs          # every health-check state
+node HPOS-Desktop/arena/arenaBridge.test.mjs          # lifecycle, persistence, guards
+node HPOS-Desktop/arena/arenaChat.test.mjs            # direct chat: turns, streaming, errors
+node HPOS-Desktop/arena/arenaDirectChat.ui.test.mjs   # the Chat UI wiring in jsdom
+npm test                                              # all of the above, in the root chain
 ```
 
-Both run against a fake Playwright driver — no browser, no network and no
-Playwright install required, which is why they run in CI where only the
-root `npm ci` happens.
+The three `arena*.test.mjs` files run against a fake Playwright driver — no
+browser, no network and no Playwright install required, which is why they
+run in CI where only the root `npm ci` happens. The UI test renders the real
+`src/App.jsx` in jsdom with `window.hpos.arena` stubbed.
+
+## Phase 2 — direct Chat
+
+`createArenaChat({bridge, timing, elements, readResponses, logger})` returns
+`{send, isBusy, ARENA_CHAT_EVENT, ARENA_CHAT_STATE, ARENA_CHAT_ERROR}`.
+
+```js
+const result = await chat.send({
+  prompt: 'hello',
+  conversationId: 'chat-123',
+  signal,                 // optional AbortSignal
+  onEvent,                // status | update events, each carrying conversationId
+})
+// { ok, state, message, conversationId, text? }
+```
+
+### One turn
+
+1. `bridge.start()` — reuses the live session (this is what makes it
+   multi-turn); a new browser is only launched when none is running.
+2. Resolve the composer with the configured role/text descriptors, abort if
+   the caller already cancelled, then `fill(prompt)`.
+3. Read the current assistant messages as a **baseline**.
+4. Click send **once**, then poll for new text.
+5. Stream: every text change emits an `update`. The answer is complete when
+   text is non-empty, generation has stopped and the text has been stable for
+   `stableMs`. Session state is persisted best-effort, then `complete` and
+   `done` are emitted.
+
+### Events
+
+| Type | State | Payload |
+| --- | --- | --- |
+| `status` | `preparing`, `ready`, `sending`, `streaming`, `complete` | — |
+| `update` | — | `text` (the whole answer so far, not a delta) |
+| `done` | — | `message` (final text) |
+| `error` | any failure state | `message` |
+
+Every event carries the `conversationId`, so a renderer ignores anything from
+another conversation.
+
+### Errors
+
+`prompt_invalid` (empty or >8000 chars), `busy` (a turn is already in flight —
+nothing is queued), `composer_missing`, `send_failed`, `response_not_detected`,
+`cancelled`, plus the reused `verification_required`, `timeout`,
+`unsupported_page`, `browser_unavailable`, `navigation_failed`, `launch_failed`
+and `playwright_unavailable`.
+
+A challenge stops the turn immediately: nothing is typed, nothing is sent,
+the session is stopped and `verification_required` is returned with a message
+telling the user to finish the check themselves.
+
+### IPC surface
+
+| Channel | Direction | Payload |
+| --- | --- | --- |
+| `hpos:arena:chat:send` | renderer → main | `{prompt, conversationId, mode}` → `{...result, conversationId}` |
+| `hpos:arena:chat:event` | main → renderer | `{type, state, text \| message, conversationId}` |
+| `hpos:arena:status` | renderer → main | → `{ok, ...getStatus(), busy}` |
+
+`mode` must be `text`; anything else returns `{ok:false, code:'EUNSUPPORTED'}`.
+
+### Selectors
+
+`ARENA_CHAT_ELEMENTS` in `config.js` holds role/text descriptors for the
+composer, the send control, the stop control and the assistant message
+containers. Every lookup goes through `resolveLocator` in `healthCheck.js`,
+so **CSS class names are never used**. When Arena ships a UI change, update
+the descriptors — no code change is needed.

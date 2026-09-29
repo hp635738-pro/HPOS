@@ -637,10 +637,14 @@ function createArenaBridge(options = {}) {
     getStatus,
     installProcessGuards,
     dispose,
-    /* Test/inspection helpers — no browser state is mutated here. */
+    /* Inspection helpers — no browser state is mutated here. `getPage` is
+       how the Direct Chat executor (chat.js) reuses the live session for
+       multi-turn conversation instead of opening a second one. */
     getStatePath: () => statePath,
     getStateDir: () => stateDir,
     isHeadless: () => headless,
+    getPage: () => page,
+    getContext: () => context,
   }
 }
 

@@ -1,0 +1,242 @@
+/**
+ * Direct Chat UI wiring test — mounts the REAL app (App.jsx through Vite) in
+ * jsdom, stubs the Arena preload surface, and asserts that a streamed Arena
+ * answer lands in the existing Chats bubble.
+ *
+ * This is the counterpart of the module-level suite in arenaChat.test.mjs:
+ * that one proves chat.js, this one proves the Chats section is actually
+ * connected to it, and that the UI is otherwise unchanged.
+ *
+ * jsdom note (same fix as chatsSection.smoke.test.mjs): React 19 checks
+ * `'oninput' in document` at module init, so the DOM globals must exist
+ * before react-dom is imported.
+ */
+import assert from 'node:assert/strict'
+import { JSDOM } from 'jsdom'
+import { createServer } from 'vite'
+
+const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+  url: 'http://localhost:5173/',
+  pretendToBeVisual: true,
+})
+globalThis.window = dom.window
+globalThis.document = dom.window.document
+Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
+for (const k of ['localStorage', 'HTMLElement', 'Element', 'Node', 'CustomEvent']) {
+  globalThis[k] = dom.window[k]
+}
+globalThis.getComputedStyle = dom.window.getComputedStyle
+globalThis.requestAnimationFrame = dom.window.requestAnimationFrame?.bind(dom.window)
+  ?? ((cb) => setTimeout(() => cb(Date.now()), 16))
+globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame?.bind(dom.window)
+  ?? ((id) => clearTimeout(id))
+
+if (!dom.window.Element.prototype.scrollIntoView) {
+  dom.window.Element.prototype.scrollIntoView = () => {}
+}
+class RO {
+  observe() {}
+
+  unobserve() {}
+
+  disconnect() {}
+}
+if (!dom.window.ResizeObserver) dom.window.ResizeObserver = RO
+if (!dom.window.matchMedia) {
+  dom.window.matchMedia = (q) => ({
+    matches: false,
+    media: q,
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() { return false },
+  })
+}
+document.oninput = null
+document.onchange = null
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const until = async (fn, timeout = 4000, step = 50) => {
+  const t0 = Date.now()
+  while (Date.now() - t0 < timeout) {
+    try { if (fn()) return true } catch { /* keep polling */ }
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(step)
+  }
+  return false
+}
+
+/* ------------------------------------------------- stubbed Arena surface --- */
+const arena = { sent: [], listeners: new Set(), finish: null }
+
+dom.window.hpos = {
+  arena: {
+    chatSend(request) {
+      arena.sent.push(request)
+      // Resolve later: events stream first, exactly like the real IPC.
+      arena.finish = { request }
+      return new Promise((resolve) => {
+        arena.resolve = resolve
+      })
+    },
+    onChatEvent(cb) {
+      arena.listeners.add(cb)
+    },
+    offChatEvent(cb) {
+      arena.listeners.delete(cb)
+    },
+    status() {
+      return Promise.resolve({ ok: true, running: true, headless: true, busy: false })
+    },
+  },
+}
+
+function emit(payload) {
+  for (const cb of [...arena.listeners]) cb(payload)
+}
+
+const vite = await createServer({
+  root: new URL('../..', import.meta.url).pathname,
+  configFile: 'vite.config.js',
+  server: { middlewareMode: true, hmr: false },
+  appType: 'custom',
+})
+
+try {
+  const React = (await import('react')).default
+  const { createRoot } = await import('react-dom/client')
+  const { default: App } = await vite.ssrLoadModule('/src/App.jsx')
+  const { ThemeProvider } = await vite.ssrLoadModule('/src/theme/ThemeContext.jsx')
+  const { ToastProvider } = await vite.ssrLoadModule('/src/components/ui/Toast.jsx')
+  const { ModalProvider } = await vite.ssrLoadModule('/src/components/ui/Modal.jsx')
+
+  const tree = React.createElement(ThemeProvider, null,
+    React.createElement(ToastProvider, null,
+      React.createElement(ModalProvider, null, React.createElement(App))))
+
+  const root = createRoot(document.getElementById('root'))
+  root.render(tree)
+  await sleep(150)
+
+  const body = () => document.body.textContent || ''
+
+  // 1. Navigate to Chats.
+  const chatsBtn = [...document.querySelectorAll('button')].find(
+    (b) => b.getAttribute('aria-label') === 'Chats',
+  )
+  assert.ok(chatsBtn, 'Chats rail button exists')
+  chatsBtn.click()
+  await sleep(200)
+  assert.ok(body().includes('How can I help today?'), 'Chats section mounts')
+
+  // 2. Type and submit.
+  const textarea = document.querySelector('textarea')
+  const setVal = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLTextAreaElement.prototype, 'value',
+  ).set
+  setVal.call(textarea, 'Hello Arena')
+  textarea.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  await sleep(80)
+  textarea.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+  }))
+
+  assert.ok(await until(() => body().includes('Hello Arena')), 'user bubble appears')
+  assert.equal(arena.sent.length, 1, 'the send action reached the Arena bridge')
+  assert.equal(arena.sent[0].prompt, 'Hello Arena', 'prompt is forwarded verbatim')
+  assert.equal(arena.sent[0].mode, 'text', 'Direct Chat is text mode only')
+  assert.ok(arena.sent[0].conversationId, 'the conversation id is sent for event routing')
+
+  // 3. Stream an answer: each update must rewrite the same bubble.
+  const id = arena.sent[0].conversationId
+  assert.ok(await until(() => body().includes('Thinking…')), 'pending state shows while streaming')
+
+  emit({ conversationId: id, type: 'update', text: 'Partial' })
+  assert.ok(await until(() => body().includes('Partial')), 'first update streams into the bubble')
+
+  emit({ conversationId: id, type: 'update', text: 'Partial answer' })
+  assert.ok(await until(() => body().includes('Partial answer')), 'second update rewrites the bubble')
+  assert.equal(
+    (body().match(/Partial/g) || []).length >= 1,
+    true,
+    'the partial text is a single growing bubble, not a new message per chunk',
+  )
+
+  emit({ conversationId: id, type: 'done', text: 'Partial answer from Arena' })
+  assert.ok(
+    await until(() => body().includes('Partial answer from Arena')),
+    'the final text lands in the bubble',
+  )
+  assert.ok(await until(() => !body().includes('Thinking…')), 'pending clears when the turn ends')
+
+  // 4. Events for a different conversation must be ignored.
+  emit({ conversationId: 'some-other-conversation', type: 'update', text: 'LEAKED' })
+  await sleep(150)
+  assert.equal(body().includes('LEAKED'), false, 'events for another conversation are ignored')
+
+  // 5. The listener is unsubscribed when the turn ends.
+  assert.equal(arena.listeners.size, 0, 'offChatEvent is called once the turn settles')
+
+  const resolveTurn1 = arena.resolve
+  resolveTurn1({ ok: true, state: 'complete', text: 'Partial answer from Arena', conversationId: id })
+  await sleep(50)
+
+  // 6. The UI is otherwise unchanged: the model label and bubble markup survive.
+  assert.ok(body().includes('Arena'), 'the reply is labelled with the Arena model')
+
+  /* 7. Verification stops the turn and is surfaced in the chat — and HPOS
+        must not try to send the prompt again (no retries in this phase). */
+  const sendAgain = async (text) => {
+    const box = document.querySelector('textarea')
+    setVal.call(box, text)
+    box.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await sleep(80)
+    box.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+    }))
+    await sleep(80)
+  }
+
+  await sendAgain('second question')
+  assert.equal(arena.sent.length, 2, 'the second prompt reached the bridge')
+  emit({
+    conversationId: id,
+    type: 'error',
+    state: 'verification_required',
+    message: 'Arena is asking for verification (sign-in, CAPTCHA or a human check). '
+      + 'HPOS will not bypass it — finish it yourself in a normal browser window, '
+      + 'then start the Arena session again.',
+  })
+  assert.ok(
+    await until(() => body().includes('will not bypass')),
+    'verification_required is surfaced to the user in the chat',
+  )
+  assert.ok(await until(() => !body().includes('Thinking…')), 'pending clears on error')
+  arena.resolve({ ok: false, state: 'verification_required', conversationId: id })
+  await sleep(150)
+  assert.equal(arena.sent.length, 2, 'a verification failure is never retried')
+  assert.equal(arena.listeners.size, 0, 'the error path also unsubscribes')
+
+  // 7. Persistence still works (unchanged behaviour).
+  root.unmount()
+  await sleep(50)
+  const root2 = createRoot(document.getElementById('root'))
+  root2.render(tree)
+  await sleep(150)
+  const chatsBtn2 = [...document.querySelectorAll('button')].find(
+    (b) => b.getAttribute('aria-label') === 'Chats',
+  )
+  chatsBtn2.click()
+  assert.ok(
+    await until(() => body().includes('Partial answer from Arena')),
+    'the Arena conversation persists across a simulated reload',
+  )
+  root2.unmount()
+
+  console.log('ok    arena direct chat UI: send → streamed updates → final bubble → persistence')
+  process.exitCode = 0
+} finally {
+  await vite.close()
+}

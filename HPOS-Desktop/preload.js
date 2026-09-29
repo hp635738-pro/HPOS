@@ -82,6 +82,9 @@ const CHANNEL_GIT_PULL_APPLY = 'hpos:git:pull-apply'
 const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
 const CHANNEL_APP_UPDATE_RUN = 'hpos:app-update:run'
 const CHANNEL_APP_UPDATE_EVENT = 'hpos:app-update:event'
+const CHANNEL_ARENA_CHAT_SEND = 'hpos:arena:chat:send'
+const CHANNEL_ARENA_CHAT_EVENT = 'hpos:arena:chat:event'
+const CHANNEL_ARENA_STATUS = 'hpos:arena:status'
  
 /* Terminal output subscriptions. The renderer hands us a callback; we keep a
    stable listener per callback so offTerminalData can remove exactly the one
@@ -90,6 +93,7 @@ const terminalListeners = new Map()
 const devLaunchListeners = new Map()
 const updaterListeners = new Map()
 const appUpdateListeners = new Map()
+const arenaChatListeners = new Map()
 
 contextBridge.exposeInMainWorld('hpos', {
   /**
@@ -224,6 +228,50 @@ contextBridge.exposeInMainWorld('hpos', {
       if (!listener) return
       ipcRenderer.removeListener(CHANNEL_DEV_OUTPUT, listener)
       devLaunchListeners.delete(callback)
+    },
+  },
+
+  /**
+   * Arena Direct Chat (Phase 2). The renderer sends a plain prompt string;
+   * every selector, URL, timeout and browser decision lives in the main
+   * process. Search and Code modes are not implemented yet and are refused
+   * there. Nothing about the session (cookies, storage state, page URL)
+   * crosses this boundary.
+   */
+  arena: {
+    /**
+     * Send one prompt to LM Arena. Resolves with the final outcome and
+     * streams progress through onChatEvent while the answer is generated.
+     * @param {{ prompt: string, conversationId?: string, mode?: string }} request
+     */
+    chatSend(request) {
+      const payload = request && typeof request === 'object' ? request : {}
+      return ipcRenderer.invoke(CHANNEL_ARENA_CHAT_SEND, {
+        prompt: typeof payload.prompt === 'string' ? payload.prompt : '',
+        conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : null,
+        mode: typeof payload.mode === 'string' ? payload.mode : 'text',
+      })
+    },
+
+    /** Subscribe to streamed turn events ({ type, state, text, … }). */
+    onChatEvent(callback) {
+      if (typeof callback !== 'function') return
+      const listener = (_event, data) => callback(data)
+      arenaChatListeners.set(callback, listener)
+      ipcRenderer.on(CHANNEL_ARENA_CHAT_EVENT, listener)
+    },
+
+    /** Unsubscribe a previously registered chat event callback. */
+    offChatEvent(callback) {
+      const listener = arenaChatListeners.get(callback)
+      if (!listener) return
+      ipcRenderer.removeListener(CHANNEL_ARENA_CHAT_EVENT, listener)
+      arenaChatListeners.delete(callback)
+    },
+
+    /** Read-only session snapshot ({ running, headless, sessionPersisted, busy }). */
+    status() {
+      return ipcRenderer.invoke(CHANNEL_ARENA_STATUS)
     },
   },
 
