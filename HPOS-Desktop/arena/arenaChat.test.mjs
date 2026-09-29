@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 
 const require = createRequire(import.meta.url)
 const {
@@ -16,6 +17,7 @@ const {
   ARENA_CHAT_EVENT,
   ARENA_CHAT_STATE,
   ARENA_CHAT_ERROR,
+  CHAT_ERROR_MESSAGES,
   defaultReadResponses,
 } = require('./chat.js')
 const { ARENA_HEALTH } = require('./errors.js')
@@ -162,16 +164,18 @@ function makeFakeBridge({ page, start = { ok: true, state: ARENA_HEALTH.READY },
 }
 
 /** Chat with a virtual clock: `tick` advances it without real waiting. */
-function makeChat({ page, bridge, overrides = {} } = {}) {
+function makeChat({ page, bridge, overrides = {}, readResponses, elements, sleep } = {}) {
   const clock = { value: 0 }
   const chat = createArenaChat({
     bridge,
     now: () => clock.value,
-    sleep: async (ms) => {
+    sleep: sleep || (async (ms) => {
       clock.value += ms
       await new Promise((resolve) => setImmediate(resolve))
-    },
+    }),
     logger: () => {},
+    ...(readResponses ? { readResponses } : {}),
+    ...(elements ? { elements } : {}),
     timing: {
       pollMs: 100,
       stableMs: 300,
@@ -481,6 +485,386 @@ function makeChat({ page, bridge, overrides = {} } = {}) {
   assert.equal(page.calls.click.length, 0, 'an already-cancelled turn must not submit')
   assert.equal(chat.isBusy(), false, 'the slot is released after cancellation')
   console.log('ok: an aborted turn stops with cancelled and frees the slot')
+}
+
+/* ------------------------------------------- stop / cancel (Stop control) --- */
+
+/* Cancelling mid-stream: the poll loop must exit at once and never submit
+   again. `generating` stays true so the only way out of the loop is the
+   cancel — the turn would otherwise run until the deadline. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    generating: true,
+    script: [[], ['one'], ['one two'], ['one two three'], ['one two three four']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge, overrides: { responseDeadlineMs: 60000 } })
+
+  const events = []
+  let cancelResult = null
+  let readsAtCancel = -1
+  const result = await chat.send({
+    prompt: 'stream me',
+    conversationId: 'c-stop',
+    onEvent: (ev) => {
+      events.push(ev)
+      /* Exactly how the UI does it: the first streamed token arrives, the
+         user presses Stop, and cancel() is called for this conversation. */
+      if (cancelResult === null && ev.type === ARENA_CHAT_EVENT.UPDATE) {
+        cancelResult = chat.cancel({ conversationId: 'c-stop' })
+        readsAtCancel = state.reads
+      }
+    },
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.equal(result.message, CHAT_ERROR_MESSAGES[ARENA_CHAT_ERROR.CANCELLED])
+  assert.equal(cancelResult.ok, true, 'cancel reports the turn it stopped')
+  assert.equal(cancelResult.state, ARENA_CHAT_ERROR.CANCELLED)
+
+  assert.deepEqual(
+    events.filter((e) => e.type === ARENA_CHAT_EVENT.UPDATE).map((e) => e.text),
+    ['one'],
+    'streaming stops at the cancel — no update is emitted afterwards',
+  )
+  const last = events[events.length - 1]
+  assert.equal(last.type, ARENA_CHAT_EVENT.ERROR, 'the turn ends with an error event')
+  assert.equal(last.state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.equal(
+    events.some((e) => e.type === ARENA_CHAT_EVENT.DONE || e.state === ARENA_CHAT_STATE.COMPLETE),
+    false,
+    'a cancelled turn is never reported as complete',
+  )
+  assert.equal(
+    state.reads,
+    readsAtCancel,
+    'the page is not read again after cancellation — polling stops immediately',
+  )
+  assert.deepEqual(page.calls.fill, ['stream me'], 'the prompt is typed once')
+  assert.deepEqual(page.calls.click, ['button'], 'cancelling never submits again')
+  assert.equal(bridge.calls.persists, 0, 'a cancelled turn is not persisted as a finished one')
+  assert.equal(chat.isBusy(), false, 'the slot is free again after a cancel')
+  console.log('ok: cancelling mid-stream stops the reads at once and never submits again')
+}
+
+/* A Stop must not wait out the poll interval. This sleep never finishes on
+   its own, so the turn can only return if the cancel wakes it. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    generating: true,
+    script: [[], ['one'], ['one two']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+
+  let chat = null
+  const made = makeChat({
+    page,
+    bridge,
+    sleep: () => new Promise(() => { /* only an abort can end this wait */ }),
+    overrides: { responseDeadlineMs: 60000 },
+  })
+  chat = made.chat
+
+  const turn = chat.send({
+    prompt: 'wake me up',
+    conversationId: 'c-wake',
+    onEvent: (ev) => {
+      if (ev.type === ARENA_CHAT_EVENT.UPDATE) chat.cancel({ conversationId: 'c-wake' })
+    },
+  })
+  /* The stall timer stays ref'd: if the turn never wakes, the assertion must
+     still get a chance to run instead of the process just exiting. */
+  let stallTimer = null
+  const stalled = new Promise((resolve) => {
+    stallTimer = setTimeout(() => resolve({ state: 'STILL_WAITING' }), 1500)
+  })
+  const out = await Promise.race([turn, stalled])
+  clearTimeout(stallTimer)
+
+  assert.notEqual(
+    out.state,
+    'STILL_WAITING',
+    'a cancelled turn must not sit out another poll interval before it stops',
+  )
+  assert.equal(out.state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.deepEqual(page.calls.click, ['button'], 'still exactly one submit')
+  console.log('ok: a cancelled turn wakes out of the poll wait immediately')
+}
+
+/* A read is a real round-trip, so a Stop can land WHILE it is in flight.
+   The turn must still end at the cancel: that read is thrown away — no
+   update from it, and never a completion after it. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    generating: true,
+    script: [[], ['one'], ['one two'], ['one two three']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+
+  const tick = () => new Promise((resolve) => setImmediate(resolve))
+  let chat = null
+  const readWhileCancelling = async (target, selectors) => {
+    /* Two reads have happened (baseline + one poll); cancel mid-read. */
+    if (state.reads === 2) {
+      await tick()
+      chat.cancel({ conversationId: 'c-inflight' })
+      await tick()
+    }
+    return defaultReadResponses(target, selectors)
+  }
+  const made = makeChat({
+    page,
+    bridge,
+    readResponses: readWhileCancelling,
+    overrides: { responseDeadlineMs: 60000 },
+  })
+  chat = made.chat
+
+  const events = []
+  const result = await chat.send({
+    prompt: 'stop mid-read',
+    conversationId: 'c-inflight',
+    onEvent: (ev) => events.push(ev),
+  })
+
+  assert.equal(result.state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.deepEqual(
+    events.filter((e) => e.type === ARENA_CHAT_EVENT.UPDATE).map((e) => e.text),
+    ['one'],
+    'the read that was in flight when Stop landed is discarded, not streamed',
+  )
+  assert.equal(
+    events.some((e) => e.type === ARENA_CHAT_EVENT.DONE),
+    false,
+    'a cancelled turn never completes',
+  )
+  assert.equal(bridge.calls.persists, 0, 'a cancelled turn is never persisted')
+  assert.deepEqual(page.calls.click, ['button'], 'and the prompt is still submitted only once')
+  console.log('ok: a stop that lands mid-read discards that read instead of streaming it')
+}
+
+/* Stop pressed before the first token: the loop must exit before it reads. */
+{
+  const state = { elements: READY_ELEMENTS, generating: true, script: [[]] }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge, overrides: { responseDeadlineMs: 60000 } })
+
+  const events = []
+  const result = await chat.send({
+    prompt: 'stop before the answer',
+    conversationId: 'c-early',
+    onEvent: (ev) => {
+      events.push(ev)
+      if (ev.type === ARENA_CHAT_EVENT.STATUS && ev.state === ARENA_CHAT_STATE.SENDING) {
+        chat.cancel({ conversationId: 'c-early' })
+      }
+    },
+  })
+
+  assert.equal(result.state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.deepEqual(page.calls.click, ['button'], 'the prompt was submitted once, not twice')
+  assert.equal(
+    events.filter((e) => e.type === ARENA_CHAT_EVENT.UPDATE).length,
+    0,
+    'nothing is streamed after an early stop',
+  )
+  assert.equal(state.reads, 1, 'the only read is the baseline — the loop exits before polling')
+  console.log('ok: stopping before the first token exits the loop before any further read')
+}
+
+/* Cancel after the turn already completed: a harmless no-op. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    script: [[], [], ['final answer'], ['final answer'], ['final answer'], ['final answer']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge })
+
+  const result = await chat.send({ prompt: 'hi', conversationId: 'c-done' })
+  assert.equal(result.ok, true)
+  assert.equal(result.text, 'final answer')
+
+  const after = chat.cancel({ conversationId: 'c-done' })
+  assert.equal(after.ok, false, 'a finished turn cannot be cancelled')
+  assert.equal(after.state, ARENA_CHAT_ERROR.NOT_RUNNING)
+  assert.equal(chat.isBusy(), false)
+  assert.deepEqual(page.calls.click, ['button'], 'the no-op cancel submits nothing')
+
+  /* The bridge is untouched: the next turn still works, one submit per turn. */
+  state.reads = 0
+  state.script = [[], ['next answer'], ['next answer'], ['next answer'], ['next answer']]
+  const second = await chat.send({ prompt: 'again', conversationId: 'c-done' })
+  assert.equal(second.ok, true, 'a later turn is unaffected by the no-op cancel')
+  assert.equal(second.text, 'next answer')
+  assert.deepEqual(page.calls.fill, ['hi', 'again'], 'one fill per turn')
+  assert.deepEqual(page.calls.click, ['button', 'button'], 'one submit per turn')
+  console.log('ok: cancelling after completion is a no-op and leaves the next turn working')
+}
+
+/* A stop is scoped to the conversation the user is looking at. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    generating: true,
+    script: [[], ['one'], ['one two'], ['one two three']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge, overrides: { responseDeadlineMs: 60000 } })
+
+  let foreign = null
+  const result = await chat.send({
+    prompt: 'hello',
+    conversationId: 'c-live',
+    onEvent: (ev) => {
+      if (foreign === null && ev.type === ARENA_CHAT_EVENT.UPDATE) {
+        foreign = chat.cancel({ conversationId: 'some-other-conversation' })
+        assert.equal(chat.isBusy(), true, 'a foreign stop must not end the running turn')
+        chat.cancel({ conversationId: 'c-live' })
+      }
+    },
+  })
+
+  assert.equal(foreign.ok, false, "another conversation's stop cannot cancel this turn")
+  assert.equal(foreign.state, ARENA_CHAT_ERROR.NOT_RUNNING)
+  assert.equal(result.state, ARENA_CHAT_ERROR.CANCELLED, 'the matching conversation cancels it')
+  console.log('ok: a stop only cancels the conversation it names')
+}
+
+/* Cancelling nothing is safe, and the bridge is still usable afterwards. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    script: [[], ['answer'], ['answer'], ['answer'], ['answer']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge })
+
+  const idle = chat.cancel()
+  assert.equal(idle.ok, false)
+  assert.equal(idle.state, ARENA_CHAT_ERROR.NOT_RUNNING)
+  assert.equal(page.calls.fill.length, 0, 'cancelling nothing types nothing')
+  assert.equal(page.calls.click.length, 0, 'cancelling nothing submits nothing')
+
+  const sent = await chat.send({ prompt: 'after a no-op cancel', conversationId: 'c-idle' })
+  assert.equal(sent.ok, true, 'the bridge is still usable after a no-op cancel')
+  assert.equal(sent.text, 'answer')
+  console.log('ok: cancelling when nothing is running is a safe no-op')
+}
+
+/* No duplicate send: a cancelled turn plus a fresh turn is one submit each,
+   and the cancelled prompt never reaches the composer a second time. */
+{
+  const state = {
+    elements: READY_ELEMENTS,
+    generating: true,
+    script: [[], ['one'], ['one two'], ['one two three']],
+  }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge, overrides: { responseDeadlineMs: 60000 } })
+
+  const first = chat.send({
+    prompt: 'first prompt',
+    conversationId: 'c-again',
+    onEvent: (ev) => {
+      if (ev.type === ARENA_CHAT_EVENT.UPDATE) chat.cancel({ conversationId: 'c-again' })
+    },
+  })
+  assert.equal((await first).state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.deepEqual(page.calls.fill, ['first prompt'], 'the cancelled prompt was typed once')
+  assert.deepEqual(page.calls.click, ['button'], 'the cancelled prompt was submitted once')
+
+  state.reads = 0
+  state.generating = false
+  state.script = [[], ['second answer'], ['second answer'], ['second answer'], ['second answer']]
+  const second = await chat.send({ prompt: 'second prompt', conversationId: 'c-again' })
+  assert.equal(second.ok, true, 'the next turn is a normal turn')
+  assert.equal(second.text, 'second answer')
+  assert.deepEqual(page.calls.fill, ['first prompt', 'second prompt'], 'no resend: one fill per turn')
+  assert.deepEqual(page.calls.click, ['button', 'button'], 'no resend: one submit per turn')
+  console.log('ok: a cancelled turn never resends — one submit per turn, always')
+}
+
+/* An external AbortSignal still cancels (the pre-Stop API), and cancel() on
+   top of it does not fight with it. */
+{
+  const state = { elements: READY_ELEMENTS, responsesAt: () => [] }
+  const page = makeFakePage({ state })
+  const bridge = makeFakeBridge({ page })
+  const { chat } = makeChat({ page, bridge, overrides: { firstAnswerMs: 100000 } })
+  const controller = new AbortController()
+
+  const done = chat.send({ prompt: 'hello', signal: controller.signal, conversationId: 'c-ext' })
+  controller.abort()
+  assert.equal((await done).state, ARENA_CHAT_ERROR.CANCELLED)
+  assert.equal(page.calls.fill.length, 0, 'an already-cancelled turn must not type')
+  assert.equal(page.calls.click.length, 0, 'an already-cancelled turn must not submit')
+  assert.equal(chat.isBusy(), false)
+  console.log('ok: an external AbortSignal still cancels the turn')
+}
+
+/* --------------------------------------- stop control: IPC/preload wiring --- */
+{
+  const mainSrc = readFileSync(new URL('../main.js', import.meta.url), 'utf8')
+  const preloadSrc = readFileSync(new URL('../preload.js', import.meta.url), 'utf8')
+  const chatsSrc = readFileSync(new URL('../../src/pages/Chats.jsx', import.meta.url), 'utf8')
+
+  const channelOf = (src) => {
+    const match = /CHANNEL_ARENA_CHAT_CANCEL = '([^']+)'/.exec(src)
+    return match ? match[1] : null
+  }
+  const mainChannel = channelOf(mainSrc)
+  const preloadChannel = channelOf(preloadSrc)
+
+  assert.ok(mainChannel, 'main.js declares the cancel channel')
+  assert.equal(mainChannel, preloadChannel, 'main and preload agree on the cancel channel')
+  assert.ok(
+    new RegExp(`ipcMain\\.handle\\(CHANNEL_ARENA_CHAT_CANCEL`).test(mainSrc),
+    'main.js handles the cancel channel',
+  )
+  assert.ok(
+    /CHANNEL_ARENA_CHAT_CANCEL[\s\S]{0,200}isTrusted\(event\)/.test(mainSrc),
+    'the cancel channel is trusted-guarded like every other Arena channel',
+  )
+  assert.ok(
+    /chatCancel\(request\)\s*\{/.test(preloadSrc),
+    'preload exposes chatCancel to the renderer',
+  )
+  assert.ok(
+    /arenaChat\.cancel\(\{ conversationId/.test(mainSrc),
+    'main forwards the cancel to chat.js with the conversation id',
+  )
+
+  /* The renderer side: one Stop control, gated on the streaming flag, calling
+     chatCancel for the conversation — and never sending the prompt again. */
+  assert.ok(/aria-label="Stop generating"/.test(chatsSrc), 'the Chats UI has a Stop control')
+  assert.ok(/\{arenaStreaming && \(/.test(chatsSrc), 'Stop renders only while Arena is streaming')
+  assert.ok(
+    /chatCancel\(\{ conversationId: turn\.id \}\)/.test(chatsSrc),
+    'Stop cancels the conversation it belongs to',
+  )
+  assert.ok(
+    /ev\.state === 'cancelled'[\s\S]{0,120}settlePartial\(\)/.test(chatsSrc),
+    'a cancelled turn keeps the partial answer instead of showing an error',
+  )
+  assert.equal(
+    /chatSend\(/.test(chatsSrc.slice(chatsSrc.indexOf('stopArena'))),
+    false,
+    'the Stop handler must not send anything',
+  )
+  console.log('ok: the Stop control is wired end-to-end (Chats -> preload -> main -> chat.js)')
 }
 
 /* ------------------------------------------------- composer missing ------- */

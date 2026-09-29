@@ -69,7 +69,7 @@ const until = async (fn, timeout = 4000, step = 50) => {
 }
 
 /* ------------------------------------------------- stubbed Arena surface --- */
-const arena = { sent: [], listeners: new Set(), finish: null }
+const arena = { sent: [], cancels: [], listeners: new Set(), finish: null }
 
 dom.window.hpos = {
   arena: {
@@ -87,6 +87,11 @@ dom.window.hpos = {
     offChatEvent(cb) {
       arena.listeners.delete(cb)
     },
+    chatCancel(request) {
+      arena.cancels.push(request)
+      // The bridge aborts the turn; the `cancelled` event is emitted below.
+      return Promise.resolve({ ok: true, state: 'cancelled' })
+    },
     status() {
       return Promise.resolve({ ok: true, running: true, headless: true, busy: false })
     },
@@ -96,6 +101,11 @@ dom.window.hpos = {
 function emit(payload) {
   for (const cb of [...arena.listeners]) cb(payload)
 }
+
+/** The Stop control, when it is on screen. */
+const stopButton = () => [...document.querySelectorAll('button')].find(
+  (b) => b.getAttribute('aria-label') === 'Stop generating',
+)
 
 const vite = await createServer({
   root: new URL('../..', import.meta.url).pathname,
@@ -186,8 +196,8 @@ try {
   // 6. The UI is otherwise unchanged: the model label and bubble markup survive.
   assert.ok(body().includes('Arena'), 'the reply is labelled with the Arena model')
 
-  /* 7. Verification stops the turn and is surfaced in the chat — and HPOS
-        must not try to send the prompt again (no retries in this phase). */
+  /* 6b. Stop control — only while an answer is actively streaming, and it
+        cancels the turn without ever sending the prompt again. */
   const sendAgain = async (text) => {
     const box = document.querySelector('textarea')
     setVal.call(box, text)
@@ -199,8 +209,55 @@ try {
     await sleep(80)
   }
 
+  await sendAgain('stop me')
+  assert.equal(arena.sent.length, 2, 'the stop-scenario prompt reached the bridge')
+  assert.ok(await until(() => body().includes('Thinking…')), 'the pending pill is back')
+  assert.ok(!stopButton(), 'Stop stays hidden until Arena starts streaming')
+
+  emit({ conversationId: id, type: 'status', state: 'streaming' })
+  assert.ok(await until(() => stopButton()), 'Stop appears as soon as the answer starts streaming')
+
+  emit({ conversationId: id, type: 'update', text: 'Half an answer' })
+  assert.ok(await until(() => body().includes('Half an answer')), 'the partial answer streams in')
+  assert.ok(stopButton(), 'Stop is still offered while the answer grows')
+
+  stopButton().click()
+  assert.equal(arena.cancels.length, 1, 'Stop reaches the Arena bridge')
+  assert.equal(arena.cancels[0].conversationId, id, 'Stop names the conversation it belongs to')
+  assert.equal(arena.sent.length, 2, 'Stop never sends the prompt again')
+  assert.ok(await until(() => !stopButton()), 'the Stop control is hidden straight away')
+
+  emit({
+    conversationId: id,
+    type: 'error',
+    state: 'cancelled',
+    message: 'The Arena request was cancelled.',
+  })
+  assert.ok(await until(() => !body().includes('Thinking…')), 'pending clears after cancellation')
+  assert.ok(body().includes('Half an answer'), 'the partial answer stays on screen')
+  assert.ok(
+    !body().includes('The Arena request was cancelled.'),
+    'the cancellation message is not written over the answer',
+  )
+  arena.resolve({ ok: false, state: 'cancelled', conversationId: id })
+  await sleep(120)
+  assert.equal(arena.sent.length, 2, 'no resend once the invoke reply lands either')
+  assert.equal(arena.listeners.size, 0, 'a cancelled turn unsubscribes too')
+
+  /* Send is back to normal: a new prompt starts a fresh turn. */
+  await sendAgain('after the stop')
+  assert.equal(arena.sent.length, 3, 'Send works again after a cancellation')
+  assert.ok(!stopButton(), 'and Stop is not shown until the new turn streams')
+  emit({ conversationId: id, type: 'done', text: 'Fresh answer' })
+  assert.ok(await until(() => body().includes('Fresh answer')), 'the new turn completes normally')
+  arena.resolve({ ok: true, state: 'complete', text: 'Fresh answer', conversationId: id })
+  await sleep(120)
+
+  /* 7. Verification stops the turn and is surfaced in the chat — and HPOS
+        must not try to send the prompt again (no retries in this phase). */
+  const beforeVerify = arena.sent.length
   await sendAgain('second question')
-  assert.equal(arena.sent.length, 2, 'the second prompt reached the bridge')
+  assert.equal(arena.sent.length, beforeVerify + 1, 'the next prompt reached the bridge')
   emit({
     conversationId: id,
     type: 'error',
@@ -216,7 +273,7 @@ try {
   assert.ok(await until(() => !body().includes('Thinking…')), 'pending clears on error')
   arena.resolve({ ok: false, state: 'verification_required', conversationId: id })
   await sleep(150)
-  assert.equal(arena.sent.length, 2, 'a verification failure is never retried')
+  assert.equal(arena.sent.length, beforeVerify + 1, 'a verification failure is never retried')
   assert.equal(arena.listeners.size, 0, 'the error path also unsubscribes')
 
   // 7. Persistence still works (unchanged behaviour).

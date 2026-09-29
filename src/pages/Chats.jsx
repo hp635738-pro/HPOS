@@ -52,8 +52,15 @@ let seq = 0
 export default function Chats() {
   const [{ convos, activeId }, setStore] = useState(loadStore)
   const [pending, setPending] = useState(false)
+  /* Arena only: true from the first streamed token until the turn settles.
+     It drives the Stop control — before the first token there is nothing to
+     stop yet, and once the turn settles `pending` takes the pill away. */
+  const [arenaStreaming, setArenaStreaming] = useState(false)
   const [mode, setMode] = useState('text')
   const replyIdx = useRef(0)
+  /* The Arena turn in flight ({ id, arena }), so Stop can name the exact
+     conversation it is cancelling even if the user switched since. */
+  const arenaTurnRef = useRef(null)
   const mainRef = useRef(null)
   const footerRef = useRef(null)
   const [composerH, setComposerH] = useState(0)
@@ -100,6 +107,7 @@ export default function Chats() {
   const startNewChat = () => {
     setStore((s) => ({ ...s, activeId: null }))
     setPending(false)
+    setArenaStreaming(false)
   }
 
   /**
@@ -112,9 +120,17 @@ export default function Chats() {
    *
    * Only text mode is routed to Arena: Search and Code are not implemented
    * yet (the main process refuses them too).
+   *
+   * Stop: while Arena is streaming, `arenaStreaming` reveals a Stop control
+   * next to the orb. It calls chatCancel for THIS conversation, which aborts
+   * the turn in the main process — the poll loop exits at once and reports
+   * `cancelled`. HPOS never resends; a cancelled turn keeps whatever text had
+   * already streamed, and the composer returns to its normal state.
    */
   const sendViaArena = (id, prompt, arena) => {
     let settled = false
+
+    arenaTurnRef.current = { id, arena }
 
     const putAssistant = (text, streaming) => {
       if (!text) return
@@ -139,17 +155,43 @@ export default function Chats() {
       settled = true
       arena.offChatEvent(onEvent)
       setPending(false)
+      setArenaStreaming(false)
+      if (arenaTurnRef.current && arenaTurnRef.current.id === id) arenaTurnRef.current = null
+    }
+
+    /** Keep what streamed before a Stop — no error text over the answer. */
+    const settlePartial = () => {
+      setStore((s) => ({
+        ...s,
+        convos: s.convos.map((c) => {
+          if (c.id !== id) return c
+          const msgs = [...c.msgs]
+          const last = msgs[msgs.length - 1]
+          if (last && last.role === 'assistant' && last.streaming) {
+            msgs[msgs.length - 1] = { ...last, streaming: false }
+          }
+          return { ...c, msgs }
+        }),
+      }))
     }
 
     const onEvent = (ev) => {
       if (!ev || ev.conversationId !== id) return
+      if (ev.type === 'status') {
+        if (ev.state === 'streaming') setArenaStreaming(true)
+        return
+      }
       if (ev.type === 'update') {
+        setArenaStreaming(true)
         putAssistant(ev.text || '', true)
       } else if (ev.type === 'done') {
         putAssistant(ev.text || '', false)
         finish()
       } else if (ev.type === 'error') {
-        putAssistant(ev.message || 'Arena could not complete the request.', false)
+        /* Cancelled by the user: the partial answer stays on screen and the
+           composer goes back to its normal state. Nothing is sent again. */
+        if (ev.state === 'cancelled') settlePartial()
+        else putAssistant(ev.message || 'Arena could not complete the request.', false)
         finish()
       }
     }
@@ -160,8 +202,9 @@ export default function Chats() {
       .then((res) => {
         // The invoke() reply carries the outcome too, so a missed event
         // still ends the turn cleanly. Errors already reported through the
-        // event stream are not written twice.
-        if (!settled && (!res || !res.ok)) {
+        // event stream are not written twice, and a cancelled turn keeps its
+        // partial answer instead of the cancellation message.
+        if (!settled && (!res || !res.ok) && !(res && res.state === 'cancelled')) {
           putAssistant(
             (res && res.message) || 'Arena could not complete the request.',
             false,
@@ -178,6 +221,19 @@ export default function Chats() {
         }
         finish()
       })
+  }
+
+  /**
+   * Stop the streaming Arena answer. The bridge confirms with a `cancelled`
+   * event moments later; the control is hidden straight away so it can never
+   * be pressed twice. The prompt is never sent again — the next Send is a
+   * brand new turn on the same Arena thread.
+   */
+  const stopArena = () => {
+    const turn = arenaTurnRef.current
+    if (!turn || typeof turn.arena.chatCancel !== 'function') return
+    setArenaStreaming(false)
+    turn.arena.chatCancel({ conversationId: turn.id }).catch(() => { /* best effort */ })
   }
 
   const handleSend = (message, files, meta) => {
@@ -347,6 +403,24 @@ export default function Chats() {
                     <span className="text-xs whitespace-nowrap text-white/50">
                       {ORB_LABEL[mode]}
                     </span>
+                    {/* Stop — Arena only, and only while an answer is
+                        actively streaming. Same pill, same rhythm: the
+                        control joins the pending row instead of adding a
+                        new element to the layout. */}
+                    {arenaStreaming && (
+                      <button
+                        type="button"
+                        onClick={stopArena}
+                        aria-label="Stop generating"
+                        title="Stop generating"
+                        className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-xs whitespace-nowrap text-white/50 transition-colors hover:border-white/25 hover:text-white/80"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-2.5 w-2.5 fill-current">
+                          <rect x="6" y="6" width="12" height="12" rx="2" />
+                        </svg>
+                        Stop
+                      </button>
+                    )}
                   </div>
                 )}
               </motion.div>

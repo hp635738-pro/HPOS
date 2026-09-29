@@ -437,8 +437,14 @@ bridge's persistent session:
 | --- | --- |
 | Messages | `renderer → hpos.arena.chatSend({prompt, conversationId, mode})` |
 | Progress | `hpos:arena:chat:event` — `preparing`, `ready`, `sending`, `streaming`, `update`, `complete`, `done`, `error` |
+| Stop | `renderer → hpos.arena.chatCancel({conversationId})` — aborts the turn; the poll loop exits at once and the prompt is never sent again |
 | Multi-turn | the same Arena conversation is reused; turn N+1 appends to the thread instead of starting a new one |
-| Errors | `prompt_invalid`, `composer_missing`, `send_failed`, `response_not_detected`, `cancelled`, `timeout`, `verification_required`, `busy`, `browser_unavailable` |
+| Errors | `prompt_invalid`, `composer_missing`, `send_failed`, `response_not_detected`, `cancelled`, `not_running`, `timeout`, `verification_required`, `busy`, `browser_unavailable` |
+
+While an Arena answer is streaming, the Chats pending pill shows a **Stop**
+control. It cancels that turn only — the answer stops streaming, the partial
+text stays on screen, and the composer returns to its normal state. The
+session itself is left open for the next turn.
 
 ```bash
 cd HPOS-Desktop

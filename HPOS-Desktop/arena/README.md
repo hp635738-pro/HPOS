@@ -160,16 +160,20 @@ run in CI where only the root `npm ci` happens. The UI test renders the real
 ## Phase 2 — direct Chat
 
 `createArenaChat({bridge, timing, elements, readResponses, logger})` returns
-`{send, isBusy, ARENA_CHAT_EVENT, ARENA_CHAT_STATE, ARENA_CHAT_ERROR}`.
+`{send, cancel, isBusy, ARENA_CHAT_EVENT, ARENA_CHAT_STATE, ARENA_CHAT_ERROR}`.
 
 ```js
 const result = await chat.send({
   prompt: 'hello',
   conversationId: 'chat-123',
-  signal,                 // optional AbortSignal
+  signal,                 // optional AbortSignal — aborts the turn like cancel()
   onEvent,                // status | update events, each carrying conversationId
 })
 // { ok, state, message, conversationId, text? }
+
+chat.cancel({ conversationId: 'chat-123' })
+// { ok: true,  state: 'cancelled',    message }   the running turn was stopped
+// { ok: false, state: 'not_running',  message }   nothing to stop (also: wrong id)
 ```
 
 ### One turn
@@ -197,11 +201,33 @@ const result = await chat.send({
 Every event carries the `conversationId`, so a renderer ignores anything from
 another conversation.
 
+## Stop / cancellation
+
+`cancel({conversationId})` aborts the running turn and resolves immediately —
+the streamed `cancelled` event follows from the turn itself.
+
+- **The poll loop exits at once.** The wait between polls is abort-aware, so a
+  cancelled turn does not sit out another poll interval, and a read that was
+  already in flight when the stop landed is discarded instead of streamed.
+- **Nothing is submitted twice.** Cancelling only stops *watching* the answer;
+  it never touches the composer or the send control again. The next `send()`
+  is a new turn on the same Arena thread.
+- **Scoped.** A stop naming another conversation is refused with
+  `not_running` — a stale UI cannot kill a turn it did not start.
+- **Safe any time.** Cancelling when nothing is running, or after the turn
+  already completed, is a `not_running` no-op.
+- **The session survives.** Cancelling does not close the browser or discard
+  the session; the thread stays open for the next turn.
+
+Cancelling stops HPOS from reading the answer. It deliberately does **not**
+click Arena's own stop control — the turn is read-only once the prompt has
+been submitted, and no challenge or third-party control is ever touched.
+
 ### Errors
 
 `prompt_invalid` (empty or >8000 chars), `busy` (a turn is already in flight —
 nothing is queued), `composer_missing`, `send_failed`, `response_not_detected`,
-`cancelled`, plus the reused `verification_required`, `timeout`,
+`cancelled`, `not_running` (a stop with nothing to stop), plus the reused `verification_required`, `timeout`,
 `unsupported_page`, `browser_unavailable`, `navigation_failed`, `launch_failed`
 and `playwright_unavailable`.
 
@@ -214,10 +240,24 @@ telling the user to finish the check themselves.
 | Channel | Direction | Payload |
 | --- | --- | --- |
 | `hpos:arena:chat:send` | renderer → main | `{prompt, conversationId, mode}` → `{...result, conversationId}` |
+| `hpos:arena:chat:cancel` | renderer → main | `{conversationId}` → `{ok, state, conversationId}` |
 | `hpos:arena:chat:event` | main → renderer | `{type, state, text \| message, conversationId}` |
 | `hpos:arena:status` | renderer → main | → `{ok, ...getStatus(), busy}` |
 
 `mode` must be `text`; anything else returns `{ok:false, code:'EUNSUPPORTED'}`.
+
+### The Stop control (Chats)
+
+While an Arena answer is streaming, the pending pill in `src/pages/Chats.jsx`
+grows a **Stop** control (`aria-label="Stop generating"`). It is rendered only
+while `arenaStreaming` is true — that is, from the first streamed token until
+the turn settles — so it never shows during ordinary thinking, for a
+non-Arena reply, or after the answer has finished.
+
+Pressing it calls `hpos.arena.chatCancel({conversationId})` and hides itself
+immediately. When the `cancelled` event arrives, the partial answer that had
+already streamed is kept on screen (no error text is written over it) and the
+composer returns to its normal state.
 
 ### Selectors
 

@@ -12,6 +12,9 @@
  *
  *   · one turn at a time — a second send() while a turn is in flight is
  *     refused with `busy`, never queued (no retries anywhere in this file);
+ *   · cancel() aborts the running turn. Cancelling stops watching the answer
+ *     at once: no further reads, no further events, and above all no second
+ *     submit — the prompt is never sent twice;
  *   · the Arena session is REUSED, so multi-turn conversation works: the
  *     page stays open and each prompt continues the same Arena thread;
  *   · verification is fatal for the turn. If Arena asks for sign-in, a
@@ -52,6 +55,7 @@ const ARENA_CHAT_ERROR = Object.freeze({
   SEND_FAILED: 'send_failed',
   RESPONSE_NOT_DETECTED: 'response_not_detected',
   CANCELLED: 'cancelled',
+  NOT_RUNNING: 'not_running',
   VERIFICATION_REQUIRED: ARENA_HEALTH.VERIFICATION_REQUIRED,
   TIMEOUT: ARENA_HEALTH.TIMEOUT,
   UNSUPPORTED_PAGE: ARENA_HEALTH.UNSUPPORTED_PAGE,
@@ -68,6 +72,7 @@ const CHAT_ERROR_MESSAGES = Object.freeze({
   [ARENA_CHAT_ERROR.SEND_FAILED]: 'Arena did not accept the message. Nothing was sent twice.',
   [ARENA_CHAT_ERROR.RESPONSE_NOT_DETECTED]: 'Arena did not produce a response.',
   [ARENA_CHAT_ERROR.CANCELLED]: 'The Arena request was cancelled.',
+  [ARENA_CHAT_ERROR.NOT_RUNNING]: 'No Arena request is running.',
   [ARENA_CHAT_ERROR.VERIFICATION_REQUIRED]: healthMessage(ARENA_HEALTH.VERIFICATION_REQUIRED),
   [ARENA_CHAT_ERROR.TIMEOUT]: 'Arena did not finish answering in time.',
   [ARENA_CHAT_ERROR.UNSUPPORTED_PAGE]: healthMessage(ARENA_HEALTH.UNSUPPORTED_PAGE),
@@ -79,6 +84,31 @@ const CHAT_ERROR_MESSAGES = Object.freeze({
 
 function isAborted(signal) {
   return Boolean(signal && signal.aborted)
+}
+
+/**
+ * Wait `ms` between polls, but return immediately if the turn is cancelled —
+ * a stopped turn must not sit out another poll interval before it notices.
+ */
+async function sleepUnlessAborted(sleep, ms, signal) {
+  if (!signal) {
+    await sleep(ms)
+    return
+  }
+  let onAbort = null
+  const aborted = new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    onAbort = () => resolve()
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    await Promise.race([sleep(ms), aborted])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
 }
 
 function cleanPrompt(value, maxChars) {
@@ -168,6 +198,10 @@ function createArenaChat(options = {}) {
   const log = typeof options.logger === 'function' ? options.logger : () => {}
 
   let inFlight = false
+  /* The running turn, so the UI can stop it mid-stream. There is only ever
+     one, and cancelling aborts THAT turn — never a later one. */
+  let activeController = null
+  let activeConversationId = null
 
   function emit(onEvent, payload) {
     try {
@@ -192,13 +226,14 @@ function createArenaChat(options = {}) {
    * @param {object} args
    * @param {string} args.prompt            the user's message
    * @param {string} [args.conversationId]  HPOS conversation id, echoed on events
-   * @param {AbortSignal} [args.signal]     cancels the turn between polls
+   * @param {AbortSignal} [args.signal]     an external signal; when it aborts,
+   *                                        the turn is cancelled just as if
+   *                                        cancel() had been called
    * @param {(event: object) => void} [args.onEvent]
    */
   async function send(args = {}) {
     const onEvent = typeof args.onEvent === 'function' ? args.onEvent : () => {}
     const conversationId = args.conversationId == null ? null : String(args.conversationId)
-    const signal = args.signal || null
     const tag = (payload) => emit(onEvent, { conversationId, ...payload })
 
     if (inFlight) return failure(ARENA_CHAT_ERROR.BUSY)
@@ -207,6 +242,23 @@ function createArenaChat(options = {}) {
     if (!prompt) return failure(ARENA_CHAT_ERROR.PROMPT_INVALID)
 
     inFlight = true
+    /* This turn's own controller. cancel() aborts it, so a stop reaches the
+       poll loop wherever it happens to be — including inside a wait. */
+    const controller = new AbortController()
+    const signal = controller.signal
+    activeController = controller
+    activeConversationId = conversationId
+    let releaseExternal = null
+    const external = args.signal || null
+    if (external) {
+      if (external.aborted) {
+        controller.abort()
+      } else {
+        const forward = () => controller.abort()
+        external.addEventListener('abort', forward, { once: true })
+        releaseExternal = () => external.removeEventListener('abort', forward)
+      }
+    }
     const startedAt = now()
     log(`chat: sending ${prompt.length} chars`)
 
@@ -270,6 +322,9 @@ function createArenaChat(options = {}) {
 
         const generating = await isGenerating(page, elements.stop)
         const snap = await readResponses(page, elements.response)
+        /* Cancelled while reading? Stop right here — no further updates, no
+           completion, and certainly no second submit. */
+        if (isAborted(signal)) return cancelled(tag)
         const isNewAnswer = snap.count > baseline.count
           || Boolean(snap.last && snap.last !== baseline.last)
         const text = isNewAnswer
@@ -319,7 +374,7 @@ function createArenaChat(options = {}) {
           return out
         }
 
-        await sleep(timing.pollMs)
+        await sleepUnlessAborted(sleep, timing.pollMs, signal)
       }
     } catch (err) {
       const out = failure(ARENA_CHAT_ERROR.SEND_FAILED, {
@@ -329,7 +384,46 @@ function createArenaChat(options = {}) {
       return out
     } finally {
       inFlight = false
+      if (releaseExternal) releaseExternal()
+      if (activeController === controller) {
+        activeController = null
+        activeConversationId = null
+      }
     }
+  }
+
+  /**
+   * Cancel the running turn. Safe to call at any time: a no-op when nothing
+   * is in flight, and it refuses to touch another conversation's turn.
+   *
+   * Cancelling stops HPOS watching the answer — the poll loop exits at once
+   * and reports `cancelled`. It never resubmits the prompt; the next send()
+   * is a new turn on the same Arena thread.
+   */
+  function cancel(args = {}) {
+    const conversationId = args && args.conversationId != null
+      ? String(args.conversationId)
+      : null
+    const idle = () => Object.freeze({
+      ok: false,
+      state: ARENA_CHAT_ERROR.NOT_RUNNING,
+      message: CHAT_ERROR_MESSAGES[ARENA_CHAT_ERROR.NOT_RUNNING],
+    })
+    if (!inFlight || !activeController) return idle()
+    /* A stop is for the turn the user is looking at. A stale or foreign
+       conversation id must not be able to kill a running turn. */
+    if (conversationId && activeConversationId && conversationId !== activeConversationId) {
+      return idle()
+    }
+    if (!activeController.signal.aborted) {
+      log('chat: cancelled by the user')
+      activeController.abort()
+    }
+    return Object.freeze({
+      ok: true,
+      state: ARENA_CHAT_ERROR.CANCELLED,
+      message: CHAT_ERROR_MESSAGES[ARENA_CHAT_ERROR.CANCELLED],
+    })
   }
 
   function cancelled(tag) {
@@ -370,6 +464,7 @@ function createArenaChat(options = {}) {
 
   return {
     send,
+    cancel,
     isBusy: () => inFlight,
     ARENA_CHAT_EVENT,
     ARENA_CHAT_STATE,

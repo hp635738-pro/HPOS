@@ -1163,12 +1163,18 @@ app.whenReady().then(async () => {
    browser decision stays here in the main process.
 
      · chatSend    send one prompt, stream events on the event channel
+     · chatCancel  stop the running turn (the Chats Stop control)
      · status      read-only session snapshot for the UI
 
    One turn at a time (chat.js refuses a concurrent send with `busy`), no
    retries anywhere, and verification is fatal for the turn: it stops the
-   session and reports `verification_required` for the UI to surface. */
+   session and reports `verification_required` for the UI to surface.
+
+   Cancelling aborts the turn where it is: the poll loop exits immediately
+   and reports `cancelled`. The prompt is never sent a second time — the
+   next send is a new turn on the same Arena thread. */
 const CHANNEL_ARENA_CHAT_SEND = 'hpos:arena:chat:send'
+const CHANNEL_ARENA_CHAT_CANCEL = 'hpos:arena:chat:cancel'
 const CHANNEL_ARENA_CHAT_EVENT = 'hpos:arena:chat:event'
 const CHANNEL_ARENA_STATUS = 'hpos:arena:status'
 
@@ -1216,6 +1222,17 @@ ipcMain.handle(CHANNEL_ARENA_CHAT_SEND, async (event, request) => {
   /* The renderer also gets the outcome on the invoke() reply so a caller
      that misses the streamed events still knows how the turn ended. */
   return { ...result, conversationId }
+})
+
+/* Stop the running turn. The conversation id scopes the request: a window
+   can only cancel the turn it started, and a stop that arrives after the
+   turn settled is a harmless no-op (`not_running`). Nothing is resent. */
+ipcMain.handle(CHANNEL_ARENA_CHAT_CANCEL, (event, request) => {
+  if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
+  const conversationId = request && typeof request.conversationId === 'string'
+    ? request.conversationId.slice(0, 120)
+    : null
+  return { ...arenaChat.cancel({ conversationId }), conversationId }
 })
 
 ipcMain.handle(CHANNEL_ARENA_STATUS, (event) => {

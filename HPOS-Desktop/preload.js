@@ -83,6 +83,7 @@ const CHANNEL_GIT_CONNECT = 'hpos:git:connect'
 const CHANNEL_APP_UPDATE_RUN = 'hpos:app-update:run'
 const CHANNEL_APP_UPDATE_EVENT = 'hpos:app-update:event'
 const CHANNEL_ARENA_CHAT_SEND = 'hpos:arena:chat:send'
+const CHANNEL_ARENA_CHAT_CANCEL = 'hpos:arena:chat:cancel'
 const CHANNEL_ARENA_CHAT_EVENT = 'hpos:arena:chat:event'
 const CHANNEL_ARENA_STATUS = 'hpos:arena:status'
  
@@ -250,6 +251,20 @@ contextBridge.exposeInMainWorld('hpos', {
         prompt: typeof payload.prompt === 'string' ? payload.prompt : '',
         conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : null,
         mode: typeof payload.mode === 'string' ? payload.mode : 'text',
+      })
+    },
+
+    /**
+     * Stop the running turn. Resolves as soon as the turn is cancelled —
+     * the streamed `cancelled` event follows on onChatEvent. Safe when
+     * nothing is running (`ok: false`, state `not_running`); the prompt is
+     * never sent again.
+     * @param {{ conversationId?: string }} request
+     */
+    chatCancel(request) {
+      const payload = request && typeof request === 'object' ? request : {}
+      return ipcRenderer.invoke(CHANNEL_ARENA_CHAT_CANCEL, {
+        conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : null,
       })
     },
 
