@@ -87,6 +87,32 @@ placeholder, with several fallbacks per element (`config.js`). No CSS
 class, id or attribute selector is used, because Arena ships hashed CSS
 module names that change on every deploy.
 
+### Timeout budgeting
+
+One `healthMs` budget covers the whole check, and it is spent in two phases:
+
+| Phase | Ceiling | Per-probe wait |
+| --- | --- | --- |
+| Verification sweep | `healthMs * verificationPhaseRatio` (40% by default) | `verificationProbeMs` (250ms) |
+| Required elements | the rest of `healthMs` | `elementMs` for the first candidate; fallbacks share what is left |
+
+This matters because a Playwright locator wait that **does not** match blocks
+for its full timeout before rejecting — it does not return early. Sixteen
+verification signals at an element-sized wait each cost ~24s against a 15s
+budget, so the deadline always expired inside the verification sweep and
+`ready`, `elements_missing` and the `captcha`/`login` groups were unreachable
+in a real browser (the unit fakes rejected instantly and hid it).
+
+Two rules keep it honest: the verification phase owns only a share of the
+budget, and `ready` is never reported unless the verification sweep
+**completed** — a sweep cut short by its deadline cannot prove no challenge
+was present, so it reports `timeout`.
+
+Verified against real headless Chromium 153 with the bridge's own defaults:
+a healthy page reports `ready` in ~4.0s, a missing send control reports
+`elements_missing`, and the human-check / captcha / login interstitials are
+detected in 0.16s / 2.1s / 2.9s.
+
 ## Session persistence
 
 `start()` re-uses `~/.hpos/arena/arena-storage-state.json` when it exists

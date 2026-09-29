@@ -14,7 +14,11 @@
  *   · element lookups use role / accessible-name / text / label /
  *     placeholder locators, never CSS classes or ids;
  *   · the whole check is bounded by one deadline, so a slow or broken page
- *     can never hang the bridge.
+ *     can never hang the bridge. The verification phase additionally owns
+ *     only a share of that deadline and probes with short waits, because a
+ *     Playwright locator wait that does not match blocks for its full
+ *     timeout — sixteen of those used to cost more than the entire budget
+ *     and made `ready` unreachable.
  *
  * The page object is injected, so unit tests drive it with a small fake —
  * no browser and no Playwright install are needed to test every state.
@@ -146,7 +150,8 @@ async function checkArenaHealth(page, options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => Date.now()
   const timeoutMs = positive(options.timeoutMs, ARENA_TIMEOUTS.healthMs)
   const elementTimeoutMs = positive(options.elementTimeoutMs, ARENA_TIMEOUTS.elementMs)
-  const verificationTimeoutMs = positive(options.verificationTimeoutMs, ARENA_TIMEOUTS.verificationMs)
+  const verificationProbeMs = positive(options.verificationProbeMs, ARENA_TIMEOUTS.verificationProbeMs)
+  const verificationPhaseRatio = ratio(options.verificationPhaseRatio, ARENA_TIMEOUTS.verificationPhaseRatio)
   const hostnames = options.hostnames || ARENA_HOSTNAMES
   const verificationSignals = options.verificationSignals || ARENA_VERIFICATION_SIGNALS
   const requiredElements = options.requiredElements || ARENA_REQUIRED_ELEMENTS
@@ -164,41 +169,68 @@ async function checkArenaHealth(page, options = {}) {
     }
 
     const deadline = checkedAt + timeoutMs
-    const budget = () => deadline - now()
+    /* Two nested budgets. The outer one is the caller's overall guarantee;
+       the inner one reserves most of it for the required elements so the
+       verification sweep can never starve the phase that reports `ready`. */
+    const verificationDeadline = Math.min(
+      deadline,
+      checkedAt + Math.max(1, Math.round(timeoutMs * verificationPhaseRatio)),
+    )
+    const remainingTo = (until) => until - now()
 
     /* 1. Verification first: if Arena is challenging the session, nothing
-          else matters and we must not touch the page. */
+          else matters and we must not touch the page.
+
+          A non-matching Playwright `waitFor` blocks for the whole timeout
+          before it rejects, so every signal gets a short probe AND the phase
+          has its own deadline — 16 signals × a full element-sized wait used
+          to exceed `healthMs` on its own and made every other state
+          unreachable. */
+    let verification = null
+    let verificationComplete = true
     for (const signal of verificationSignals) {
       for (const selector of signal.selectors || []) {
-        const remaining = budget()
-        if (remaining <= 0) return result(ARENA_HEALTH.TIMEOUT, { url, checkedAt, timedOut: true })
+        const remaining = remainingTo(verificationDeadline)
+        if (remaining <= 0) {
+          verificationComplete = false
+          break
+        }
         // eslint-disable-next-line no-await-in-loop
-        if (await probe(page, selector, Math.min(verificationTimeoutMs, remaining))) {
-          return result(ARENA_HEALTH.VERIFICATION_REQUIRED, {
-            url,
-            checkedAt,
-            verification: Object.freeze({
-              signal: signal.id,
-              selector: describeSelector(selector),
-            }),
+        if (await probe(page, selector, Math.min(verificationProbeMs, remaining))) {
+          verification = Object.freeze({
+            signal: signal.id,
+            selector: describeSelector(selector),
           })
+          break
         }
       }
+      if (verification) break
     }
 
-    /* 2. Required elements. */
+    if (verification) {
+      return result(ARENA_HEALTH.VERIFICATION_REQUIRED, { url, checkedAt, verification })
+    }
+
+    /* 2. Required elements. The first candidate of an element may use the
+          full element timeout (a slow SPA is allowed to render); fallbacks
+          share whatever is left, so a missing element is reported as
+          `elements_missing` instead of exhausting the budget. */
     const elements = {}
     const missing = []
     for (const element of requiredElements) {
+      const selectors = element.selectors || []
       let matched = null
-      for (const selector of element.selectors || []) {
-        const remaining = budget()
+      for (let index = 0; index < selectors.length; index += 1) {
+        const remaining = remainingTo(deadline)
         if (remaining <= 0) {
           return result(ARENA_HEALTH.TIMEOUT, { url, checkedAt, timedOut: true, missing })
         }
+        const waitMs = index === 0
+          ? Math.min(elementTimeoutMs, remaining)
+          : Math.min(elementTimeoutMs, Math.max(1, Math.floor(remaining / (selectors.length - index))))
         // eslint-disable-next-line no-await-in-loop
-        if (await probe(page, selector, Math.min(elementTimeoutMs, remaining))) {
-          matched = describeSelector(selector)
+        if (await probe(page, selectors[index], waitMs)) {
+          matched = describeSelector(selectors[index])
           break
         }
       }
@@ -213,6 +245,12 @@ async function checkArenaHealth(page, options = {}) {
         elements: Object.freeze(elements),
         missing: Object.freeze(missing),
       })
+    }
+
+    /* Never call a page `ready` unless the verification sweep finished —
+       an incomplete sweep cannot prove no challenge was present. */
+    if (!verificationComplete) {
+      return result(ARENA_HEALTH.TIMEOUT, { url, checkedAt, timedOut: true })
     }
 
     return result(ARENA_HEALTH.READY, { url, checkedAt, elements: Object.freeze(elements) })
@@ -230,6 +268,13 @@ async function checkArenaHealth(page, options = {}) {
 function positive(value, fallback) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+/** Clamp a phase share to (0, 1] — a phase may never own more than the whole. */
+function ratio(value, fallback) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return Math.min(1, parsed)
 }
 
 module.exports = {

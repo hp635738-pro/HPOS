@@ -25,7 +25,8 @@ const FAST_TIMEOUTS = {
   navigationMs: 1000,
   healthMs: 4000,
   elementMs: 200,
-  verificationMs: 100,
+  verificationProbeMs: 50,
+  verificationPhaseRatio: 0.4,
   shutdownMs: 60,
   forceKillMs: 20,
 }

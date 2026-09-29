@@ -155,6 +155,18 @@ function createArenaBridge(options = {}) {
     else console.log(line)
   }
 
+  /**
+   * Best-effort handle on the Chromium OS process.
+   *
+   * Playwright 1.63's `Browser` exposes no `process()` (verified against a
+   * real launch: `typeof browser.process === 'undefined'`), so with the
+   * current driver this returns null and `killBrowserSync()` is inert. That
+   * is tolerated rather than fatal: Playwright tears down browsers it
+   * launched when the owning Node process dies, which was verified directly
+   * (a SIGKILLed parent left zero Chromium processes). The graceful
+   * `browser.close()` in stop() remains the real shutdown path; the kill is
+   * only the fallback for a close that hangs.
+   */
   function browserProcess(target = browser) {
     if (!target || typeof target.process !== 'function') return null
     try {
@@ -457,7 +469,8 @@ function createArenaBridge(options = {}) {
         const health = await checkArenaHealth(page, {
           timeoutMs: timeouts.healthMs,
           elementTimeoutMs: timeouts.elementMs,
-          verificationTimeoutMs: timeouts.verificationMs,
+          verificationProbeMs: timeouts.verificationProbeMs,
+          verificationPhaseRatio: timeouts.verificationPhaseRatio,
           now,
         })
         lastHealth = health
@@ -542,7 +555,8 @@ function createArenaBridge(options = {}) {
     const health = await checkArenaHealth(page, {
       timeoutMs: timeouts.healthMs,
       elementTimeoutMs: timeouts.elementMs,
-      verificationTimeoutMs: timeouts.verificationMs,
+      verificationProbeMs: timeouts.verificationProbeMs,
+      verificationPhaseRatio: timeouts.verificationPhaseRatio,
       now,
     })
     lastHealth = health

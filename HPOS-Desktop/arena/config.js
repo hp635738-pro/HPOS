@@ -49,11 +49,21 @@ const ARENA_URL = Object.freeze({
 const ARENA_TIMEOUTS = Object.freeze({
   launchMs: 30000,
   navigationMs: 30000,
+  /* Overall budget for one health check — every phase shares it. */
   healthMs: 15000,
+  /* Ceiling for a single required-element candidate. The first candidate of
+     an element may use it in full (a slow SPA is allowed to render); fallback
+     candidates share what is left so a genuinely missing element is reported
+     instead of burning the budget one candidate at a time. */
   elementMs: 5000,
-  /* Verification signals are answered from an interstitial, so they are
-     probed with a short budget instead of the full element timeout. */
-  verificationMs: 1500,
+  /* Verification interstitials are server-rendered and present at first
+     paint, so each signal only needs a short wait — giving all 16 of them
+     `elementMs` each summed to far more than `healthMs` and made every other
+     state unreachable. */
+  verificationProbeMs: 250,
+  /* Hard cap on the verification phase, as a share of `healthMs`. The
+     remainder is reserved for the required-element phase. */
+  verificationPhaseRatio: 0.4,
   shutdownMs: 5000,
   forceKillMs: 2000,
 })

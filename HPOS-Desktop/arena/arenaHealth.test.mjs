@@ -20,6 +20,7 @@ const {
   ARENA_HOSTNAMES,
   ARENA_LAUNCH,
   ARENA_REQUIRED_ELEMENTS,
+  ARENA_TIMEOUTS,
   ARENA_VERIFICATION_SIGNALS,
 } = require('./config.js')
 
@@ -39,8 +40,14 @@ function matchesName(filter, value) {
  * A page whose "visible" elements are declared up front. Locator waits
  * resolve when a declared element matches the descriptor and reject with a
  * TimeoutError otherwise, exactly like Playwright.
+ *
+ * Pass `clock` to model REAL Playwright timing: a wait that does not match
+ * blocks for its whole `timeout` before rejecting, while a matching one
+ * resolves immediately. Without `clock` every miss rejects instantly — that
+ * optimistic shape is exactly what hid the timeout-budgeting bug, so the
+ * budget regression tests must always pass a clock.
  */
-function makeFakePage({ url = 'https://arena.ai/', elements = [], throwsOnFirst = false, waits = null } = {}) {
+function makeFakePage({ url = 'https://arena.ai/', elements = [], throwsOnFirst = false, clock = null } = {}) {
   const probes = []
 
   function makeLocator(kind, filter, label) {
@@ -50,11 +57,14 @@ function makeFakePage({ url = 'https://arena.ai/', elements = [], throwsOnFirst 
         return locator
       },
       async waitFor(options = {}) {
-        probes.push({ kind, filter: label, state: options.state, timeout: options.timeout })
-        if (typeof waits === 'function') {
-          await waits()
-          return undefined
-        }
+        const requested = Math.max(1, Math.round(options.timeout || 0))
+        probes.push({
+          kind,
+          filter: label,
+          state: options.state,
+          timeout: requested,
+          at: clock ? clock.value : 0,
+        })
         const hit = elements.some((element) => {
           if (kind === 'role') return element.role === filter.role && matchesName(filter.name, element.name)
           if (kind === 'text') return typeof element.text === 'string' && filter.test(element.text)
@@ -65,6 +75,7 @@ function makeFakePage({ url = 'https://arena.ai/', elements = [], throwsOnFirst 
           return false
         })
         if (!hit) {
+          if (clock) clock.tick(requested)
           const err = new Error(`locator not visible: ${kind}`)
           err.name = 'TimeoutError'
           throw err
@@ -97,6 +108,24 @@ const READY_ELEMENTS = [
   { role: 'textbox', name: 'Ask anything' },
   { role: 'button', name: 'Send' },
 ]
+
+/** Virtual clock: lets the fake page charge real-shaped wait costs instantly. */
+function makeClock() {
+  return {
+    value: 0,
+    tick(ms) {
+      this.value += Math.max(0, Math.round(ms))
+    },
+  }
+}
+
+const VERIFICATION_LABELS = new Set(
+  ARENA_VERIFICATION_SIGNALS.flatMap((signal) => signal.selectors.map(describeSelector)),
+)
+
+function verificationProbesOf(page) {
+  return page.probes.filter((probe) => VERIFICATION_LABELS.has(probe.filter))
+}
 
 /* -------------------------------------------------------------- ready ------- */
 {
@@ -185,28 +214,145 @@ const READY_ELEMENTS = [
 
 /* --------------------------------------------------------------- timeout --- */
 {
-  /* Every probe times out and the clock advances past the deadline. */
-  let clock = 0
-  const page = makeFakePage({
-    elements: [],
-    waits: async () => {
-      clock += 1000
-      const err = new Error('locator waiter timed out')
-      err.name = 'TimeoutError'
-      throw err
-    },
-  })
+  /* Nothing matches and every probe charges its full wait. */
+  const clock = makeClock()
+  const page = makeFakePage({ elements: [], clock })
   const health = await checkArenaHealth(page, {
-    timeoutMs: 5000,
-    verificationTimeoutMs: 1000,
-    elementTimeoutMs: 1000,
-    now: () => clock,
+    timeoutMs: 2000,
+    elementTimeoutMs: 500,
+    verificationProbeMs: 300,
+    now: () => clock.value,
   })
 
   assert.equal(health.ok, false)
   assert.equal(health.state, ARENA_HEALTH.TIMEOUT)
   assert.equal(health.timedOut, true)
+  assert.ok(clock.value <= 2000, `elapsed ${clock.value}ms must stay inside the 2000ms budget`)
   console.log('ok: timeout — the check is bounded by one deadline')
+}
+
+/* ======================= timeout-budget regressions =======================
+   Real Playwright blocks a non-matching locator wait for its whole timeout.
+   Sixteen verification probes at the old 1500ms each cost 24s against a 15s
+   budget, so the deadline always expired inside the verification sweep and
+   `ready` was unreachable in a real browser. These tests charge that cost. */
+
+/* ---------------- default timeouts reach the health-check phase (ready) --- */
+{
+  const clock = makeClock()
+  const page = makeFakePage({ elements: READY_ELEMENTS, clock })
+  const health = await checkArenaHealth(page, { now: () => clock.value })
+
+  assert.equal(health.ok, true, 'a healthy page must be ready with DEFAULT timeouts')
+  assert.equal(health.state, ARENA_HEALTH.READY)
+  assert.deepEqual(Object.keys(health.elements).sort(), ['promptComposer', 'sendControl'])
+  assert.ok(
+    clock.value < ARENA_TIMEOUTS.healthMs,
+    `elapsed ${clock.value}ms must fit inside the ${ARENA_TIMEOUTS.healthMs}ms budget`,
+  )
+  console.log(`ok: default timeouts reach the health-check phase — ready in ${clock.value}ms of ${ARENA_TIMEOUTS.healthMs}ms`)
+}
+
+/* ------------- verification probing cannot exceed the health budget -------- */
+{
+  const clock = makeClock()
+  const page = makeFakePage({ elements: [], clock })
+  const budget = ARENA_TIMEOUTS.healthMs
+  const verificationCap = Math.round(budget * ARENA_TIMEOUTS.verificationPhaseRatio)
+  await checkArenaHealth(page, { now: () => clock.value })
+
+  /* (a) never overshoot the caller's overall budget */
+  assert.ok(
+    clock.value <= budget,
+    `elapsed ${clock.value}ms exceeded the ${budget}ms health budget`,
+  )
+
+  /* (b) the required-element phase is actually reached, and verification
+         stayed inside its own share of the budget */
+  const verification = verificationProbesOf(page)
+  const elementProbes = page.probes.filter((probe) => !VERIFICATION_LABELS.has(probe.filter))
+  assert.ok(verification.length > 0, 'verification signals must be probed')
+  assert.ok(elementProbes.length > 0, 'the required-element phase must be reached')
+
+  const last = verification[verification.length - 1]
+  const verificationEnd = last.at + last.timeout
+  assert.ok(
+    verificationEnd <= verificationCap,
+    `verification probing ended at ${verificationEnd}ms, cap is ${verificationCap}ms`,
+  )
+  assert.ok(
+    elementProbes[0].at >= verificationEnd - 1,
+    'element probing must start only after the verification sweep',
+  )
+
+  /* (c) no single non-matching selector is charged the full element timeout */
+  for (const probe of verification) {
+    assert.ok(
+      probe.timeout <= ARENA_TIMEOUTS.verificationProbeMs,
+      `verification probe waited ${probe.timeout}ms (max ${ARENA_TIMEOUTS.verificationProbeMs}ms): ${probe.filter}`,
+    )
+  }
+  console.log(`ok: verification probing stays inside its ${verificationCap}ms share (${verificationEnd}ms) of the ${budget}ms budget`)
+}
+
+/* ------- a missing element is reported, not masked by a starved budget ----- */
+{
+  const clock = makeClock()
+  const page = makeFakePage({ elements: [], clock })
+  const budget = ARENA_TIMEOUTS.healthMs * 2
+  const health = await checkArenaHealth(page, { timeoutMs: budget, now: () => clock.value })
+
+  assert.equal(health.state, ARENA_HEALTH.ELEMENTS_MISSING, 'a missing element must be named, not reported as a timeout')
+  assert.deepEqual(health.missing.map((m) => m.id), ['promptComposer', 'sendControl'])
+  assert.ok(clock.value <= budget, `elapsed ${clock.value}ms exceeded the ${budget}ms budget`)
+  console.log('ok: missing elements are reported instead of exhausting the budget')
+}
+
+/* ------------- the captcha/login groups are reachable again ---------------- */
+{
+  /* `login` is the last verification group: with the old budgeting the
+     deadline expired before the sweep ever reached it. */
+  const clock = makeClock()
+  const page = makeFakePage({ elements: [{ role: 'heading', name: 'Sign in' }], clock })
+  const health = await checkArenaHealth(page, { now: () => clock.value })
+
+  assert.equal(health.state, ARENA_HEALTH.VERIFICATION_REQUIRED)
+  assert.equal(health.verification.signal, 'login')
+  assert.ok(
+    clock.value <= Math.round(ARENA_TIMEOUTS.healthMs * ARENA_TIMEOUTS.verificationPhaseRatio),
+    `login detected at ${clock.value}ms — inside the verification share`,
+  )
+  console.log('ok: the captcha/login signal groups are reachable within the verification budget')
+}
+
+/* --------------- verification is detected without a long wait -------------- */
+{
+  const clock = makeClock()
+  const page = makeFakePage({ elements: [{ text: 'Verify you are human' }], clock })
+  const health = await checkArenaHealth(page, { now: () => clock.value })
+
+  assert.equal(health.state, ARENA_HEALTH.VERIFICATION_REQUIRED)
+  assert.equal(health.verification.signal, 'human_check')
+  assert.ok(
+    clock.value <= ARENA_TIMEOUTS.verificationProbeMs,
+    `an interstitial present at first paint must be detected at once (took ${clock.value}ms)`,
+  )
+  console.log('ok: an interstitial at first paint is detected immediately')
+}
+
+/* ---------------- an incomplete sweep never claims `ready` ----------------- */
+{
+  const clock = makeClock()
+  const page = makeFakePage({ elements: READY_ELEMENTS, clock })
+  const health = await checkArenaHealth(page, {
+    timeoutMs: 1000,
+    verificationProbeMs: 500,
+    now: () => clock.value,
+  })
+
+  assert.notEqual(health.state, ARENA_HEALTH.READY, 'a cut-short verification sweep must not claim ready')
+  assert.equal(health.state, ARENA_HEALTH.TIMEOUT)
+  console.log('ok: a cut-short verification sweep never reports ready')
 }
 
 /* ------------------------------------------------------ browser unavailable */
