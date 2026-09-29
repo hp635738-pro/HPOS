@@ -118,8 +118,11 @@ export default function Chats() {
    * grows. `pending` stays true for the whole turn, so the ThinkingOrb keeps
    * showing until the answer is final or an error lands.
    *
-   * Only text mode is routed to Arena: Search and Code are not implemented
-   * yet (the main process refuses them too).
+   * Text (Direct Chat) and Search are routed to Arena — both run through the
+   * same session and the same event stream, so this function is mode-blind:
+   * Search results arrive as text plus a Markdown sources block and render in
+   * the same bubble. Code is not implemented yet (the main process refuses it
+   * too).
    *
    * Stop: while Arena is streaming, `arenaStreaming` reveals a Stop control
    * next to the orb. It calls chatCancel for THIS conversation, which aborts
@@ -198,7 +201,7 @@ export default function Chats() {
 
     arena.onChatEvent(onEvent)
     arena
-      .chatSend({ prompt, conversationId: id, mode: 'text' })
+      .chatSend({ prompt, conversationId: id, mode })
       .then((res) => {
         // The invoke() reply carries the outcome too, so a missed event
         // still ends the turn cleanly. Errors already reported through the
@@ -263,11 +266,11 @@ export default function Chats() {
     setPending(true)
 
     /* A live Arena bridge (Electron main process) takes over the turn. When
-       it is absent — plain web dev, unit tests, or Search/Code mode — the
-       original demo reply path is untouched. */
+       it is absent — plain web dev, unit tests, or Code mode — the original
+       demo reply path is untouched. */
     const arena = typeof window !== 'undefined' ? window.hpos?.arena : null
     if (
-      mode === 'text'
+      (mode === 'text' || mode === 'search')
       && arena
       && typeof arena.chatSend === 'function'
       && typeof arena.onChatEvent === 'function'

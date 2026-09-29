@@ -1,6 +1,7 @@
 # HPOS-Desktop/arena — Arena Playwright bridge
 
-Phase 1 (lifecycle) and Phase 2 (direct Chat) of the Arena integration.
+Phase 1 (lifecycle), Phase 2 (Direct Chat) and Phase 3 (Search) of the Arena
+integration.
 
 This module owns every piece of browser automation HPOS uses for Arena. It
 is required by the Electron main process (`HPOS-Desktop/main.js`), which
@@ -15,12 +16,14 @@ exposes it to the renderer over the `hpos.arena` IPC surface.
 | Session | `arenaBridge.js` | Playwright `storageState` persistence under `~/.hpos/arena` |
 | Lifecycle | `arenaBridge.js` | idempotent `start()` / `stop()`, process guards, `dispose()` |
 | Direct chat | `chat.js` | one prompt → streamed answer, multi-turn over one session |
+| Search | `search.js` | one query → streamed answer + cited sources, same session |
+| Turn engine | `turn.js` | the mechanics both modes share: poll loop, cancel, errors |
 | Config | `config.js` | origin, timeouts, launch options, selector descriptors |
 | States | `errors.js` | frozen `ARENA_HEALTH` / `ARENA_ERROR` codes + safe messages |
 
 ## What is deliberately NOT implemented
 
-- Search mode, Code mode, downloads and any redesign of the Chat UI.
+- Code mode, downloads and any redesign of the Chat or Search UI.
 - **Automatic retries.** A failed turn is reported once — never resent.
 - **Anything that bypasses verification.** No CAPTCHA solving, no
   challenge clicking, no stealth patches, no User-Agent spoofing, no
@@ -148,6 +151,7 @@ and reported as `session_state_invalid`. A session that hit verification is
 node HPOS-Desktop/arena/arenaHealth.test.mjs          # every health-check state
 node HPOS-Desktop/arena/arenaBridge.test.mjs          # lifecycle, persistence, guards
 node HPOS-Desktop/arena/arenaChat.test.mjs            # direct chat: turns, streaming, errors
+node HPOS-Desktop/arena/arenaSearch.test.mjs          # search: results, sources, failures
 node HPOS-Desktop/arena/arenaDirectChat.ui.test.mjs   # the Chat UI wiring in jsdom
 npm test                                              # all of the above, in the root chain
 ```
@@ -156,6 +160,81 @@ The three `arena*.test.mjs` files run against a fake Playwright driver — no
 browser, no network and no Playwright install required, which is why they
 run in CI where only the root `npm ci` happens. The UI test renders the real
 `src/App.jsx` in jsdom with `window.hpos.arena` stubbed.
+
+## Phase 3 — Search
+
+`createArenaSearch({bridge, timing, elements, readResults, searchUrl, logger})`
+returns `{run, cancel, isBusy, ARENA_SEARCH_EVENT, ARENA_SEARCH_STATE,
+ARENA_SEARCH_ERROR}`.
+
+```js
+const result = await search.run({
+  query: 'capital of france',
+  conversationId: 'chat-123',
+  signal,            // optional AbortSignal — cancels like cancel()
+  onEvent,
+})
+// { ok, state, message, text, answer, sources: [{ title, url }] }
+```
+
+`text` is the answer plus the cited sources rendered as Markdown, which is
+exactly what the existing Search bubble already displays:
+
+```
+Paris is the capital of France.
+
+---
+**Sources**
+1. [Britannica](https://britannica.com/paris)
+2. [Wikipedia](https://en.wikipedia.org/wiki/Paris)
+```
+
+### What it reuses
+
+Search is a **mode of the Arena composer**, not a different site, so it runs on
+the same session as Direct Chat:
+
+| Reused | How |
+| --- | --- |
+| Session | `bridge.start()` / `getPage()` / `persistSession()` — one thread, no relaunch |
+| Health check | `bridge.healthCheck()` (falling back to `checkArenaHealth`) for diagnosis |
+| Selectors | `resolveLocator` + the semantic descriptors in `config.js` |
+| Verification | fatal, handled identically: stop the session, report `verification_required` |
+| Lifecycle | the bridge owns launch/stop/guards; Search adds nothing |
+| Turn mechanics | `turn.js` — the poll loop, stability, deadlines, cancellation, errors |
+
+Because the turn engine is shared, Search inherits the same guarantees as Chat:
+one submit per turn, no retries, immediate cancellation, and the same error
+vocabulary (`verification_required`, `timeout`, `navigation_failed`,
+`response_not_detected`, `cancelled`, `busy`, …).
+
+### Getting into Search mode
+
+`prepare` runs before the query is typed and is best-effort:
+
+1. navigate to a configured Arena search page — **off by default**
+   (`HPOS_ARENA_SEARCH_URL`, refused unless it is an Arena URL);
+2. click the Search switch, but **only** when the page is not already showing a
+   search-scoped input, so the mode is never toggled back off.
+
+Either step failing degrades to typing into whatever composer is there; only an
+explicitly configured navigation reports `navigation_failed`.
+
+### Sources
+
+Links are read with `getByRole('link')` and filtered:
+
+- Arena's own links (nav, sign-in, footer) are chrome, not citations;
+- duplicates are removed and the list is capped at 8;
+- **only sources the current search produced are reported** — links left by an
+  earlier search in the same conversation are diffed away against the
+  pre-submit snapshot, so a bubble cites only its own findings.
+
+### One slot for both modes
+
+Chat and Search drive the SAME browser page, so `main.js` gives them one shared
+slot (`createArenaTurnSlot()`): a chat turn cannot start while a search is
+running and vice versa. Without it the two would type over each other.
 
 ## Phase 2 — direct Chat
 
@@ -239,12 +318,13 @@ telling the user to finish the check themselves.
 
 | Channel | Direction | Payload |
 | --- | --- | --- |
-| `hpos:arena:chat:send` | renderer → main | `{prompt, conversationId, mode}` → `{...result, conversationId}` |
+| `hpos:arena:chat:send` | renderer → main | `{prompt, conversationId, mode}` → `{...result, conversationId, mode}` — `mode` is `text` (Direct Chat) or `search` |
 | `hpos:arena:chat:cancel` | renderer → main | `{conversationId}` → `{ok, state, conversationId}` |
 | `hpos:arena:chat:event` | main → renderer | `{type, state, text \| message, conversationId}` |
 | `hpos:arena:status` | renderer → main | → `{ok, ...getStatus(), busy}` |
 
-`mode` must be `text`; anything else returns `{ok:false, code:'EUNSUPPORTED'}`.
+`mode` is `text` or `search`; anything else (Code) returns
+`{ok:false, code:'EUNSUPPORTED'}`.
 
 ### The Stop control (Chats)
 
@@ -261,8 +341,14 @@ composer returns to its normal state.
 
 ### Selectors
 
-`ARENA_CHAT_ELEMENTS` in `config.js` holds role/text descriptors for the
-composer, the send control, the stop control and the assistant message
-containers. Every lookup goes through `resolveLocator` in `healthCheck.js`,
-so **CSS class names are never used**. When Arena ships a UI change, update
-the descriptors — no code change is needed.
+`ARENA_CHAT_ELEMENTS` (and `ARENA_SEARCH_ELEMENTS`) in `config.js` hold
+role/text descriptors for the composer, the send control, the stop control and
+the result containers. Every lookup goes through `resolveLocator` in
+`healthCheck.js`, so **CSS class names are never used**. When Arena ships a UI
+change, update the descriptors — no code change is needed.
+
+One hard rule learned against real Chromium: descriptors for something HPOS
+**types into** may only match text-entry roles (`searchbox`, `textbox`,
+`combobox`) or placeholders. A bare `getByLabel` match is ambiguous — it
+matches `aria-label` on any element, so a "Search" mode switch looks exactly
+like a search box.

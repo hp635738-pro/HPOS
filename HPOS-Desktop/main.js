@@ -12,7 +12,12 @@ const {
   describeUpdateMechanism,
   createLinuxPackageBackend,
 } = require('./linuxUpdate')
-const { createArenaBridge, createArenaChat } = require('./arena')
+const {
+  createArenaBridge,
+  createArenaChat,
+  createArenaSearch,
+  createArenaTurnSlot,
+} = require('./arena')
 
 /* ------------------------------------------------ front-end mode detection
    Clean separation of dev vs production:
@@ -1157,35 +1162,51 @@ app.whenReady().then(async () => {
   })
 })
 
-/* ------------------------------------------- Arena Direct Chat (Phase 2)
+/* ---------------------------------- Arena Direct Chat + Search (Phase 2/3)
    One IPC surface for the Chats section. The renderer sends a plain prompt
    string and receives structured results; every selector, URL, timeout and
    browser decision stays here in the main process.
 
-     · chatSend    send one prompt, stream events on the event channel
+     · chatSend    send one prompt (text) or search query (search), streaming
+                   events on the event channel
      · chatCancel  stop the running turn (the Chats Stop control)
      · status      read-only session snapshot for the UI
 
-   One turn at a time (chat.js refuses a concurrent send with `busy`), no
-   retries anywhere, and verification is fatal for the turn: it stops the
-   session and reports `verification_required` for the UI to surface.
+   Both modes run on the SAME session and the SAME browser page, so they
+   share one in-flight slot: a search cannot start while a chat turn is
+   running, and vice versa — otherwise the two would type over each other.
+
+   One turn at a time (a concurrent send is refused with `busy`), no retries
+   anywhere, and verification is fatal for the turn: it stops the session and
+   reports `verification_required` for the UI to surface.
 
    Cancelling aborts the turn where it is: the poll loop exits immediately
-   and reports `cancelled`. The prompt is never sent a second time — the
-   next send is a new turn on the same Arena thread. */
+   and reports `cancelled`. Nothing is sent a second time — the next send is
+   a new turn on the same Arena thread. */
 const CHANNEL_ARENA_CHAT_SEND = 'hpos:arena:chat:send'
 const CHANNEL_ARENA_CHAT_CANCEL = 'hpos:arena:chat:cancel'
 const CHANNEL_ARENA_CHAT_EVENT = 'hpos:arena:chat:event'
 const CHANNEL_ARENA_STATUS = 'hpos:arena:status'
 
+const arenaLogger = (line) => {
+  if ((process.env.HPOS_ARENA_LOG_LEVEL || 'info') !== 'silent') {
+    // eslint-disable-next-line no-console
+    console.log(line)
+  }
+}
+/* One browser page, so one turn at a time — across BOTH modes. */
+const arenaTurnSlot = createArenaTurnSlot()
+
 const arenaChat = createArenaChat({
   bridge: arenaBridge,
-  logger: (line) => {
-    if ((process.env.HPOS_ARENA_LOG_LEVEL || 'info') !== 'silent') {
-      // eslint-disable-next-line no-console
-      console.log(line)
-    }
-  },
+  slot: arenaTurnSlot,
+  logger: arenaLogger,
+})
+
+const arenaSearch = createArenaSearch({
+  bridge: arenaBridge,
+  slot: arenaTurnSlot,
+  logger: arenaLogger,
 })
 
 function broadcastArenaChatEvent(payload) {
@@ -1207,21 +1228,27 @@ ipcMain.handle(CHANNEL_ARENA_CHAT_SEND, async (event, request) => {
   const conversationId = request && typeof request.conversationId === 'string'
     ? request.conversationId.slice(0, 120)
     : null
-  /* Model/mode are echoed for the bubble label only — Search and Code are
-     not implemented, so anything other than the default text mode is
-     refused here rather than silently ignored. */
+  /* Mode decides which Arena interface handles the turn. Search is Phase 3;
+     Code is not implemented yet, so anything else is refused here rather
+     than silently treated as text. */
   const mode = request && typeof request.mode === 'string' ? request.mode : 'text'
-  if (mode !== 'text') {
-    return fail('EUNSUPPORTED', 'Only Direct Chat (text) is available in this phase')
+  if (mode !== 'text' && mode !== 'search') {
+    return fail('EUNSUPPORTED', 'Only Direct Chat and Search are available in this phase')
   }
-  const result = await arenaChat.send({
-    prompt,
-    conversationId,
-    onEvent: broadcastArenaChatEvent,
-  })
+  const result = mode === 'search'
+    ? await arenaSearch.run({
+      query: prompt,
+      conversationId,
+      onEvent: broadcastArenaChatEvent,
+    })
+    : await arenaChat.send({
+      prompt,
+      conversationId,
+      onEvent: broadcastArenaChatEvent,
+    })
   /* The renderer also gets the outcome on the invoke() reply so a caller
      that misses the streamed events still knows how the turn ended. */
-  return { ...result, conversationId }
+  return { ...result, conversationId, mode }
 })
 
 /* Stop the running turn. The conversation id scopes the request: a window
@@ -1237,7 +1264,7 @@ ipcMain.handle(CHANNEL_ARENA_CHAT_CANCEL, (event, request) => {
 
 ipcMain.handle(CHANNEL_ARENA_STATUS, (event) => {
   if (!isTrusted(event)) return fail('EUNTRUSTED', 'Refused: unknown renderer')
-  return { ok: true, ...arenaBridge.getStatus(), busy: arenaChat.isBusy() }
+  return { ok: true, ...arenaBridge.getStatus(), busy: arenaTurnSlot.busy }
 })
 
 app.on('window-all-closed', () => {

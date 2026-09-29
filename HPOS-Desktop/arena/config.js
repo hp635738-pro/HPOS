@@ -214,6 +214,94 @@ const ARENA_CHAT_TIMINGS = Object.freeze({
   maxResponseChars: 48000,
 })
 
+/* ------------------------------------------------------- Search (Phase 3)
+   Search is a MODE of the Arena composer, not a different site: HPOS keeps
+   the existing session and switches the composer into Search mode before it
+   types. Same rule as everywhere else — semantic locators only, with
+   fallbacks so a copy change degrades instead of failing the turn.
+
+     · `searchInput` is deliberately strict (searchbox, or a control whose
+       placeholder/label talks about search). When one of those is already on
+       the page the composer is IN Search mode, so no switch is clicked —
+       this is what keeps HPOS from toggling the mode back off.
+     · `mode` is the switch itself, tried only when no search-scoped input was
+       found, and clicked at most once.
+     · `results` are the answer containers; `sources` are the links Arena
+       cites. Both are best-effort: a search with no sources still returns its
+       answer. */
+const ARENA_SEARCH_ELEMENTS = Object.freeze({
+  /* Text-entry roles and placeholders ONLY. Deliberately no bare
+     `{ label: /search/i }`: getByLabel matches aria-label on ANY element, so
+     a "Search" mode switch (or any control labelled Search) would masquerade
+     as a search box — HPOS then skipped the mode switch and tried to type the
+     query into a button. Found against real Chromium, not by the unit fakes. */
+  searchInput: Object.freeze([
+    { kind: 'role', role: 'searchbox', name: /search|ask|query|find/i },
+    { kind: 'role', role: 'searchbox' },
+    { kind: 'role', role: 'textbox', name: /^search$/i },
+    { kind: 'placeholder', placeholder: /search|find|ask the web/i },
+  ]),
+  mode: Object.freeze([
+    { kind: 'role', role: 'switch', name: /^search$/i },
+    { kind: 'role', role: 'tab', name: /^search$/i },
+    { kind: 'role', role: 'radio', name: /^search$/i },
+    { kind: 'role', role: 'button', name: /^search$/i },
+    { kind: 'text', text: /^search$/i },
+  ]),
+  /* Strict search-scoped descriptors first, the generic composer as a last
+     resort so a redesign degrades to "typed somewhere" instead of failing. */
+  /* What the query is typed into. Same rule: only things that can actually
+     hold text, so a fill() never lands on a button. */
+  input: Object.freeze([
+    { kind: 'role', role: 'searchbox', name: /search|ask|query|find/i },
+    { kind: 'role', role: 'searchbox' },
+    { kind: 'role', role: 'textbox', name: /^search$/i },
+    { kind: 'placeholder', placeholder: /search|find|ask the web/i },
+    { kind: 'role', role: 'textbox', name: /ask|message|prompt|chat|type/i },
+    { kind: 'placeholder', placeholder: /ask|message|prompt|chat|type/i },
+    { kind: 'role', role: 'textbox' },
+  ]),
+  /* Keyed `send` because that is what the turn engine looks for. Order
+     matters: a page that has both a Search switch and a Send button must
+     submit with Send, so `^search$` is the LAST candidate — it is there for
+     pages whose search control really is the submit control. */
+  send: Object.freeze([
+    { kind: 'role', role: 'button', name: /^send/i },
+    { kind: 'role', role: 'button', name: /send message/i },
+    { kind: 'role', role: 'button', name: /submit/i },
+    { kind: 'role', role: 'button', name: /^search$/i },
+  ]),
+  stop: Object.freeze([
+    { kind: 'role', role: 'button', name: /^stop/i },
+    { kind: 'role', role: 'button', name: /stop generating/i },
+    { kind: 'text', text: /searching/i },
+    { kind: 'text', text: /gathering (sources|results)/i },
+  ]),
+  results: Object.freeze([
+    { kind: 'role', role: 'article' },
+    { kind: 'label', label: /search result|result|answer|response/i },
+  ]),
+  sources: Object.freeze([
+    { kind: 'role', role: 'link' },
+  ]),
+})
+
+const ARENA_SEARCH_TIMINGS = Object.freeze({
+  ...ARENA_CHAT_TIMINGS,
+  /* Sources keep landing after the answer text has stopped moving, so a
+     search needs a slightly longer quiet period before it counts as final. */
+  stableMs: 2200,
+  missingAnswerMs: 6000,
+})
+
+/* null on purpose: Search is a mode of the composer, so HPOS switches mode in
+   place rather than guessing a path. If Arena ever moves Search to its own
+   page, point HPOS_ARENA_SEARCH_URL at it — a non-Arena URL is refused. */
+const ARENA_SEARCH_URL = Object.freeze({
+  defaultUrl: null,
+  envKey: 'HPOS_ARENA_SEARCH_URL',
+})
+
 module.exports = {
   ARENA_ORIGIN,
   ARENA_HOSTNAMES,
@@ -226,4 +314,7 @@ module.exports = {
   ARENA_REQUIRED_ELEMENTS,
   ARENA_CHAT_ELEMENTS,
   ARENA_CHAT_TIMINGS,
+  ARENA_SEARCH_ELEMENTS,
+  ARENA_SEARCH_TIMINGS,
+  ARENA_SEARCH_URL,
 }

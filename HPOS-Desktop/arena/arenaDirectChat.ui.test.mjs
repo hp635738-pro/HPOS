@@ -22,7 +22,19 @@ const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></
 globalThis.window = dom.window
 globalThis.document = dom.window.document
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true })
-for (const k of ['localStorage', 'HTMLElement', 'Element', 'Node', 'CustomEvent']) {
+/* React's own checks (`'oninput' in document`) and the Radix primitives used
+   by the prompt box (FocusScope needs MutationObserver, NodeFilter, …) read
+   these as GLOBALs, not as window properties. Copy every jsdom global Node
+   does not already define instead of chasing them one crash at a time. */
+for (const key of Object.getOwnPropertyNames(dom.window)) {
+  if (key in globalThis || key.startsWith('_')) continue
+  try {
+    globalThis[key] = dom.window[key]
+  } catch {
+    /* read-only global — the app does not need it as a global */
+  }
+}
+for (const k of ['localStorage', 'HTMLElement', 'Element', 'Node', 'CustomEvent', 'MutationObserver', 'DOMRect']) {
   globalThis[k] = dom.window[k]
 }
 globalThis.getComputedStyle = dom.window.getComputedStyle
@@ -42,6 +54,14 @@ class RO {
   disconnect() {}
 }
 if (!dom.window.ResizeObserver) dom.window.ResizeObserver = RO
+/* Radix (the mode-change dialog) calls pointer-capture APIs that jsdom does
+   not implement; without them the click on the Search toggle crashes the
+   tree instead of opening the dialog. */
+for (const name of ['hasPointerCapture', 'setPointerCapture', 'releasePointerCapture']) {
+  if (!dom.window.HTMLElement.prototype[name]) {
+    dom.window.HTMLElement.prototype[name] = () => false
+  }
+}
 if (!dom.window.matchMedia) {
   dom.window.matchMedia = (q) => ({
     matches: false,
@@ -290,6 +310,78 @@ try {
     await until(() => body().includes('Partial answer from Arena')),
     'the Arena conversation persists across a simulated reload',
   )
+
+  /* 8. Search mode (Phase 3) — the same session and the same bubble, with the
+        sources rendered as Markdown by the existing renderer. Switching mode
+        inside a conversation asks before clearing it, which is existing
+        behaviour we must not disturb. */
+  /* jsdom does not match CSS class selectors on SVG nodes, so compare the
+     class attribute instead of using `svg.lucide-globe`. */
+  const isGlobe = (b) => {
+    const svg = b.querySelector('svg')
+    return Boolean(svg && String(svg.getAttribute('class') || '').includes('lucide-globe'))
+  }
+  const globeBtn = [...document.querySelectorAll('button')].find(isGlobe)
+  assert.ok(globeBtn, 'the Search mode toggle exists in the prompt box')
+  globeBtn.click()
+  await sleep(150)
+  const newChatBtn = [...document.querySelectorAll('button')].find(
+    (b) => (b.textContent || '').trim() === 'New Chat',
+  )
+  assert.ok(newChatBtn, 'changing mode inside a conversation asks first')
+  newChatBtn.click()
+  await sleep(250)
+  assert.ok(
+    await until(() => body().includes('How can I help today?')),
+    'confirming starts an empty chat in Search mode',
+  )
+
+  const searchBox = document.querySelector('textarea')
+  setVal.call(searchBox, 'capital of france')
+  searchBox.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+  await sleep(80)
+  searchBox.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+  }))
+
+  assert.ok(await until(() => arena.sent.length === beforeVerify + 2), 'the search reached the bridge')
+  const searchReq = arena.sent[arena.sent.length - 1]
+  assert.equal(searchReq.mode, 'search', 'the Search mode is forwarded to Arena')
+  assert.equal(searchReq.prompt, 'capital of france', 'the query is forwarded verbatim')
+  assert.ok(searchReq.conversationId, 'the conversation id is sent for event routing')
+  assert.ok(
+    await until(() => body().includes('Searching…')),
+    'the pending state reads Searching… in Search mode',
+  )
+
+  const sid = searchReq.conversationId
+  emit({ conversationId: sid, type: 'status', state: 'streaming' })
+  emit({ conversationId: sid, type: 'update', text: 'Paris is the capital' })
+  assert.ok(
+    await until(() => body().includes('Paris is the capital')),
+    'the search result streams into the same bubble',
+  )
+
+  const finalText = 'Paris is the capital of France.\n\n---\n**Sources**\n'
+    + '1. [Britannica](https://britannica.com/paris)'
+  emit({ conversationId: sid, type: 'done', text: finalText, sources: [{ title: 'Britannica', url: 'https://britannica.com/paris' }] })
+  assert.ok(await until(() => body().includes('Paris is the capital of France.')), 'the final result lands')
+  assert.ok(await until(() => body().includes('Sources')), 'and so does the sources block')
+  assert.ok(
+    await until(() => !body().includes('Searching…')),
+    'pending clears when the search finishes',
+  )
+
+  const cited = [...document.querySelectorAll('a')].find(
+    (a) => a.getAttribute('href') === 'https://britannica.com/paris',
+  )
+  assert.ok(cited, 'a cited source is rendered as a real link by the existing Markdown renderer')
+
+  arena.resolve({ ok: true, state: 'complete', text: finalText, mode: 'search', conversationId: sid })
+  await sleep(120)
+  assert.equal(arena.listeners.size, 0, 'a search turn unsubscribes too')
+  assert.equal(arena.sent.length, beforeVerify + 2, 'a completed search is never re-sent')
+
   root2.unmount()
 
   console.log('ok    arena direct chat UI: send → streamed updates → final bubble → persistence')

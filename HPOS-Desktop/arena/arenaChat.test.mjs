@@ -909,18 +909,18 @@ function makeChat({ page, bridge, overrides = {}, readResponses, elements, sleep
   const page = makeFakePage({ state })
   const snap = await defaultReadResponses(page, [{ kind: 'role', role: 'article' }])
   assert.equal(snap.count, 2)
-  assert.equal(snap.last, 'second answer', 'the reader takes the LAST message as the current answer')
+  assert.equal(snap.text, 'second answer', 'the reader takes the LAST message as the current answer')
 
   const empty = await defaultReadResponses(
     makeFakePage({ state: { responsesAt: () => [] } }),
     [{ kind: 'role', role: 'article' }],
   )
-  assert.deepEqual(empty, { count: 0, last: '' })
+  assert.deepEqual(empty, { count: 0, text: '' })
 
   /* A page exposing no assistant containers at all is not an error — the
      reader simply reports "nothing yet". */
   const none = await defaultReadResponses(makeFakePage({ state: {} }), [{ kind: 'role', role: 'article' }])
-  assert.deepEqual(none, { count: 0, last: '' })
+  assert.deepEqual(none, { count: 0, text: '' })
   console.log('ok: the default response reader takes the last assistant message')
 }
 

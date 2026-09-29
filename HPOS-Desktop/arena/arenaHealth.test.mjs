@@ -465,23 +465,39 @@ function verificationProbesOf(page) {
     assert.equal(evasion.test(source), false, `${file} must never solve a challenge`)
   }
 
-  /* Direct Chat may interact, but still never solves a challenge and never
-     retries a send — both are hard rules for this phase. */
-  const chatSource = readFileSync(join(arenaDir, 'chat.js'), 'utf8')
-  assert.equal(evasion.test(chatSource), false, 'chat.js must never solve a challenge')
+  /* Turns (Direct Chat and Search) may interact, but still never solve a
+     challenge and never retry a send — both are hard rules. The mechanics
+     live in turn.js; chat.js and search.js only supply selectors. */
+  const turnFiles = ['turn.js', 'chat.js', 'search.js']
   /* Comments legitimately describe the "no retries" rule, so scan code only. */
-  const chatCode = chatSource
+  const codeOf = (file) => readFileSync(join(arenaDir, file), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  for (const file of turnFiles) {
+    const source = readFileSync(join(arenaDir, file), 'utf8')
+    assert.equal(evasion.test(source), false, `${file} must never solve a challenge`)
+    assert.equal(
+      /\b(retry|retries|retryCount|resend|sendAgain|submitOnceAgain)\b/i.test(codeOf(file)),
+      false,
+      `${file} must not retry a send (no automatic retries in this phase)`,
+    )
+  }
   assert.equal(
-    /\b(retry|retries|retryCount|resend|sendAgain|submitOnceAgain)\b/i.test(chatCode),
-    false,
-    'chat.js must not retry a send (no automatic retries in this phase)',
-  )
-  assert.equal(
-    (chatCode.match(/\.click\s*\(/g) || []).length,
+    (codeOf('turn.js').match(/\.click\s*\(/g) || []).length,
     1,
     'a turn must submit exactly once — one click, never a second attempt',
+  )
+  /* Search may click ONE extra control: the switch that puts the composer
+     into Search mode, before anything is typed. It is a mode change, not a
+     resubmit, so one is the ceiling. */
+  assert.ok(
+    (codeOf('search.js').match(/\.click\s*\(/g) || []).length <= 1,
+    'search.js may click the mode switch at most once',
+  )
+  assert.equal(
+    (codeOf('chat.js').match(/\.click\s*\(/g) || []).length,
+    0,
+    'chat.js owns no clicking — submitting lives in the shared turn engine',
   )
   console.log('ok: launch options are headless and evasion-free; the health check is observation-only')
 }

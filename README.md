@@ -431,13 +431,22 @@ that reports `ready`, `verification_required`, `timeout`, `navigation_failed`,
 `launch_failed`, `playwright_unavailable` and `unsupported_page`.
 
 **Phase 2 — direct Chat.** One prompt in, streamed answer out, through the
-bridge's persistent session:
+bridge's persistent session.
+
+**Phase 3 — Search.** The Search mode of the same composer, on the same
+session. A query returns the answer plus Arena's cited sources as Markdown,
+streamed into the existing Search bubble. It reuses the session, health check,
+semantic selectors, verification handling and lifecycle from Phase 1/2 — both
+modes are built on one shared turn engine, so Search inherits the same
+guarantees (one submit per turn, no retries, immediate Stop). A chat turn and a
+search turn share one slot, because they drive the same browser page.
 
 | | |
 | --- | --- |
 | Messages | `renderer → hpos.arena.chatSend({prompt, conversationId, mode})` |
 | Progress | `hpos:arena:chat:event` — `preparing`, `ready`, `sending`, `streaming`, `update`, `complete`, `done`, `error` |
 | Stop | `renderer → hpos.arena.chatCancel({conversationId})` — aborts the turn; the poll loop exits at once and the prompt is never sent again |
+| Search | the same `chatSend` with `mode: 'search'` — returns `{text, sources}` and renders the sources as Markdown links |
 | Multi-turn | the same Arena conversation is reused; turn N+1 appends to the thread instead of starting a new one |
 | Errors | `prompt_invalid`, `composer_missing`, `send_failed`, `response_not_detected`, `cancelled`, `not_running`, `timeout`, `verification_required`, `busy`, `browser_unavailable` |
 
@@ -457,9 +466,9 @@ bridge **stops** and reports `verification_required` — HPOS does not bypass
 verification in any form. `installProcessGuards()` plus the `before-quit` stop
 in `main.js` guarantee no Chromium outlives the app.
 
-**Deliberately not implemented:** Search mode, Code mode, automatic retries
+**Deliberately not implemented:** Code mode, automatic retries
 (a failed turn is reported, never resent), downloads, and any redesign of the
-existing Chat UI. Details: `HPOS-Desktop/arena/README.md`.
+existing Chat or Search UI. Details: `HPOS-Desktop/arena/README.md`.
 
 ```bash
 npm test        # packaging/path + runtime-bridge (protocol, connection, events,
